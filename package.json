@@ -1,0 +1,14 @@
+{
+  "name": "hr-system",
+  "version": "2.0.0",
+  "description": "人資管理系統 — 完整版",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'static + serverless, no build step'"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "engines": { "node": "18.x" }
+}

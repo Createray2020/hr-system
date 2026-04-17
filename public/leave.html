@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>請假審批 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body data-page="leave">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">請假審核審批</div>
+        <div class="page-sub">管理並審核員工請假申請 <span class="db-badge" id="db-status">● 連線中…</span></div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-pdf" onclick="exportListPDF()">📄 匯出清單</button>
+        <button class="btn btn-primary" onclick="openApplyModal()">＋ 代為申請</button>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card blue"><div class="stat-label">待審核</div><div class="stat-value" id="stat-pending">—</div><div class="stat-hint">需要處理</div></div>
+      <div class="stat-card green"><div class="stat-label">已核准</div><div class="stat-value" id="stat-approved">—</div><div class="stat-hint">累計</div></div>
+      <div class="stat-card red"><div class="stat-label">已退回</div><div class="stat-value" id="stat-rejected">—</div><div class="stat-hint">累計</div></div>
+      <div class="stat-card orange"><div class="stat-label">總申請數</div><div class="stat-value" id="stat-total">—</div><div class="stat-hint">資料庫紀錄</div></div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('',this)">全部</button>
+      <button class="tab-btn" onclick="switchTab('pending',this)">待審核</button>
+      <button class="tab-btn" onclick="switchTab('approved',this)">已核准</button>
+      <button class="tab-btn" onclick="switchTab('rejected',this)">已退回</button>
+    </div>
+
+    <div class="filter-bar">
+      <input type="text" id="search-input" placeholder="搜尋員工姓名…" oninput="loadLeaves()">
+      <select id="type-filter" onchange="loadLeaves()">
+        <option value="">全部假別</option>
+        <option value="annual">特休假</option><option value="sick">病假</option>
+        <option value="personal">事假</option><option value="maternity">產假</option>
+        <option value="funeral">喪假</option><option value="marriage">婚假</option>
+      </select>
+      <select id="dept-filter" onchange="loadLeaves()">
+        <option value="">全部部門</option>
+        <option value="研發部">研發部</option><option value="行銷部">行銷部</option>
+        <option value="財務部">財務部</option><option value="業務部">業務部</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>員工</th><th>假別</th><th>起始日期</th><th>結束日期</th>
+          <th>天數</th><th>申請時間</th><th>狀態</th><th>操作</th>
+        </tr></thead>
+        <tbody id="leave-tbody"><tr class="loading-row"><td colspan="8">載入中…</td></tr></tbody>
+      </table>
+      <div id="leave-empty" class="empty-state" style="display:none">
+        <div class="icon">📭</div><div>目前沒有符合條件的假單</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Review Modal -->
+<div class="modal-bg" id="review-modal">
+  <div class="modal">
+    <div class="modal-title" id="review-modal-title">📋 假單審核</div>
+    <div class="modal-grid">
+      <div class="modal-section"><div class="modal-label">申請員工</div><div class="modal-value" id="rv-employee">—</div></div>
+      <div class="modal-section"><div class="modal-label">所屬部門</div><div class="modal-value" id="rv-dept">—</div></div>
+      <div class="modal-section"><div class="modal-label">假別</div><div class="modal-value" id="rv-type">—</div></div>
+      <div class="modal-section"><div class="modal-label">天數</div><div class="modal-value" id="rv-days">—</div></div>
+      <div class="modal-section"><div class="modal-label">開始日期</div><div class="modal-value" id="rv-start">—</div></div>
+      <div class="modal-section"><div class="modal-label">結束日期</div><div class="modal-value" id="rv-end">—</div></div>
+    </div>
+    <div class="modal-section"><div class="modal-label">請假原因</div><div class="reason-box" id="rv-reason">—</div></div>
+    <div class="modal-section">
+      <div class="modal-label">審核備注</div>
+      <textarea class="note-input" id="rv-note" rows="3" placeholder="請輸入審核意見（選填）…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-pdf" onclick="exportSinglePDF()">📄 匯出 PDF</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-ghost" onclick="closeModal('review-modal')">取消</button>
+      <button class="btn btn-reject" id="btn-reject-action" onclick="handleAction('rejected')">✕ 退回</button>
+      <button class="btn btn-approve" id="btn-approve-action" onclick="handleAction('approved')">✓ 核准</button>
+    </div>
+  </div>
+</div>
+
+<!-- Apply Modal -->
+<div class="modal-bg" id="apply-modal">
+  <div class="modal">
+    <div class="modal-title">📝 代為申請假單</div>
+    <div class="form-grid">
+      <div class="form-row"><label class="form-label">員工</label><select class="form-select" id="ap-employee"></select></div>
+      <div class="form-row"><label class="form-label">假別</label>
+        <select class="form-select" id="ap-type">
+          <option value="annual">特休假</option><option value="sick">病假</option>
+          <option value="personal">事假</option><option value="maternity">產假</option>
+          <option value="funeral">喪假</option><option value="marriage">婚假</option>
+        </select>
+      </div>
+      <div class="form-row"><label class="form-label">開始日期</label><input type="date" class="form-input" id="ap-start"></div>
+      <div class="form-row"><label class="form-label">結束日期</label><input type="date" class="form-input" id="ap-end"></div>
+    </div>
+    <div class="form-row"><label class="form-label">請假原因</label><textarea class="form-textarea" id="ap-reason" placeholder="請輸入請假原因…"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('apply-modal')">取消</button>
+      <button class="btn btn-primary" onclick="submitLeave()">送出申請</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/layout.js"></script>
+<script>
+const LEAVE_TYPES = {annual:'特休假',sick:'病假',personal:'事假',maternity:'產假',funeral:'喪假',marriage:'婚假'};
+const STATUS_LABELS = {pending:'待審核',approved:'已核准',rejected:'已退回'};
+let currentTab = '';
+let currentReviewId = null;
+let currentReviewData = null;
+let allLeaveData = [];
+
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 600));
+  const badge = document.getElementById('db-status');
+  try {
+    await Promise.all([loadStats(), loadLeaves(), loadEmployeesSelect()]);
+    badge.textContent = '● Supabase 已連線';
+    badge.style.cssText = 'background:rgba(74,222,128,.1);color:#4ADE80;border-color:rgba(74,222,128,.2)';
+  } catch(e) {
+    badge.textContent = '● 連線失敗';
+    badge.style.cssText = 'background:rgba(248,113,113,.1);color:#F87171;border-color:rgba(248,113,113,.2)';
+  }
+};
+
+async function loadStats() {
+  const s = await api('/api/stats');
+  document.getElementById('stat-pending').textContent  = s.pending;
+  document.getElementById('stat-approved').textContent = s.approved;
+  document.getElementById('stat-rejected').textContent = s.rejected;
+  document.getElementById('stat-total').textContent    = s.total;
+}
+
+async function loadLeaves() {
+  const search = document.getElementById('search-input').value;
+  const type_  = document.getElementById('type-filter').value;
+  const dept   = document.getElementById('dept-filter').value;
+  const p = new URLSearchParams();
+  if (currentTab) p.set('status', currentTab);
+  if (search)     p.set('search', search);
+  if (type_)      p.set('type', type_);
+  if (dept)       p.set('dept', dept);
+  const rows = await api('/api/leaves?' + p);
+  allLeaveData = rows;
+  renderTable(rows);
+}
+
+async function loadEmployeesSelect() {
+  const emps = await api('/api/employees?status=active');
+  document.getElementById('ap-employee').innerHTML =
+    emps.map(e => `<option value="${e.id}">${e.name}（${e.dept}）</option>`).join('');
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('leave-tbody');
+  const empty = document.getElementById('leave-empty');
+  if (!rows.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = rows.map(r => {
+    const dt = new Date(r.applied_at);
+    const dtStr = `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    const isPending = r.status === 'pending';
+    return `<tr>
+      <td><div class="emp-cell"><div class="avatar">${r.avatar||r.emp_name?.[0]||'?'}</div><div><div class="emp-name">${r.emp_name}</div><div class="emp-dept">${r.dept}</div></div></div></td>
+      <td><span class="type-chip">${LEAVE_TYPES[r.leave_type]||r.leave_type}</span></td>
+      <td>${r.start_date}</td><td>${r.end_date}</td>
+      <td><span class="days-badge">${r.days}天</span></td>
+      <td style="color:var(--text-dim);font-size:12px">${dtStr}</td>
+      <td><span class="badge badge-${r.status}"><span class="badge-dot badge-dot-${r.status}"></span>${STATUS_LABELS[r.status]}</span></td>
+      <td><div class="action-btns">
+        <button class="btn btn-ghost btn-sm" onclick="openReview('${r.id}')">查看</button>
+        ${isPending ? `
+        <button class="btn btn-approve btn-sm" onclick="quickAction('${r.id}','approved')">核准</button>
+        <button class="btn btn-reject btn-sm"  onclick="quickAction('${r.id}','rejected')">退回</button>` : ''}
+      </div></td></tr>`;
+  }).join('');
+}
+
+function switchTab(tab, el) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadLeaves();
+}
+
+async function openReview(id) {
+  const r = await api(`/api/leave?id=${id}`);
+  currentReviewId = id; currentReviewData = r;
+  document.getElementById('rv-employee').textContent = r.emp_name;
+  document.getElementById('rv-dept').textContent     = r.dept;
+  document.getElementById('rv-type').textContent     = LEAVE_TYPES[r.leave_type]||r.leave_type;
+  document.getElementById('rv-days').textContent     = r.days + ' 天';
+  document.getElementById('rv-start').textContent    = r.start_date;
+  document.getElementById('rv-end').textContent      = r.end_date;
+  document.getElementById('rv-reason').textContent   = r.reason||'（未填寫）';
+  document.getElementById('rv-note').value           = r.handler_note||'';
+  const isPending = r.status === 'pending';
+  document.getElementById('rv-note').readOnly = !isPending;
+  document.getElementById('btn-approve-action').style.display = isPending ? '' : 'none';
+  document.getElementById('btn-reject-action').style.display  = isPending ? '' : 'none';
+  const titles = {pending:'📋 假單審核', approved:'✅ 已核准假單', rejected:'❌ 已退回假單'};
+  document.getElementById('review-modal-title').textContent = titles[r.status]||'假單詳情';
+  document.getElementById('review-modal').classList.add('open');
+}
+
+async function handleAction(status) {
+  const note = document.getElementById('rv-note').value.trim();
+  await api(`/api/leave?id=${currentReviewId}`, { method:'PUT', body: JSON.stringify({ status, handler_note: note }) });
+  closeModal('review-modal');
+  await Promise.all([loadLeaves(), loadStats()]);
+  toast(status === 'approved' ? '✅ 已核准假單' : '❌ 已退回假單', status === 'approved' ? 'success' : 'error');
+}
+
+async function quickAction(id, status) {
+  await api(`/api/leave?id=${id}`, { method:'PUT', body: JSON.stringify({ status, handler_note: '' }) });
+  await Promise.all([loadLeaves(), loadStats()]);
+  toast(status === 'approved' ? '✅ 已快速核准' : '❌ 已快速退回', status === 'approved' ? 'success' : 'error');
+}
+
+function openApplyModal() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('ap-start').value  = today;
+  document.getElementById('ap-end').value    = today;
+  document.getElementById('ap-reason').value = '';
+  document.getElementById('apply-modal').classList.add('open');
+}
+
+async function submitLeave() {
+  const start  = document.getElementById('ap-start').value;
+  const end    = document.getElementById('ap-end').value;
+  const reason = document.getElementById('ap-reason').value.trim();
+  if (!start||!end||!reason) { toast('請填寫所有欄位','error'); return; }
+  if (end < start) { toast('結束日期不能早於開始日期','error'); return; }
+  const days = Math.round((new Date(end)-new Date(start))/86400000)+1;
+  await api('/api/leaves', { method:'POST', body: JSON.stringify({
+    employee_id: document.getElementById('ap-employee').value,
+    leave_type:  document.getElementById('ap-type').value,
+    start_date: start, end_date: end, days, reason
+  })});
+  closeModal('apply-modal');
+  await Promise.all([loadLeaves(), loadStats()]);
+  toast('✅ 假單已存入 Supabase','success');
+}
+
+function exportSinglePDF() {
+  if (!currentReviewData) return;
+  const r = currentReviewData;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+  const statusColor = {approved:[22,163,74],rejected:[220,38,38],pending:[234,88,12]};
+  const col = statusColor[r.status]||[100,100,100];
+  doc.setFillColor(15,17,23); doc.rect(0,0,210,30,'F');
+  doc.setFontSize(18); doc.setTextColor(232,234,240);
+  doc.text('Leave Request Form', 105, 14, {align:'center'});
+  doc.setFontSize(9); doc.setTextColor(122,133,160);
+  doc.text(`ID: ${r.id}`, 105, 22, {align:'center'});
+  doc.setFillColor(...col); doc.roundedRect(15,36,50,8,2,2,'F');
+  doc.setFontSize(9); doc.setTextColor(255,255,255);
+  doc.text(STATUS_LABELS[r.status]||r.status, 40, 41.5, {align:'center'});
+  doc.autoTable({
+    startY:52, head:[], theme:'grid',
+    body:[
+      ['Employee',r.emp_name,'Department',r.dept],
+      ['Position',r.position,'Leave Type',LEAVE_TYPES[r.leave_type]||r.leave_type],
+      ['Start Date',r.start_date,'End Date',r.end_date],
+      ['Days',r.days+' day(s)','Applied',r.applied_at?.slice(0,16).replace('T',' ')],
+    ],
+    columnStyles:{0:{fontStyle:'bold',fillColor:[241,245,249],cellWidth:30},1:{cellWidth:55},2:{fontStyle:'bold',fillColor:[241,245,249],cellWidth:30},3:{cellWidth:55}},
+    styles:{fontSize:10,cellPadding:4}, margin:{left:15,right:15},
+  });
+  let y = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(9); doc.setTextColor(120,130,150); doc.text('REASON',15,y); y+=4;
+  const rl = doc.splitTextToSize(r.reason||'N/A',176);
+  doc.setFillColor(248,250,252); doc.setDrawColor(226,232,240);
+  doc.roundedRect(15,y,180,rl.length*6+8,2,2,'FD');
+  doc.setFontSize(10); doc.setTextColor(50,60,80); doc.text(rl,20,y+6); y+=rl.length*6+18;
+  doc.setFontSize(9); doc.setTextColor(120,130,150); doc.text('REVIEW NOTE',15,y); y+=4;
+  const nl = doc.splitTextToSize(r.handler_note||'N/A',176);
+  doc.setFillColor(248,250,252); doc.roundedRect(15,y,180,nl.length*6+8,2,2,'FD');
+  doc.setFontSize(10); doc.setTextColor(50,60,80); doc.text(nl,20,y+6); y+=nl.length*6+14;
+  doc.autoTable({
+    startY:y, theme:'grid',
+    head:[['申請人簽名','主管簽名','人資確認']], body:[['','','']],
+    styles:{fontSize:10,cellPadding:12,halign:'center'},
+    headStyles:{fillColor:[30,35,51],textColor:[200,208,230],fontSize:9},
+    columnStyles:{0:{cellWidth:60},1:{cellWidth:60},2:{cellWidth:60}},
+    margin:{left:15,right:15},
+  });
+  doc.setFontSize(8); doc.setTextColor(160,170,190);
+  doc.text(`Printed: ${new Date().toLocaleString('zh-TW')}`, 105, doc.internal.pageSize.height-8, {align:'center'});
+  doc.save(`Leave_${r.id}_${r.emp_name}.pdf`);
+  toast('📄 PDF 已下載','success');
+}
+
+function exportListPDF() {
+  if (!allLeaveData.length) { toast('目前沒有資料可匯出','error'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+  doc.setFillColor(15,17,23); doc.rect(0,0,297,22,'F');
+  doc.setFontSize(14); doc.setTextColor(232,234,240);
+  doc.text('Leave Requests Report', 148.5, 10, {align:'center'});
+  doc.setFontSize(8); doc.setTextColor(122,133,160);
+  doc.text(`${new Date().toLocaleString('zh-TW')}  |  Total: ${allLeaveData.length} records`, 148.5, 17, {align:'center'});
+  doc.autoTable({
+    startY:28, theme:'grid',
+    head:[['ID','員工','部門','假別','開始日','結束日','天數','狀態','備注']],
+    body: allLeaveData.map(r=>[r.id,r.emp_name,r.dept,LEAVE_TYPES[r.leave_type]||r.leave_type,r.start_date,r.end_date,r.days+'天',STATUS_LABELS[r.status]||r.status,r.handler_note||'—']),
+    headStyles:{fillColor:[30,35,51],textColor:[200,208,230],fontSize:8.5},
+    styles:{fontSize:8.5,cellPadding:3},
+    columnStyles:{0:{cellWidth:22},1:{cellWidth:18},2:{cellWidth:18},3:{cellWidth:18},4:{cellWidth:22},5:{cellWidth:22},6:{cellWidth:14},7:{cellWidth:18},8:{cellWidth:'auto'}},
+    margin:{left:10,right:10},
+  });
+  doc.save(`LeaveReport_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('📄 清單 PDF 已下載','success');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+</body>
+</html>

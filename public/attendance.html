@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>出勤管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+  .clock-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:32px;text-align:center;margin-bottom:28px}
+  .clock-display{font-size:56px;font-family:'DM Mono',monospace;font-weight:700;color:var(--accent2);letter-spacing:4px;line-height:1}
+  .clock-date{font-size:14px;color:var(--text-dim);margin-top:8px}
+  .punch-row{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:20px}
+  .punch-info{font-size:13px;color:var(--text-dim);text-align:center}
+  .punch-time{font-family:'DM Mono',monospace;color:var(--text);font-size:15px;font-weight:500}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .hours-bar{margin-top:12px}
+  .late-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:rgba(248,113,113,.15);color:var(--red);font-family:'DM Mono',monospace}
+  .ot-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:rgba(74,222,128,.12);color:var(--green);font-family:'DM Mono',monospace}
+</style>
+</head>
+<body data-page="attendance">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">出勤管理</div>
+        <div class="page-sub">打卡紀錄與出勤統計</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-pdf" onclick="exportPDF()">📄 匯出報表</button>
+        <button class="btn btn-ghost" onclick="openManualModal()">✏️ 人工補登</button>
+      </div>
+    </div>
+
+    <!-- 打卡區 -->
+    <div class="clock-card">
+      <div class="clock-display" id="clock-display">00:00:00</div>
+      <div class="clock-date" id="clock-date">載入中…</div>
+      <div class="punch-row">
+        <div class="punch-info">
+          <div>上班打卡</div>
+          <div class="punch-time" id="in-time">—</div>
+        </div>
+        <button class="btn btn-approve" id="btn-clockin" onclick="punch('in')" style="padding:12px 28px;font-size:15px">
+          ⏺ 上班打卡
+        </button>
+        <button class="btn btn-reject" id="btn-clockout" onclick="punch('out')" style="padding:12px 28px;font-size:15px">
+          ⏹ 下班打卡
+        </button>
+        <div class="punch-info">
+          <div>下班打卡</div>
+          <div class="punch-time" id="out-time">—</div>
+        </div>
+      </div>
+      <div id="today-status" style="margin-top:12px;font-size:13px;color:var(--text-dim)"></div>
+    </div>
+
+    <!-- 統計 -->
+    <div class="stats-row">
+      <div class="stat-card green"><div class="stat-label">本月出勤</div><div class="stat-value" id="st-normal">—</div><div class="stat-hint">天</div></div>
+      <div class="stat-card orange"><div class="stat-label">遲到次數</div><div class="stat-value" id="st-late">—</div><div class="stat-hint">次</div></div>
+      <div class="stat-card red"><div class="stat-label">缺勤天數</div><div class="stat-value" id="st-absent">—</div><div class="stat-hint">天</div></div>
+      <div class="stat-card blue"><div class="stat-label">加班時數</div><div class="stat-value" id="st-ot">—</div><div class="stat-hint">小時</div></div>
+    </div>
+
+    <!-- 篩選 -->
+    <div class="filter-bar">
+      <select id="emp-filter" onchange="loadAttendance()">
+        <option value="">全部員工</option>
+      </select>
+      <input type="month" id="month-filter" onchange="loadAttendance()">
+      <select id="status-filter" onchange="loadAttendance()">
+        <option value="">全部狀態</option>
+        <option value="normal">正常</option>
+        <option value="late">遲到</option>
+        <option value="absent">缺勤</option>
+        <option value="leave">請假</option>
+      </select>
+    </div>
+
+    <!-- 表格 -->
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>員工</th><th>日期</th><th>上班打卡</th><th>下班打卡</th>
+          <th>工時</th><th>加班</th><th>狀態</th><th>備注</th>
+        </tr></thead>
+        <tbody id="att-tbody"><tr class="loading-row"><td colspan="8">載入中…</td></tr></tbody>
+      </table>
+      <div id="att-empty" class="empty-state" style="display:none">
+        <div class="icon">📭</div><div>暫無出勤紀錄</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 人工補登 Modal -->
+<div class="modal-bg" id="manual-modal">
+  <div class="modal">
+    <div class="modal-title">✏️ 人工補登出勤</div>
+    <div class="form-grid">
+      <div class="form-row"><label class="form-label">員工</label><select class="form-select" id="m-employee"></select></div>
+      <div class="form-row"><label class="form-label">日期</label><input type="date" class="form-input" id="m-date"></div>
+      <div class="form-row"><label class="form-label">上班時間</label><input type="time" class="form-input" id="m-in" value="09:00"></div>
+      <div class="form-row"><label class="form-label">下班時間</label><input type="time" class="form-input" id="m-out" value="18:00"></div>
+      <div class="form-row"><label class="form-label">狀態</label>
+        <select class="form-select" id="m-status">
+          <option value="normal">正常</option><option value="late">遲到</option>
+          <option value="early_leave">早退</option><option value="absent">缺勤</option><option value="leave">請假</option>
+        </select>
+      </div>
+      <div class="form-row"><label class="form-label">加班時數</label><input type="number" class="form-input" id="m-ot" value="0" min="0" max="12" step="0.5"></div>
+    </div>
+    <div class="form-row"><label class="form-label">備注</label><textarea class="form-textarea" id="m-note" rows="2"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('manual-modal')">取消</button>
+      <button class="btn btn-primary" onclick="submitManual()">確認補登</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/layout.js"></script>
+<script>
+const STATUS_MAP = {normal:'正常',late:'遲到',early_leave:'早退',absent:'缺勤',leave:'請假',holiday:'假日'};
+let employees = [];
+
+window.onload = async () => {
+  startClock();
+  const now = new Date();
+  document.getElementById('month-filter').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  // 等 layout.js 初始化
+  await new Promise(r => setTimeout(r, 600));
+  try {
+    employees = await api('/api/employees?status=active');
+    fillEmpSelects();
+    await loadAttendance();
+    await loadTodayPunch();
+    await loadStats();
+  } catch(e) { toast('載入失敗：'+e.message,'error'); }
+};
+
+function startClock() {
+  const tick = () => {
+    const now = new Date();
+    document.getElementById('clock-display').textContent =
+      [now.getHours(),now.getMinutes(),now.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':');
+    document.getElementById('clock-date').textContent =
+      now.toLocaleDateString('zh-TW',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  };
+  tick(); setInterval(tick, 1000);
+}
+
+function fillEmpSelects() {
+  const opts = `<option value="">全部員工</option>` + employees.map(e=>`<option value="${e.id}">${e.name}（${e.dept}）</option>`).join('');
+  document.getElementById('emp-filter').innerHTML = opts;
+  const mOpts = employees.map(e=>`<option value="${e.id}">${e.name}（${e.dept}）</option>`).join('');
+  document.getElementById('m-employee').innerHTML = mOpts;
+}
+
+async function loadTodayPunch() {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const empId = window.currentUser?.id;
+    if (!empId) return;
+    const data = await api(`/api/attendance?employee_id=${empId}&date=${today}`);
+    const rec  = data[0];
+    if (rec?.clock_in) {
+      document.getElementById('in-time').textContent  = rec.clock_in.slice(11,16);
+      document.getElementById('btn-clockin').disabled = true;
+    }
+    if (rec?.clock_out) {
+      document.getElementById('out-time').textContent  = rec.clock_out.slice(11,16);
+      document.getElementById('btn-clockout').disabled = true;
+    }
+    if (rec) {
+      document.getElementById('today-status').textContent =
+        `今日狀態：${STATUS_MAP[rec.status]||rec.status}　工時：${rec.work_hours||0}h`;
+    }
+  } catch(e) {}
+}
+
+async function loadStats() {
+  try {
+    const empId = window.currentUser?.id;
+    if (!empId) return;
+    const now = new Date();
+    const ym  = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const data = await api(`/api/attendance?employee_id=${empId}&month=${ym}`);
+    document.getElementById('st-normal').textContent = data.filter(r=>r.status==='normal').length;
+    document.getElementById('st-late').textContent   = data.filter(r=>r.status==='late').length;
+    document.getElementById('st-absent').textContent = data.filter(r=>r.status==='absent').length;
+    document.getElementById('st-ot').textContent     = data.reduce((s,r)=>s+(r.overtime_hours||0),0).toFixed(1);
+  } catch(e) {}
+}
+
+async function loadAttendance() {
+  const emp   = document.getElementById('emp-filter').value;
+  const month = document.getElementById('month-filter').value;
+  const st    = document.getElementById('status-filter').value;
+  const p     = new URLSearchParams();
+  if (emp)   p.set('employee_id', emp);
+  if (month) p.set('month', month);
+  if (st)    p.set('status', st);
+
+  const tbody = document.getElementById('att-tbody');
+  const empty = document.getElementById('att-empty');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="8">載入中…</td></tr>';
+
+  try {
+    const rows = await api('/api/attendance?' + p);
+    if (!rows.length) { tbody.innerHTML=''; empty.style.display='block'; return; }
+    empty.style.display = 'none';
+    tbody.innerHTML = rows.map(r => {
+      const emp = employees.find(e=>e.id===r.employee_id)||{};
+      const inT  = r.clock_in  ? r.clock_in.slice(11,16)  : '—';
+      const outT = r.clock_out ? r.clock_out.slice(11,16) : '—';
+      const isLate = r.status === 'late';
+      const hasOT  = (r.overtime_hours||0) > 0;
+      return `<tr>
+        <td><div class="emp-cell"><div class="avatar">${emp.avatar||'?'}</div><div><div class="emp-name">${emp.name||r.employee_id}</div><div class="emp-dept">${emp.dept||''}</div></div></div></td>
+        <td style="font-family:'DM Mono',monospace;font-size:13px">${r.work_date}</td>
+        <td>${inT} ${isLate?'<span class="late-tag">遲到</span>':''}</td>
+        <td>${outT}</td>
+        <td style="font-family:'DM Mono',monospace">${r.work_hours||'—'}h</td>
+        <td>${hasOT?`<span class="ot-tag">+${r.overtime_hours}h</span>`:'—'}</td>
+        <td>${statusBadge(r.status)}</td>
+        <td style="color:var(--text-dim);font-size:12px">${r.note||'—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { toast('載入失敗','error'); }
+}
+
+function statusBadge(s) {
+  const label = STATUS_MAP[s]||s;
+  return `<span class="badge badge-${s}"><span class="badge-dot badge-dot-${s}"></span>${label}</span>`;
+}
+
+async function punch(type) {
+  try {
+    const empId = window.currentUser?.id;
+    if (!empId) { toast('無法取得使用者資料','error'); return; }
+    await api('/api/attendance/punch', { method:'POST', body: JSON.stringify({ employee_id: empId, type }) });
+    const now = new Date();
+    const timeStr = [now.getHours(),now.getMinutes()].map(n=>String(n).padStart(2,'0')).join(':');
+    if (type === 'in') {
+      document.getElementById('in-time').textContent  = timeStr;
+      document.getElementById('btn-clockin').disabled = true;
+      toast('✅ 上班打卡成功：'+timeStr,'success');
+    } else {
+      document.getElementById('out-time').textContent  = timeStr;
+      document.getElementById('btn-clockout').disabled = true;
+      toast('✅ 下班打卡成功：'+timeStr,'success');
+    }
+    await loadAttendance();
+  } catch(e) { toast('打卡失敗：'+e.message,'error'); }
+}
+
+function openManualModal() {
+  document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('manual-modal').classList.add('open');
+}
+
+async function submitManual() {
+  const payload = {
+    employee_id:    document.getElementById('m-employee').value,
+    work_date:      document.getElementById('m-date').value,
+    clock_in_time:  document.getElementById('m-in').value,
+    clock_out_time: document.getElementById('m-out').value,
+    status:         document.getElementById('m-status').value,
+    overtime_hours: parseFloat(document.getElementById('m-ot').value)||0,
+    note:           document.getElementById('m-note').value.trim(),
+  };
+  if (!payload.employee_id||!payload.work_date) { toast('請填寫必填欄位','error'); return; }
+  try {
+    await api('/api/attendance/manual', { method:'POST', body: JSON.stringify(payload) });
+    closeModal('manual-modal');
+    await loadAttendance();
+    toast('✅ 補登成功','success');
+  } catch(e) { toast('補登失敗：'+e.message,'error'); }
+}
+
+function exportPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+  const month = document.getElementById('month-filter').value || new Date().toISOString().slice(0,7);
+
+  doc.setFillColor(15,17,23); doc.rect(0,0,297,22,'F');
+  doc.setFontSize(14); doc.setTextColor(232,234,240);
+  doc.text('Attendance Report', 148.5, 10, {align:'center'});
+  doc.setFontSize(8); doc.setTextColor(122,133,160);
+  doc.text(`${month}  |  ${new Date().toLocaleString('zh-TW')}`, 148.5, 17, {align:'center'});
+
+  const rows = [];
+  document.querySelectorAll('#att-tbody tr').forEach(tr => {
+    const cells = tr.querySelectorAll('td');
+    if (cells.length < 7) return;
+    rows.push([
+      cells[0].querySelector('.emp-name')?.textContent||'',
+      cells[1].textContent.trim(),
+      cells[2].textContent.replace('遲到','').trim(),
+      cells[3].textContent.trim(),
+      cells[4].textContent.trim(),
+      cells[5].textContent.replace('+','').trim(),
+      cells[6].textContent.trim(),
+    ]);
+  });
+
+  doc.autoTable({
+    startY:28,
+    head:[['員工','日期','上班','下班','工時','加班','狀態']],
+    body: rows,
+    headStyles:{fillColor:[30,35,51],textColor:[200,208,230],fontSize:8.5},
+    styles:{fontSize:8.5,cellPadding:3},
+    margin:{left:10,right:10}, theme:'grid',
+  });
+
+  doc.save(`Attendance_${month}.pdf`);
+  toast('📄 出勤報表已下載','success');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+</body>
+</html>

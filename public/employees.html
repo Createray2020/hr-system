@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>員工資料 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .emp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-bottom:28px}
+  .emp-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;cursor:pointer;transition:all .2s}
+  .emp-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+  .emp-card-top{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+  .avatar-lg{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#3B5FD4,#7B6CF6);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;flex-shrink:0}
+  .emp-card-name{font-size:16px;font-weight:600}
+  .emp-card-pos{font-size:12px;color:var(--text-dim)}
+  .emp-card-info{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .emp-card-item{font-size:12px;color:var(--text-dim)}
+  .emp-card-item span{color:var(--text);font-weight:500}
+  .detail-section{margin-bottom:24px}
+  .detail-section-title{font-size:11px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+  .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .detail-item .d-label{font-size:11px;color:var(--text-dim);margin-bottom:2px}
+  .detail-item .d-value{font-size:14px}
+  .salary-display{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:var(--accent2)}
+  .view-toggle{display:flex;gap:6px;margin-bottom:20px}
+  .view-btn{padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-size:13px;cursor:pointer;transition:all .2s;font-family:'Noto Sans TC',sans-serif}
+  .view-btn.active{background:var(--surface2);color:var(--text);border-color:var(--accent)}
+</style>
+</head>
+<body data-page="employees">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">員工資料</div>
+        <div class="page-sub">管理所有員工個人與職務資訊</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" onclick="openAddModal()">＋ 新增員工</button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card green"><div class="stat-label">在職員工</div><div class="stat-value" id="st-active">—</div><div class="stat-hint">人</div></div>
+      <div class="stat-card blue"><div class="stat-label">部門數量</div><div class="stat-value" id="st-dept">—</div><div class="stat-hint">個部門</div></div>
+      <div class="stat-card orange"><div class="stat-label">本月新進</div><div class="stat-value" id="st-new">—</div><div class="stat-hint">人</div></div>
+      <div class="stat-card red"><div class="stat-label">已離職</div><div class="stat-value" id="st-resigned">—</div><div class="stat-hint">人</div></div>
+    </div>
+
+    <!-- Filter + View toggle -->
+    <div class="filter-bar">
+      <input type="text" id="search-input" placeholder="搜尋姓名、Email…" oninput="renderList()">
+      <select id="dept-filter" onchange="renderList()">
+        <option value="">全部部門</option>
+      </select>
+      <select id="status-filter" onchange="renderList()">
+        <option value="active">在職</option>
+        <option value="">全部</option>
+        <option value="resigned">已離職</option>
+      </select>
+      <div style="margin-left:auto">
+        <div class="view-toggle">
+          <button class="view-btn active" id="vb-card" onclick="setView('card',this)">⊞ 卡片</button>
+          <button class="view-btn" id="vb-table" onclick="setView('table',this)">≡ 列表</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card view -->
+    <div id="card-view">
+      <div class="emp-grid" id="emp-grid"></div>
+      <div id="card-empty" class="empty-state" style="display:none"><div class="icon">👤</div><div>找不到符合的員工</div></div>
+    </div>
+
+    <!-- Table view -->
+    <div id="table-view" style="display:none">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>員工</th><th>部門</th><th>職稱</th><th>電子郵件</th>
+            <th>電話</th><th>到職日</th><th>底薪</th><th>狀態</th><th>操作</th>
+          </tr></thead>
+          <tbody id="emp-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 員工詳細 / 編輯 Modal -->
+<div class="modal-bg" id="emp-modal">
+  <div class="modal modal-lg">
+    <div class="modal-title" id="emp-modal-title">員工詳細資料</div>
+
+    <div class="detail-section">
+      <div class="detail-section-title">基本資料</div>
+      <div class="detail-grid">
+        <div class="form-row"><label class="form-label">姓名 *</label><input class="form-input" id="f-name"></div>
+        <div class="form-row"><label class="form-label">電子郵件</label><input class="form-input" id="f-email" type="email"></div>
+        <div class="form-row"><label class="form-label">電話</label><input class="form-input" id="f-phone"></div>
+        <div class="form-row"><label class="form-label">身分證字號</label><input class="form-input" id="f-id-num"></div>
+        <div class="form-row"><label class="form-label">生日</label><input class="form-input" id="f-birth" type="date"></div>
+        <div class="form-row"><label class="form-label">地址</label><input class="form-input" id="f-address"></div>
+      </div>
+    </div>
+
+    <hr class="form-divider">
+    <div class="detail-section">
+      <div class="detail-section-title">職務資訊</div>
+      <div class="detail-grid">
+        <div class="form-row"><label class="form-label">部門 *</label>
+          <select class="form-select" id="f-dept">
+            <option value="研發部">研發部</option><option value="行銷部">行銷部</option>
+            <option value="財務部">財務部</option><option value="業務部">業務部</option>
+            <option value="人資部">人資部</option>
+          </select>
+        </div>
+        <div class="form-row"><label class="form-label">職稱 *</label><input class="form-input" id="f-position"></div>
+        <div class="form-row"><label class="form-label">角色</label>
+          <select class="form-select" id="f-role">
+            <option value="employee">一般員工</option><option value="manager">主管</option>
+            <option value="hr">人資</option><option value="admin">管理員</option>
+          </select>
+        </div>
+        <div class="form-row"><label class="form-label">到職日</label><input class="form-input" id="f-hire" type="date"></div>
+        <div class="form-row"><label class="form-label">底薪</label><input class="form-input" id="f-salary" type="number"></div>
+        <div class="form-row"><label class="form-label">狀態</label>
+          <select class="form-select" id="f-status">
+            <option value="active">在職</option><option value="inactive">暫停</option><option value="resigned">已離職</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <hr class="form-divider">
+    <div class="detail-section">
+      <div class="detail-section-title">薪資帳戶</div>
+      <div class="form-row"><label class="form-label">銀行帳號</label><input class="form-input" id="f-bank"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('emp-modal')">取消</button>
+      <button class="btn btn-primary" id="emp-save-btn" onclick="saveEmployee()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/layout.js"></script>
+<script>
+let allEmployees = [];
+let editingId = null;
+let currentView = 'card';
+
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 600));
+  try {
+    await loadEmployees();
+  } catch(e) { toast('載入失敗：'+e.message,'error'); }
+};
+
+async function loadEmployees() {
+  allEmployees = await api('/api/employees');
+  updateStats();
+  fillDeptFilter();
+  renderList();
+}
+
+function updateStats() {
+  const active   = allEmployees.filter(e=>e.status==='active');
+  const resigned = allEmployees.filter(e=>e.status==='resigned');
+  const depts    = [...new Set(allEmployees.map(e=>e.dept))];
+  const now = new Date();
+  const newHires = active.filter(e => {
+    const h = new Date(e.hire_date);
+    return h.getFullYear()===now.getFullYear() && h.getMonth()===now.getMonth();
+  });
+  document.getElementById('st-active').textContent  = active.length;
+  document.getElementById('st-dept').textContent    = depts.length;
+  document.getElementById('st-new').textContent     = newHires.length;
+  document.getElementById('st-resigned').textContent= resigned.length;
+}
+
+function fillDeptFilter() {
+  const depts = [...new Set(allEmployees.map(e=>e.dept))];
+  const sel = document.getElementById('dept-filter');
+  sel.innerHTML = '<option value="">全部部門</option>' +
+    depts.map(d=>`<option value="${d}">${d}</option>`).join('');
+}
+
+function getFiltered() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const dept   = document.getElementById('dept-filter').value;
+  const status = document.getElementById('status-filter').value;
+  return allEmployees.filter(e => {
+    if (status && e.status !== status) return false;
+    if (dept && e.dept !== dept) return false;
+    if (search && !e.name.includes(search) && !(e.email||'').includes(search)) return false;
+    return true;
+  });
+}
+
+function renderList() {
+  if (currentView === 'card') renderCards(); else renderTable();
+}
+
+function renderCards() {
+  const rows = getFiltered();
+  const grid = document.getElementById('emp-grid');
+  const empty = document.getElementById('card-empty');
+  if (!rows.length) { grid.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display = 'none';
+  grid.innerHTML = rows.map(e => `
+    <div class="emp-card" onclick="openEditModal('${e.id}')">
+      <div class="emp-card-top">
+        <div class="avatar-lg">${e.avatar||e.name[0]}</div>
+        <div>
+          <div class="emp-card-name">${e.name}</div>
+          <div class="emp-card-pos">${e.dept} · ${e.position}</div>
+        </div>
+      </div>
+      <div class="emp-card-info">
+        <div class="emp-card-item">📧 <span>${e.email||'—'}</span></div>
+        <div class="emp-card-item">📱 <span>${e.phone||'—'}</span></div>
+        <div class="emp-card-item">📅 <span>${e.hire_date||'—'}</span></div>
+        <div class="emp-card-item">💰 <span>${e.base_salary?'$'+Number(e.base_salary).toLocaleString():'—'}</span></div>
+      </div>
+    </div>`).join('');
+}
+
+function renderTable() {
+  const rows = getFiltered();
+  const tbody = document.getElementById('emp-tbody');
+  tbody.innerHTML = rows.map(e => `<tr>
+    <td><div class="emp-cell"><div class="avatar">${e.avatar||e.name[0]}</div><div><div class="emp-name">${e.name}</div></div></div></td>
+    <td>${e.dept}</td><td>${e.position}</td>
+    <td style="font-size:12px;color:var(--text-dim)">${e.email||'—'}</td>
+    <td style="font-size:12px">${e.phone||'—'}</td>
+    <td style="font-family:'DM Mono',monospace;font-size:12px">${e.hire_date||'—'}</td>
+    <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--accent2)">$${Number(e.base_salary||0).toLocaleString()}</td>
+    <td><span class="badge badge-${e.status}"><span class="badge-dot badge-dot-${e.status}"></span>${e.status==='active'?'在職':e.status==='resigned'?'已離職':'暫停'}</span></td>
+    <td><div class="action-btns">
+      <button class="btn btn-ghost btn-sm" onclick="openEditModal('${e.id}')">編輯</button>
+    </div></td>
+  </tr>`).join('');
+}
+
+function setView(v, el) {
+  currentView = v;
+  document.querySelectorAll('.view-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('card-view').style.display  = v==='card'  ? '' : 'none';
+  document.getElementById('table-view').style.display = v==='table' ? '' : 'none';
+  renderList();
+}
+
+function openAddModal() {
+  editingId = null;
+  document.getElementById('emp-modal-title').textContent = '➕ 新增員工';
+  ['name','email','phone','id-num','birth','address','position','bank'].forEach(f => {
+    const el = document.getElementById('f-'+f);
+    if (el) el.value = '';
+  });
+  document.getElementById('f-dept').value   = '研發部';
+  document.getElementById('f-role').value   = 'employee';
+  document.getElementById('f-status').value = 'active';
+  document.getElementById('f-salary').value = '';
+  document.getElementById('f-hire').value   = new Date().toISOString().split('T')[0];
+  document.getElementById('emp-modal').classList.add('open');
+}
+
+function openEditModal(id) {
+  const e = allEmployees.find(x=>x.id===id);
+  if (!e) return;
+  editingId = id;
+  document.getElementById('emp-modal-title').textContent = `✏️ 編輯員工：${e.name}`;
+  document.getElementById('f-name').value    = e.name||'';
+  document.getElementById('f-email').value   = e.email||'';
+  document.getElementById('f-phone').value   = e.phone||'';
+  document.getElementById('f-id-num').value  = e.id_number||'';
+  document.getElementById('f-birth').value   = e.birth_date||'';
+  document.getElementById('f-address').value = e.address||'';
+  document.getElementById('f-dept').value    = e.dept||'研發部';
+  document.getElementById('f-position').value= e.position||'';
+  document.getElementById('f-role').value    = e.role||'employee';
+  document.getElementById('f-hire').value    = e.hire_date||'';
+  document.getElementById('f-salary').value  = e.base_salary||0;
+  document.getElementById('f-status').value  = e.status||'active';
+  document.getElementById('f-bank').value    = e.bank_account||'';
+  document.getElementById('emp-modal').classList.add('open');
+}
+
+async function saveEmployee() {
+  const payload = {
+    name:         document.getElementById('f-name').value.trim(),
+    email:        document.getElementById('f-email').value.trim()||null,
+    phone:        document.getElementById('f-phone').value.trim()||null,
+    id_number:    document.getElementById('f-id-num').value.trim()||null,
+    birth_date:   document.getElementById('f-birth').value||null,
+    address:      document.getElementById('f-address').value.trim()||null,
+    dept:         document.getElementById('f-dept').value,
+    position:     document.getElementById('f-position').value.trim(),
+    role:         document.getElementById('f-role').value,
+    hire_date:    document.getElementById('f-hire').value||null,
+    base_salary:  parseFloat(document.getElementById('f-salary').value)||0,
+    status:       document.getElementById('f-status').value,
+    bank_account: document.getElementById('f-bank').value.trim()||null,
+    avatar:       document.getElementById('f-name').value.trim()[0]||'?',
+  };
+  if (!payload.name || !payload.position) { toast('請填寫姓名和職稱','error'); return; }
+  try {
+    if (editingId) {
+      await api(`/api/employees/${editingId}`, { method:'PUT', body: JSON.stringify(payload) });
+      toast('✅ 員工資料已更新','success');
+    } else {
+      await api('/api/employees', { method:'POST', body: JSON.stringify(payload) });
+      toast('✅ 員工已新增','success');
+    }
+    closeModal('emp-modal');
+    await loadEmployees();
+  } catch(e) { toast('儲存失敗：'+e.message,'error'); }
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+</body>
+</html>

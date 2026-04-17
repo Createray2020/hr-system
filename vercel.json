@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/employees/me",            "destination": "/api/employees/[id]?id=me" },
+    { "source": "/api/employees/:id",           "destination": "/api/employees/[id]?id=:id" },
+    { "source": "/api/employees",               "destination": "/api/employees/index" },
+    { "source": "/api/attendance/punch",        "destination": "/api/attendance/punch" },
+    { "source": "/api/attendance/manual",       "destination": "/api/attendance/manual" },
+    { "source": "/api/attendance",              "destination": "/api/attendance/index" },
+    { "source": "/api/salary/batch",            "destination": "/api/salary/batch" },
+    { "source": "/api/salary/:id/confirm",      "destination": "/api/salary/[id]?id=:id&action=confirm" },
+    { "source": "/api/salary/:id/pay",          "destination": "/api/salary/[id]?id=:id&action=pay" },
+    { "source": "/api/salary/:id",              "destination": "/api/salary/[id]?id=:id" },
+    { "source": "/api/salary",                  "destination": "/api/salary/index" },
+    { "source": "/api/leaves/:id/review",       "destination": "/api/leave?id=:id" },
+    { "source": "/api/leaves",                  "destination": "/api/leaves" },
+    { "source": "/api/leave",                   "destination": "/api/leave" },
+    { "source": "/api/stats",                   "destination": "/api/stats" },
+    { "source": "/(.*)",                        "destination": "/public/$1" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin",  "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization" }
+      ]
+    }
+  ]
+}

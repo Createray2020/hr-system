@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HR System — 登入</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--bg:#0F1117;--surface:#181C27;--border:#2A3048;--accent:#5B8DEF;--accent2:#7FBBFF;--text:#E8EAF0;--text-dim:#7A85A0;--red:#F87171;--green:#4ADE80;--purple:#C084FC}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+  .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(91,141,239,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(91,141,239,.04) 1px,transparent 1px);background-size:40px 40px;pointer-events:none}
+  .bg-glow{position:fixed;width:600px;height:600px;background:radial-gradient(circle,rgba(91,141,239,.08) 0%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+  .login-wrap{width:420px;position:relative;z-index:1}
+  .login-header{text-align:center;margin-bottom:32px}
+  .login-mark{font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:8px}
+  .login-title{font-size:28px;font-weight:700;margin-bottom:6px}
+  .login-sub{font-size:13px;color:var(--text-dim)}
+  .login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .form-row{margin-bottom:18px}
+  .form-label{font-size:11.5px;color:var(--text-dim);margin-bottom:7px;display:block;font-family:'DM Mono',monospace;letter-spacing:.5px;text-transform:uppercase}
+  .form-input{width:100%;background:#1E2333;border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-size:14px;color:var(--text);font-family:'Noto Sans TC',sans-serif;outline:none;transition:border-color .2s}
+  .form-input:focus{border-color:var(--accent)}
+  .btn-login{width:100%;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:600;font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .2s;margin-top:8px}
+  .btn-login:hover{background:var(--accent2);color:#0F1117}
+  .btn-login:disabled{opacity:.5;cursor:not-allowed}
+  .error-msg{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--red);margin-bottom:16px;display:none}
+  .divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--text-dim);font-size:12px}
+  .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border)}
+  .demo-accounts{margin-top:20px}
+  .demo-title{font-size:11px;font-family:'DM Mono',monospace;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:10px}
+  .demo-btn{width:100%;background:rgba(91,141,239,.08);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text-dim);font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .2s;text-align:left;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .demo-btn:hover{border-color:var(--accent);color:var(--text);background:rgba(91,141,239,.12)}
+  .demo-role{font-size:11px;font-family:'DM Mono',monospace;color:var(--accent);padding:2px 8px;background:rgba(91,141,239,.12);border-radius:4px}
+  .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+
+<div class="login-wrap">
+  <div class="login-header">
+    <div class="login-mark">HR · SYSTEM</div>
+    <div class="login-title">人資管理平台</div>
+    <div class="login-sub">請登入您的帳號以繼續</div>
+  </div>
+
+  <div class="login-card">
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="form-row">
+      <label class="form-label">電子郵件</label>
+      <input class="form-input" type="email" id="email" placeholder="your@email.com" autocomplete="email">
+    </div>
+    <div class="form-row">
+      <label class="form-label">密碼</label>
+      <input class="form-input" type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+
+    <button class="btn-login" id="login-btn" onclick="doLogin()">登入</button>
+
+    <div class="divider">或使用測試帳號</div>
+
+    <div class="demo-accounts">
+      <div class="demo-title">快速登入（Demo）</div>
+      <button class="demo-btn" onclick="fillDemo('li@hr.com','hr123456')">
+        <span>李部長 — 研發部主管</span>
+        <span class="demo-role">MANAGER</span>
+      </button>
+      <button class="demo-btn" onclick="fillDemo('huang@hr.com','hr123456')">
+        <span>黃總監 — 業務部總監</span>
+        <span class="demo-role">MANAGER</span>
+      </button>
+      <button class="demo-btn" onclick="fillDemo('chen@hr.com','hr123456')">
+        <span>陳小明 — 研發部工程師</span>
+        <span class="demo-role">EMPLOYEE</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 替換成你的 Supabase URL 和 anon key
+  const SUPABASE_URL = 'https://scsgqxixmbompnoypuuw.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+  const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // 已登入則直接跳轉
+  _sb.auth.getSession().then(({ data: { session } }) => {
+    if (session) window.location.href = '/dashboard.html';
+  });
+
+  function fillDemo(email, pw) {
+    document.getElementById('email').value    = email;
+    document.getElementById('password').value = pw;
+  }
+
+  async function doLogin() {
+    const email    = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const errEl    = document.getElementById('error-msg');
+    const btn      = document.getElementById('login-btn');
+    errEl.style.display = 'none';
+
+    if (!email || !password) {
+      errEl.textContent = '請填寫電子郵件和密碼';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    btn.innerHTML = '<div class="spinner"></div>';
+    btn.disabled  = true;
+
+    const { error } = await _sb.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      errEl.textContent = '登入失敗：帳號或密碼不正確';
+      errEl.style.display = 'block';
+      btn.textContent = '登入';
+      btn.disabled = false;
+      return;
+    }
+
+    window.location.href = '/dashboard.html';
+  }
+
+  document.getElementById('password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+</script>
+</body>
+</html>
