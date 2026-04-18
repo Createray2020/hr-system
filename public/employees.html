@@ -17,15 +17,26 @@
   .emp-card-info{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   .emp-card-item{font-size:12px;color:var(--text-dim)}
   .emp-card-item span{color:var(--text);font-weight:500}
-  .detail-section{margin-bottom:24px}
+  .detail-section{margin-bottom:20px}
   .detail-section-title{font-size:11px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
   .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .detail-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
   .detail-item .d-label{font-size:11px;color:var(--text-dim);margin-bottom:2px}
   .detail-item .d-value{font-size:14px}
   .salary-display{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:var(--accent2)}
   .view-toggle{display:flex;gap:6px;margin-bottom:20px}
   .view-btn{padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-size:13px;cursor:pointer;transition:all .2s;font-family:'Noto Sans TC',sans-serif}
   .view-btn.active{background:var(--surface2);color:var(--text);border-color:var(--accent)}
+  .readonly-field{background:var(--surface)!important;color:var(--text-dim)!important;cursor:default}
+  .salary-summary{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
+  .sal-item .sal-label{font-size:10px;color:var(--text-dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px}
+  .sal-item .sal-val{font-size:14px;font-weight:600;font-family:'DM Mono',monospace}
+  .sal-total .sal-label{color:var(--accent2)}
+  .sal-total .sal-val{color:var(--accent2);font-size:16px}
+  .check-row{display:flex;align-items:center;gap:8px;padding-top:28px}
+  .check-row input[type=checkbox]{width:16px;height:16px;cursor:pointer}
+  .check-row label{font-size:13px;cursor:pointer}
+  .seniority-badge{display:inline-block;padding:3px 10px;background:rgba(91,141,239,.12);color:var(--accent2);border-radius:20px;font-size:12px;font-weight:500;font-family:'DM Mono',monospace}
 </style>
 </head>
 <body data-page="employees">
@@ -80,8 +91,8 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>員工</th><th>部門</th><th>職稱</th><th>電子郵件</th>
-            <th>電話</th><th>到職日</th><th>底薪</th><th>狀態</th><th>操作</th>
+            <th>員工</th><th>編號</th><th>部門</th><th>職稱</th><th>職等/職級</th>
+            <th>電子郵件</th><th>到職日</th><th>月薪合計</th><th>狀態</th><th>操作</th>
           </tr></thead>
           <tbody id="emp-tbody"></tbody>
         </table>
@@ -90,24 +101,28 @@
   </main>
 </div>
 
-<!-- 員工詳細 / 編輯 Modal -->
+<!-- 員工編輯 Modal -->
 <div class="modal-bg" id="emp-modal">
   <div class="modal modal-lg">
     <div class="modal-title" id="emp-modal-title">員工詳細資料</div>
 
+    <!-- 基本資料 -->
     <div class="detail-section">
       <div class="detail-section-title">基本資料</div>
       <div class="detail-grid">
         <div class="form-row"><label class="form-label">姓名 *</label><input class="form-input" id="f-name"></div>
+        <div class="form-row"><label class="form-label">員工編號</label><input class="form-input" id="f-emp-no" placeholder="自動產生（EMP-001）"></div>
         <div class="form-row"><label class="form-label">電子郵件</label><input class="form-input" id="f-email" type="email"></div>
         <div class="form-row"><label class="form-label">電話</label><input class="form-input" id="f-phone"></div>
         <div class="form-row"><label class="form-label">身分證字號</label><input class="form-input" id="f-id-num"></div>
         <div class="form-row"><label class="form-label">生日</label><input class="form-input" id="f-birth" type="date"></div>
-        <div class="form-row"><label class="form-label">地址</label><input class="form-input" id="f-address"></div>
+        <div class="form-row" style="grid-column:span 2"><label class="form-label">地址</label><input class="form-input" id="f-address"></div>
       </div>
     </div>
 
     <hr class="form-divider">
+
+    <!-- 職務資訊 -->
     <div class="detail-section">
       <div class="detail-section-title">職務資訊</div>
       <div class="detail-grid">
@@ -125,17 +140,69 @@
             <option value="hr">人資</option><option value="admin">管理員</option>
           </select>
         </div>
+        <div class="form-row"><label class="form-label">職等</label>
+          <select class="form-select" id="f-grade" onchange="onGradeChange()">
+            <option value="">— 選擇職等 —</option>
+            <option value="一等">一等</option>
+            <option value="二等">二等</option>
+            <option value="三等">三等</option>
+          </select>
+        </div>
+        <div class="form-row"><label class="form-label">職級</label>
+          <select class="form-select" id="f-grade-level" onchange="onGradeLevelChange()">
+            <option value="">— 先選職等 —</option>
+          </select>
+        </div>
+        <div class="check-row">
+          <input type="checkbox" id="f-is-manager" onchange="onGradeLevelChange()">
+          <label for="f-is-manager">擔任主管職</label>
+          <span id="mgr-note" style="font-size:11px;color:var(--text-dim);margin-left:4px"></span>
+        </div>
         <div class="form-row"><label class="form-label">到職日</label><input class="form-input" id="f-hire" type="date"></div>
-        <div class="form-row"><label class="form-label">底薪</label><input class="form-input" id="f-salary" type="number"></div>
+        <div class="form-row"><label class="form-label">離職日期</label><input class="form-input" id="f-resign-date" type="date"></div>
         <div class="form-row"><label class="form-label">狀態</label>
           <select class="form-select" id="f-status">
             <option value="active">在職</option><option value="inactive">暫停</option><option value="resigned">已離職</option>
           </select>
         </div>
+        <div class="form-row"><label class="form-label">年資</label>
+          <div style="padding-top:8px"><span id="f-seniority" class="seniority-badge">—</span></div>
+        </div>
       </div>
     </div>
 
     <hr class="form-divider">
+
+    <!-- 薪資結構（唯讀） -->
+    <div class="detail-section">
+      <div class="detail-section-title">薪資結構（自動計算）</div>
+      <div class="salary-summary">
+        <div class="sal-item">
+          <div class="sal-label">底薪</div>
+          <div class="sal-val" id="disp-base">$30,000</div>
+        </div>
+        <div class="sal-item">
+          <div class="sal-label">職等加給</div>
+          <div class="sal-val" id="disp-grade-allow">—</div>
+        </div>
+        <div class="sal-item">
+          <div class="sal-label">全勤獎金</div>
+          <div class="sal-val" id="disp-att-bonus">—</div>
+        </div>
+        <div class="sal-item" id="disp-mgr-wrap">
+          <div class="sal-label">主管加給</div>
+          <div class="sal-val" id="disp-mgr-allow">—</div>
+        </div>
+        <div class="sal-item sal-total" style="grid-column:span 4;border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+          <div class="sal-label">月薪合計</div>
+          <div class="sal-val" id="disp-total">—</div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="form-divider">
+
+    <!-- 薪資帳戶 -->
     <div class="detail-section">
       <div class="detail-section-title">薪資帳戶</div>
       <div class="form-row"><label class="form-label">銀行帳號</label><input class="form-input" id="f-bank"></div>
@@ -155,16 +222,25 @@ function toast(msg, type='success') {
   if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
   const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
 }
-let allEmployees = [];
-let editingId = null;
-let currentView = 'card';
+
+let allEmployees  = [];
+let allSalaryGrades = [];
+let editingId     = null;
+let currentView   = 'card';
+
+/* ── Grade level map ── */
+const GRADE_LEVELS = { '一等': [1,2,3], '二等': [1,2,3], '三等': [1,2,3,4,5] };
 
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 600));
   try {
-    await loadEmployees();
+    await Promise.all([loadEmployees(), loadSalaryGrades()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
+
+async function loadSalaryGrades() {
+  try { allSalaryGrades = await api('/api/salary-grade'); } catch(e) { allSalaryGrades = []; }
+}
 
 async function loadEmployees() {
   allEmployees = await api('/api/employees');
@@ -182,10 +258,10 @@ function updateStats() {
     const h = new Date(e.hire_date);
     return h.getFullYear()===now.getFullYear() && h.getMonth()===now.getMonth();
   });
-  document.getElementById('st-active').textContent  = active.length;
-  document.getElementById('st-dept').textContent    = depts.length;
-  document.getElementById('st-new').textContent     = newHires.length;
-  document.getElementById('st-resigned').textContent= resigned.length;
+  document.getElementById('st-active').textContent   = active.length;
+  document.getElementById('st-dept').textContent     = depts.length;
+  document.getElementById('st-new').textContent      = newHires.length;
+  document.getElementById('st-resigned').textContent = resigned.length;
 }
 
 function fillDeptFilter() {
@@ -213,7 +289,7 @@ function renderList() {
 
 function renderCards() {
   const rows = getFiltered();
-  const grid = document.getElementById('emp-grid');
+  const grid  = document.getElementById('emp-grid');
   const empty = document.getElementById('card-empty');
   if (!rows.length) { grid.innerHTML=''; empty.style.display='block'; return; }
   empty.style.display = 'none';
@@ -227,10 +303,10 @@ function renderCards() {
         </div>
       </div>
       <div class="emp-card-info">
+        <div class="emp-card-item">🆔 <span>${e.emp_no||'—'}</span></div>
         <div class="emp-card-item">📧 <span>${e.email||'—'}</span></div>
-        <div class="emp-card-item">📱 <span>${e.phone||'—'}</span></div>
         <div class="emp-card-item">📅 <span>${e.hire_date||'—'}</span></div>
-        <div class="emp-card-item">💰 <span>${e.base_salary?'$'+Number(e.base_salary).toLocaleString():'—'}</span></div>
+        <div class="emp-card-item">💰 <span>${calcTotal(e)?'$'+calcTotal(e).toLocaleString():'—'}</span></div>
       </div>
     </div>`).join('');
 }
@@ -238,18 +314,31 @@ function renderCards() {
 function renderTable() {
   const rows = getFiltered();
   const tbody = document.getElementById('emp-tbody');
-  tbody.innerHTML = rows.map(e => `<tr>
-    <td><div class="emp-cell"><div class="avatar">${e.avatar||e.name[0]}</div><div><div class="emp-name">${e.name}</div></div></div></td>
-    <td>${e.dept}</td><td>${e.position}</td>
-    <td style="font-size:12px;color:var(--text-dim)">${e.email||'—'}</td>
-    <td style="font-size:12px">${e.phone||'—'}</td>
-    <td style="font-family:'DM Mono',monospace;font-size:12px">${e.hire_date||'—'}</td>
-    <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--accent2)">$${Number(e.base_salary||0).toLocaleString()}</td>
-    <td><span class="badge badge-${e.status}"><span class="badge-dot badge-dot-${e.status}"></span>${e.status==='active'?'在職':e.status==='resigned'?'已離職':'暫停'}</span></td>
-    <td><div class="action-btns">
-      <button class="btn btn-ghost btn-sm" onclick="openEditModal('${e.id}')">編輯</button>
-    </div></td>
-  </tr>`).join('');
+  tbody.innerHTML = rows.map(e => {
+    const total = calcTotal(e);
+    const grade = e.grade ? `${e.grade} / ${e.grade_level}級` : '—';
+    return `<tr>
+      <td><div class="emp-cell"><div class="avatar">${e.avatar||e.name[0]}</div><div><div class="emp-name">${e.name}</div></div></div></td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${e.emp_no||'—'}</td>
+      <td>${e.dept}</td><td>${e.position}</td>
+      <td style="font-size:12px">${grade}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${e.email||'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${e.hire_date||'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--accent2)">${total?'$'+total.toLocaleString():'—'}</td>
+      <td><span class="badge badge-${e.status}"><span class="badge-dot badge-dot-${e.status}"></span>${e.status==='active'?'在職':e.status==='resigned'?'已離職':'暫停'}</span></td>
+      <td><div class="action-btns">
+        <button class="btn btn-ghost btn-sm" onclick="openEditModal('${e.id}')">編輯</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function calcTotal(e) {
+  const base = 30000;
+  const ga   = Number(e.grade_allowance  || 0);
+  const ab   = Number(e.attendance_bonus || 0);
+  const ma   = Number(e.manager_allowance|| 0);
+  return base + ga + ab + ma;
 }
 
 function setView(v, el) {
@@ -261,19 +350,81 @@ function setView(v, el) {
   renderList();
 }
 
+/* ── Grade / Level UI helpers ── */
+function onGradeChange() {
+  const grade = document.getElementById('f-grade').value;
+  const levels = GRADE_LEVELS[grade] || [];
+  const sel = document.getElementById('f-grade-level');
+  sel.innerHTML = levels.length
+    ? levels.map(l=>`<option value="${l}">${l} 級</option>`).join('')
+    : '<option value="">— 先選職等 —</option>';
+  onGradeLevelChange();
+}
+
+function onGradeLevelChange() {
+  const grade = document.getElementById('f-grade').value;
+  const level = parseInt(document.getElementById('f-grade-level').value) || null;
+  const isManager = document.getElementById('f-is-manager').checked;
+
+  const row = allSalaryGrades.find(r => r.grade === grade && r.grade_level === level);
+
+  const base = 30000;
+  const ga   = row ? (row.grade_allowance  || 0) : 0;
+  const ab   = row ? (row.attendance_bonus  || 0) : 0;
+  const canMgr = row ? !!row.can_be_manager : false;
+  const ma   = (isManager && canMgr) ? (row?.manager_allowance || 0) : 0;
+
+  // Update manager checkbox availability
+  const mgrNote = document.getElementById('mgr-note');
+  if (row) {
+    document.getElementById('f-is-manager').disabled = !canMgr;
+    mgrNote.textContent = canMgr ? '' : '（此職等職級不可擔任主管）';
+    if (!canMgr) document.getElementById('f-is-manager').checked = false;
+  } else {
+    document.getElementById('f-is-manager').disabled = true;
+    mgrNote.textContent = '';
+  }
+
+  // Update display
+  document.getElementById('disp-grade-allow').textContent = ga  ? '$'+ga.toLocaleString()  : '—';
+  document.getElementById('disp-att-bonus').textContent   = ab  ? '$'+ab.toLocaleString()  : '—';
+  document.getElementById('disp-mgr-allow').textContent   = ma  ? '$'+ma.toLocaleString()  : '—';
+  document.getElementById('disp-mgr-wrap').style.opacity  = isManager && canMgr ? '1' : '0.4';
+
+  const total = row ? base + ga + ab + ma : null;
+  document.getElementById('disp-total').textContent = total ? '$'+total.toLocaleString() : '—';
+}
+
+function calcSeniority(hireDate) {
+  if (!hireDate) return '—';
+  const start = new Date(hireDate);
+  const now   = new Date();
+  let years  = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  if (months < 0) { years--; months += 12; }
+  if (years < 0) return '未到職';
+  return years > 0 ? `${years}年${months}月` : `${months}月`;
+}
+
+/* ── Modal open/close ── */
 function openAddModal() {
   editingId = null;
   document.getElementById('emp-modal-title').textContent = '➕ 新增員工';
-  ['name','email','phone','id-num','birth','address','position','bank'].forEach(f => {
-    const el = document.getElementById('f-'+f);
-    if (el) el.value = '';
+  ['name','email','phone','id-num','birth','address','position','bank','emp-no','resign-date'].forEach(f => {
+    const el = document.getElementById('f-'+f); if (el) el.value = '';
   });
   document.getElementById('f-dept').value   = '研發部';
   document.getElementById('f-role').value   = 'employee';
   document.getElementById('f-status').value = 'active';
-  document.getElementById('f-salary').value = '';
+  document.getElementById('f-salary') && (document.getElementById('f-salary').value = '');
   document.getElementById('f-hire').value   = new Date().toISOString().split('T')[0];
+  document.getElementById('f-grade').value       = '';
+  document.getElementById('f-grade-level').innerHTML = '<option value="">— 先選職等 —</option>';
+  document.getElementById('f-is-manager').checked   = false;
+  document.getElementById('f-is-manager').disabled  = true;
+  document.getElementById('f-seniority').textContent = '—';
   document.getElementById('btn-resign').style.display = 'none';
+  resetSalaryDisplay();
   document.getElementById('emp-modal').classList.add('open');
 }
 
@@ -282,54 +433,65 @@ function openEditModal(id) {
   if (!e) return;
   editingId = id;
   document.getElementById('emp-modal-title').textContent = `✏️ 編輯員工：${e.name}`;
-  document.getElementById('f-name').value    = e.name||'';
-  document.getElementById('f-email').value   = e.email||'';
-  document.getElementById('f-phone').value   = e.phone||'';
-  document.getElementById('f-id-num').value  = e.id_number||'';
-  document.getElementById('f-birth').value   = e.birth_date||'';
-  document.getElementById('f-address').value = e.address||'';
-  document.getElementById('f-dept').value    = e.dept||'研發部';
-  document.getElementById('f-position').value= e.position||'';
-  document.getElementById('f-role').value    = e.role||'employee';
-  document.getElementById('f-hire').value    = e.hire_date||'';
-  document.getElementById('f-salary').value  = e.base_salary||0;
-  document.getElementById('f-status').value  = e.status||'active';
-  document.getElementById('f-bank').value    = e.bank_account||'';
+
+  document.getElementById('f-name').value        = e.name        || '';
+  document.getElementById('f-emp-no').value      = e.emp_no      || '';
+  document.getElementById('f-email').value       = e.email       || '';
+  document.getElementById('f-phone').value       = e.phone       || '';
+  document.getElementById('f-id-num').value      = e.id_number   || '';
+  document.getElementById('f-birth').value       = e.birth_date  || '';
+  document.getElementById('f-address').value     = e.address     || '';
+  document.getElementById('f-dept').value        = e.dept        || '研發部';
+  document.getElementById('f-position').value    = e.position    || '';
+  document.getElementById('f-role').value        = e.role        || 'employee';
+  document.getElementById('f-hire').value        = e.hire_date   || '';
+  document.getElementById('f-resign-date').value = e.resign_date || '';
+  document.getElementById('f-status').value      = e.status      || 'active';
+  document.getElementById('f-bank').value        = e.bank_account|| '';
+
+  // Grade fields
+  document.getElementById('f-grade').value = e.grade || '';
+  onGradeChange(); // rebuild grade_level options first
+  if (e.grade_level) document.getElementById('f-grade-level').value = e.grade_level;
+  document.getElementById('f-is-manager').checked = !!e.is_manager;
+  onGradeLevelChange(); // update display
+
+  // Seniority
+  document.getElementById('f-seniority').textContent = calcSeniority(e.hire_date);
+
+  // Resign button: only for active employees
   document.getElementById('btn-resign').style.display = e.status === 'active' ? '' : 'none';
+
   document.getElementById('emp-modal').classList.add('open');
 }
 
-async function resignEmployee() {
-  if (!editingId) return;
-  const emp = allEmployees.find(e => e.id === editingId);
-  if (!confirm(`確定要將「${emp?.name}」標記為離職？此操作會保留資料但停用帳號。`)) return;
-  try {
-    await api(`/api/employees/${editingId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ status: 'resigned' })
-    });
-    closeModal('emp-modal');
-    await loadEmployees();
-    toast('已標記為離職', 'success');
-  } catch(e) { toast('操作失敗：' + e.message, 'error'); }
+function resetSalaryDisplay() {
+  ['disp-grade-allow','disp-att-bonus','disp-mgr-allow','disp-total'].forEach(id => {
+    document.getElementById(id).textContent = '—';
+  });
 }
 
+/* ── Save ── */
 async function saveEmployee() {
   const payload = {
     name:         document.getElementById('f-name').value.trim(),
-    email:        document.getElementById('f-email').value.trim()||null,
-    phone:        document.getElementById('f-phone').value.trim()||null,
-    id_number:    document.getElementById('f-id-num').value.trim()||null,
-    birth_date:   document.getElementById('f-birth').value||null,
-    address:      document.getElementById('f-address').value.trim()||null,
+    emp_no:       document.getElementById('f-emp-no').value.trim() || null,
+    email:        document.getElementById('f-email').value.trim()  || null,
+    phone:        document.getElementById('f-phone').value.trim()  || null,
+    id_number:    document.getElementById('f-id-num').value.trim() || null,
+    birth_date:   document.getElementById('f-birth').value         || null,
+    address:      document.getElementById('f-address').value.trim()|| null,
     dept:         document.getElementById('f-dept').value,
     position:     document.getElementById('f-position').value.trim(),
     role:         document.getElementById('f-role').value,
-    hire_date:    document.getElementById('f-hire').value||null,
-    base_salary:  parseFloat(document.getElementById('f-salary').value)||0,
+    grade:        document.getElementById('f-grade').value         || null,
+    grade_level:  parseInt(document.getElementById('f-grade-level').value) || null,
+    is_manager:   document.getElementById('f-is-manager').checked,
+    hire_date:    document.getElementById('f-hire').value          || null,
+    resign_date:  document.getElementById('f-resign-date').value   || null,
     status:       document.getElementById('f-status').value,
-    bank_account: document.getElementById('f-bank').value.trim()||null,
-    avatar:       document.getElementById('f-name').value.trim()[0]||'?',
+    bank_account: document.getElementById('f-bank').value.trim()   || null,
+    avatar:       document.getElementById('f-name').value.trim()[0]|| '?',
   };
   if (!payload.name || !payload.position) { toast('請填寫姓名和職稱','error'); return; }
   try {
@@ -343,6 +505,23 @@ async function saveEmployee() {
     closeModal('emp-modal');
     await loadEmployees();
   } catch(e) { toast('儲存失敗：'+e.message,'error'); }
+}
+
+/* ── Resign ── */
+async function resignEmployee() {
+  if (!editingId) return;
+  const emp = allEmployees.find(e => e.id === editingId);
+  if (!confirm(`確定要將「${emp?.name}」標記為離職？此操作會保留資料但停用帳號。`)) return;
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    await api(`/api/employees/${editingId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'resigned', resign_date: today })
+    });
+    closeModal('emp-modal');
+    await loadEmployees();
+    toast('已標記為離職', 'success');
+  } catch(e) { toast('操作失敗：' + e.message, 'error'); }
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
