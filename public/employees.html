@@ -142,6 +142,7 @@
     </div>
 
     <div class="modal-actions">
+      <button class="btn btn-danger" id="btn-resign" onclick="resignEmployee()" style="margin-right:auto">離職</button>
       <button class="btn btn-ghost" onclick="closeModal('emp-modal')">取消</button>
       <button class="btn btn-primary" id="emp-save-btn" onclick="saveEmployee()">儲存</button>
     </div>
@@ -272,6 +273,7 @@ function openAddModal() {
   document.getElementById('f-status').value = 'active';
   document.getElementById('f-salary').value = '';
   document.getElementById('f-hire').value   = new Date().toISOString().split('T')[0];
+  document.getElementById('btn-resign').style.display = 'none';
   document.getElementById('emp-modal').classList.add('open');
 }
 
@@ -293,7 +295,23 @@ function openEditModal(id) {
   document.getElementById('f-salary').value  = e.base_salary||0;
   document.getElementById('f-status').value  = e.status||'active';
   document.getElementById('f-bank').value    = e.bank_account||'';
+  document.getElementById('btn-resign').style.display = e.status === 'active' ? '' : 'none';
   document.getElementById('emp-modal').classList.add('open');
+}
+
+async function resignEmployee() {
+  if (!editingId) return;
+  const emp = allEmployees.find(e => e.id === editingId);
+  if (!confirm(`確定要將「${emp?.name}」標記為離職？此操作會保留資料但停用帳號。`)) return;
+  try {
+    await api(`/api/employees/${editingId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'resigned' })
+    });
+    closeModal('emp-modal');
+    await loadEmployees();
+    toast('已標記為離職', 'success');
+  } catch(e) { toast('操作失敗：' + e.message, 'error'); }
 }
 
 async function saveEmployee() {
