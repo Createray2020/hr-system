@@ -14,7 +14,7 @@ export default async function handler(req, res) {
       // 步驟一：查詢所有部門
       const { data: depts, error } = await supabase
         .from('departments').select('*').order('name');
-      if (error) return res.status(500).json({ error: error.message, hint: '若出現欄位不存在錯誤，請執行：ALTER TABLE departments ADD COLUMN IF NOT EXISTS description TEXT DEFAULT \'\'; ALTER TABLE departments ADD COLUMN IF NOT EXISTS color TEXT DEFAULT \'#5B8DEF\';' });
+      if (error) return res.status(500).json({ error: error.message, details: error.details, hint: error.hint });
 
       // 步驟二：統計各部門在職人數（以 dept 名稱欄位對應）
       const { data: emps } = await supabase
@@ -36,8 +36,8 @@ export default async function handler(req, res) {
         emp_count:    countMap[d.name] || 0,
         manager_name: managerMap[d.manager_id] || null,
       })));
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
+    } catch (e) {
+      return res.status(500).json({ error: e.message, stack: e.stack });
     }
   }
 
