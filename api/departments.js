@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'manager']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo', 'chairman', 'manager']);
     if (!caller) return;
     const { name, description, color, manager_id } = req.body;
     if (!name) return res.status(400).json({ error: '缺少部門名稱' });
@@ -59,7 +59,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PUT') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'manager']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo', 'chairman', 'manager']);
     if (!caller) return;
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: '缺少 id' });
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const caller = await requireRole(req, res, ['hr', 'admin']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo', 'chairman']);
     if (!caller) return;
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: '缺少 id' });
