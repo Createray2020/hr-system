@@ -409,6 +409,12 @@ function onEmpTypeOrHireChange() {
 }
 
 /* ── Grade / Level UI helpers ── */
+function currentGradeRow() {
+  const grade = document.getElementById('f-grade').value;
+  const level = parseInt(document.getElementById('f-grade-level').value) || null;
+  return allSalaryGrades.find(r => r.grade === grade && r.grade_level === level) || null;
+}
+
 function onGradeChange() {
   const grade = document.getElementById('f-grade').value;
   const levels = GRADE_LEVELS[grade] || [];
@@ -548,9 +554,17 @@ async function saveEmployee() {
     dept:         document.getElementById('f-dept').value,
     position:     document.getElementById('f-position').value.trim(),
     role:         document.getElementById('f-role').value,
-    grade:        document.getElementById('f-grade').value         || null,
-    grade_level:  parseInt(document.getElementById('f-grade-level').value) || null,
-    is_manager:   document.getElementById('f-is-manager').checked,
+    grade:             document.getElementById('f-grade').value         || null,
+    grade_level:       parseInt(document.getElementById('f-grade-level').value) || null,
+    is_manager:        document.getElementById('f-is-manager').checked,
+    base_salary:       30000,
+    grade_allowance:   currentGradeRow()?.grade_allowance  ?? 0,
+    attendance_bonus:  currentGradeRow()?.attendance_bonus ?? 0,
+    manager_allowance: (() => {
+      const row = currentGradeRow();
+      return (document.getElementById('f-is-manager').checked && row?.can_be_manager)
+        ? (row?.manager_allowance ?? 0) : 0;
+    })(),
     hire_date:    document.getElementById('f-hire').value          || null,
     resign_date:  document.getElementById('f-resign-date').value   || null,
     status:       document.getElementById('f-status').value,

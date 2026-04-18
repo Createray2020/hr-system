@@ -29,37 +29,20 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PUT') {
-    const caller = await requireRoleOrPass(req, res, ['hr', 'ceo', 'manager', 'chairman', 'admin']);
-    if (!caller) return;
+    try {
+      const caller = await requireRoleOrPass(req, res, ['hr', 'ceo', 'manager', 'chairman', 'admin']);
+      if (!caller) return;
 
-    const body = { ...req.body };
-
-    // ── 根據 grade / grade_level / is_manager 自動計算薪資欄位 ──
-    if (body.grade && body.grade_level != null) {
-      const { data: gradeRow } = await supabase
-        .from('salary_grade')
-        .select('*')
-        .eq('grade', body.grade)
-        .eq('grade_level', Number(body.grade_level))
-        .single();
-
-      if (gradeRow) {
-        body.base_salary      = 30000;
-        body.grade_allowance  = gradeRow.grade_allowance  ?? 0;
-        body.attendance_bonus = gradeRow.attendance_bonus ?? 0;
-        // 主管加給：is_manager=true 且 can_be_manager=true 才給
-        body.manager_allowance = (body.is_manager === true && gradeRow.can_be_manager === true)
-          ? (gradeRow.manager_allowance ?? 0)
-          : 0;
-      }
+      // 前端負責計算薪資欄位後傳入，PUT 只負責寫入 employees 資料表
+      const { error } = await supabase
+        .from('employees')
+        .update({ ...req.body, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ message: '已更新' });
+    } catch(e) {
+      return res.status(500).json({ error: e.message, stack: e.stack });
     }
-
-    const { error } = await supabase
-      .from('employees')
-      .update({ ...body, updated_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ message: '已更新' });
   }
 
   if (req.method === 'DELETE') {
