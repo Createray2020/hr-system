@@ -140,9 +140,7 @@
         </div>
         <div class="form-row"><label class="form-label">部門 *</label>
           <select class="form-select" id="f-dept">
-            <option value="研發部">研發部</option><option value="行銷部">行銷部</option>
-            <option value="財務部">財務部</option><option value="業務部">業務部</option>
-            <option value="人資部">人資部</option>
+            <option value="">載入中…</option>
           </select>
         </div>
         <div class="form-row"><label class="form-label">職稱 *</label><input class="form-input" id="f-position"></div>
@@ -246,7 +244,7 @@ const GRADE_LEVELS = { '一等': [1,2,3], '二等': [1,2,3], '三等': [1,2,3,4,
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 600));
   try {
-    await Promise.all([loadEmployees(), loadSalaryGrades()]);
+    await Promise.all([loadEmployees(), loadSalaryGrades(), loadDepts()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
 
@@ -254,10 +252,22 @@ async function loadSalaryGrades() {
   try { allSalaryGrades = await api('/api/salary-grade'); } catch(e) { allSalaryGrades = []; }
 }
 
+async function loadDepts() {
+  try {
+    const depts = await api('/api/departments');
+    const opts = depts.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
+    document.getElementById('f-dept').innerHTML    = opts;
+    document.getElementById('dept-filter').innerHTML =
+      '<option value="">全部部門</option>' + opts;
+  } catch(e) {
+    // fallback to deriving from loaded employees
+    fillDeptFilter();
+  }
+}
+
 async function loadEmployees() {
   allEmployees = await api('/api/employees');
   updateStats();
-  fillDeptFilter();
   renderList();
 }
 
@@ -477,7 +487,9 @@ function openAddModal() {
   ['name','email','phone','id-num','birth','address','position','bank','emp-no','resign-date'].forEach(f => {
     const el = document.getElementById('f-'+f); if (el) el.value = '';
   });
-  document.getElementById('f-dept').value   = '研發部';
+  // Select first available dept option (or empty if none loaded yet)
+  const deptSel = document.getElementById('f-dept');
+  if (deptSel.options.length > 0) deptSel.selectedIndex = 0;
   document.getElementById('f-role').value   = 'employee';
   document.getElementById('f-status').value = 'active';
   document.getElementById('f-type-full').checked = true;
@@ -510,7 +522,7 @@ function openEditModal(id) {
   document.getElementById('f-id-num').value      = e.id_number   || '';
   document.getElementById('f-birth').value       = e.birth_date  || '';
   document.getElementById('f-address').value     = e.address     || '';
-  document.getElementById('f-dept').value        = e.dept        || '研發部';
+  document.getElementById('f-dept').value        = e.dept        || '';
   document.getElementById('f-position').value    = e.position    || '';
   document.getElementById('f-role').value        = e.role        || 'employee';
   document.getElementById('f-hire').value        = e.hire_date   || '';
