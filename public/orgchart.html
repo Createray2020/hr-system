@@ -10,39 +10,52 @@
 /* ── Org scroll wrapper ── */
 .org-scroll {
   overflow-x: auto; overflow-y: visible;
-  padding: 32px 24px 40px;
+  padding: 32px 40px 48px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); min-height: 200px;
 }
-.org-root { display: flex; gap: 0; justify-content: center; min-width: max-content; }
-
-/* ── Tree node ── */
-.org-node { display: flex; flex-direction: column; align-items: center; }
-
-/* ── Children container + connector lines ── */
-.org-children {
-  display: flex; gap: 0; padding-top: 20px;
-  position: relative;
+.org-root {
+  display: flex; flex-direction: row;
+  align-items: flex-start; justify-content: center;
+  gap: 0; min-width: max-content;
 }
-/* vertical line from parent card down */
-.org-children::before {
-  content: ''; position: absolute; top: 0; left: 50%;
-  transform: translateX(-0.25px); width: 0.5px; height: 10px;
-  background: var(--border);
+
+/* ── Each node: vertical stack (card → vline → kids-row) ── */
+.tree-node {
+  display: flex; flex-direction: column; align-items: center;
 }
-/* each child: top padding + horizontal & vertical connectors */
-.org-children > .org-node { padding: 10px 10px 0; position: relative; }
-.org-children > .org-node::before {        /* horizontal line */
+
+/* ── Vertical connector from card down to kids-row ── */
+.vline {
+  width: 1px; height: 24px;
+  background: var(--border); flex-shrink: 0;
+}
+
+/* ── Row of children ── */
+.kids-row {
+  display: flex; flex-direction: row;
+  align-items: flex-start;
+}
+
+/* ── Wrapper for each child node — carries connector lines ── */
+.kid-wrap {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 24px 12px 0; position: relative;
+}
+/* horizontal bar at the top of each kid-wrap */
+.kid-wrap::before {
   content: ''; position: absolute; top: 0;
-  left: 0; right: 0; height: 0.5px; background: var(--border);
-}
-.org-children > .org-node:first-child::before { left: 50%; }
-.org-children > .org-node:last-child::before  { right: 50%; }
-.org-children > .org-node:only-child::before  { display: none; }
-.org-children > .org-node::after {         /* vertical line down to card */
-  content: ''; position: absolute; top: 0; left: 50%;
-  transform: translateX(-0.25px); width: 0.5px; height: 10px;
+  left: 0; right: 0; height: 1px;
   background: var(--border);
+}
+.kid-wrap:first-child::before  { left: 50%; }
+.kid-wrap:last-child::before   { right: 50%; }
+.kid-wrap:only-child::before   { display: none; }
+/* vertical drop from horizontal bar to card */
+.kid-wrap::after {
+  content: ''; position: absolute; top: 0; left: 50%;
+  transform: translateX(-0.5px);
+  width: 1px; height: 24px; background: var(--border);
 }
 
 /* ── Node card ── */
@@ -51,25 +64,26 @@
   border-radius: 10px; padding: 10px 12px;
   display: flex; align-items: center; gap: 9px;
   cursor: pointer; transition: all .2s;
-  min-width: 150px; max-width: 190px; position: relative;
+  width: 148px; box-sizing: border-box; position: relative;
+  flex-shrink: 0;
 }
-.node-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.node-card:hover  { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
 .node-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91,141,239,.3); }
 .node-avatar {
-  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 700;
 }
 .node-info { flex: 1; min-width: 0; }
-.node-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.node-pos  { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.node-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-pos  { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .node-badge {
   display: inline-block; font-size: 9px; padding: 1px 5px;
   border-radius: 4px; margin-top: 3px; font-weight: 500;
 }
 .node-toggle {
   background: none; border: none; color: var(--text-dim);
-  cursor: pointer; font-size: 11px; padding: 2px 0; flex-shrink: 0;
+  cursor: pointer; font-size: 11px; padding: 0; flex-shrink: 0;
   line-height: 1; transition: color .15s;
 }
 .node-toggle:hover { color: var(--text); }
@@ -265,23 +279,30 @@ function buildTree() {
   return roots;
 }
 
-/* ── Render tree ── */
+/* ── Render one tree node (recursive) ── */
 function nodeHTML(emp) {
-  const color = deptColorMap[emp.dept] || '#5B8DEF';
+  const color   = deptColorMap[emp.dept] || '#5B8DEF';
   const hasKids = emp.children && emp.children.length > 0;
-  const badge = ROLE_LABEL[emp.role];
+  const badge   = ROLE_LABEL[emp.role];
+
+  const childrenHTML = hasKids ? `
+    <div class="vline"></div>
+    <div class="kids-row" id="ch-${emp.id}">
+      ${emp.children.map(c => `<div class="kid-wrap">${nodeHTML(c)}</div>`).join('')}
+    </div>` : '';
+
   return `
-    <div class="org-node" data-id="${emp.id}">
+    <div class="tree-node" data-id="${emp.id}">
       <div class="node-card" style="border-top:2px solid ${color}" onclick="openDetail('${emp.id}')">
         <div class="node-avatar" style="background:${color}22;color:${color}">${esc(emp.avatar || emp.name[0])}</div>
         <div class="node-info">
           <div class="node-name">${esc(emp.name)}</div>
-          <div class="node-pos">${esc(emp.position)}</div>
+          <div class="node-pos">${esc(emp.position || emp.dept || '')}</div>
           ${badge ? `<span class="node-badge" style="background:${color}22;color:${color}">${badge}</span>` : ''}
         </div>
         ${hasKids ? `<button class="node-toggle" onclick="toggleNode(event,'${emp.id}')">▾</button>` : ''}
       </div>
-      ${hasKids ? `<div class="org-children" id="ch-${emp.id}">${emp.children.map(nodeHTML).join('')}</div>` : ''}
+      ${childrenHTML}
     </div>`;
 }
 
@@ -289,25 +310,38 @@ function renderTree() {
   const roots = buildTree();
   const el = document.getElementById('org-tree');
   if (!roots.length) { el.innerHTML = '<div class="org-loading">暫無員工資料</div>'; return; }
-  el.innerHTML = roots.map(nodeHTML).join('');
+  // Root nodes are wrapped in kid-wrap only if more than one root (for horizontal connectors)
+  if (roots.length === 1) {
+    el.innerHTML = nodeHTML(roots[0]);
+  } else {
+    el.innerHTML = roots.map(r => `<div class="kid-wrap" style="--no-hline:1">${nodeHTML(r)}</div>`).join('');
+    // Remove horizontal connector lines at root level (no parent to connect to)
+    el.querySelectorAll('.org-root > .kid-wrap').forEach(kw => {
+      kw.style.setProperty('--root', '1');
+    });
+  }
 }
 
 /* ── Expand / Collapse ── */
 function toggleNode(e, id) {
   e.stopPropagation();
   const ch  = document.getElementById('ch-' + id);
+  const vl  = ch ? ch.previousElementSibling : null; // the .vline before kids-row
   const btn = e.currentTarget;
   if (!ch) return;
   const hidden = ch.style.display === 'none';
   ch.style.display = hidden ? '' : 'none';
+  if (vl && vl.classList.contains('vline')) vl.style.display = hidden ? '' : 'none';
   btn.textContent  = hidden ? '▾' : '▸';
 }
 function expandAll() {
-  document.querySelectorAll('.org-children').forEach(el => { el.style.display = ''; });
+  document.querySelectorAll('.kids-row').forEach(el => { el.style.display = ''; });
+  document.querySelectorAll('.vline').forEach(el => { el.style.display = ''; });
   document.querySelectorAll('.node-toggle').forEach(b => { b.textContent = '▾'; });
 }
 function collapseAll() {
-  document.querySelectorAll('.org-children').forEach(el => { el.style.display = 'none'; });
+  document.querySelectorAll('.kids-row').forEach(el => { el.style.display = 'none'; });
+  document.querySelectorAll('.vline').forEach(el => { el.style.display = 'none'; });
   document.querySelectorAll('.node-toggle').forEach(b => { b.textContent = '▸'; });
 }
 
@@ -361,7 +395,7 @@ function openDetail(empId) {
   const roleLabel = { chairman:'董事長', ceo:'執行長', manager:'部門主管', hr:'人資專員', admin:'管理員', employee:'員工' };
 
   document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
-  const card = document.querySelector(`.org-node[data-id="${empId}"] > .node-card`);
+  const card = document.querySelector(`.tree-node[data-id="${empId}"] > .node-card`);
   if (card) card.classList.add('selected');
 
   document.getElementById('detail-body').innerHTML = `
