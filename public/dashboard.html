@@ -138,7 +138,7 @@ async function loadDashboard() {
   const today = now.toISOString().split('T')[0];
 
   const [leaveStats, employees, salaryData, todayAtt] = await Promise.all([
-    api('/api/stats'),
+    api('/api/leaves?stats=true'),
     api('/api/employees?status=active'),
     api(`/api/salary?year=${now.getFullYear()}&month=${now.getMonth()+1}`).catch(()=>[]),
     api(`/api/attendance?month=${ym}`).catch(()=>[]),
