@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>組織圖 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ── Org scroll wrapper ── */
+.org-scroll {
+  overflow-x: auto; overflow-y: visible;
+  padding: 32px 24px 40px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); min-height: 200px;
+}
+.org-root { display: flex; gap: 0; justify-content: center; min-width: max-content; }
+
+/* ── Tree node ── */
+.org-node { display: flex; flex-direction: column; align-items: center; }
+
+/* ── Children container + connector lines ── */
+.org-children {
+  display: flex; gap: 0; padding-top: 20px;
+  position: relative;
+}
+/* vertical line from parent card down */
+.org-children::before {
+  content: ''; position: absolute; top: 0; left: 50%;
+  transform: translateX(-0.25px); width: 0.5px; height: 10px;
+  background: var(--border);
+}
+/* each child: top padding + horizontal & vertical connectors */
+.org-children > .org-node { padding: 10px 10px 0; position: relative; }
+.org-children > .org-node::before {        /* horizontal line */
+  content: ''; position: absolute; top: 0;
+  left: 0; right: 0; height: 0.5px; background: var(--border);
+}
+.org-children > .org-node:first-child::before { left: 50%; }
+.org-children > .org-node:last-child::before  { right: 50%; }
+.org-children > .org-node:only-child::before  { display: none; }
+.org-children > .org-node::after {         /* vertical line down to card */
+  content: ''; position: absolute; top: 0; left: 50%;
+  transform: translateX(-0.25px); width: 0.5px; height: 10px;
+  background: var(--border);
+}
+
+/* ── Node card ── */
+.node-card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px;
+  display: flex; align-items: center; gap: 9px;
+  cursor: pointer; transition: all .2s;
+  min-width: 150px; max-width: 190px; position: relative;
+}
+.node-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.node-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91,141,239,.3); }
+.node-avatar {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700;
+}
+.node-info { flex: 1; min-width: 0; }
+.node-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-pos  { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.node-badge {
+  display: inline-block; font-size: 9px; padding: 1px 5px;
+  border-radius: 4px; margin-top: 3px; font-weight: 500;
+}
+.node-toggle {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 11px; padding: 2px 0; flex-shrink: 0;
+  line-height: 1; transition: color .15s;
+}
+.node-toggle:hover { color: var(--text); }
+
+/* ── View toolbar ── */
+.view-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.view-seg {
+  display: flex; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.view-seg button {
+  background: none; border: none; color: var(--text-dim);
+  padding: 7px 16px; font-size: 13px; cursor: pointer;
+  font-family: 'Noto Sans TC', sans-serif; transition: all .2s;
+}
+.view-seg button.active { background: var(--accent); color: #fff; }
+.toolbar-sep { flex: 1; }
+
+/* ── Department card view ── */
+.dept-oc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.dept-oc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.dept-oc-header {
+  padding: 14px 18px; display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.dept-oc-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.dept-oc-name { font-size: 15px; font-weight: 600; }
+.dept-oc-count { margin-left: auto; font-size: 11px; color: var(--text-dim); font-family: 'DM Mono', monospace; }
+.dept-oc-members { padding: 6px 10px 10px; }
+.dept-member-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 8px; border-radius: 7px; cursor: pointer; transition: background .15s;
+}
+.dept-member-row:hover { background: var(--surface2); }
+.dept-member-av {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
+.dept-member-name { font-size: 13px; font-weight: 500; }
+.dept-member-pos  { font-size: 11px; color: var(--text-dim); }
+.dept-mgr-badge {
+  margin-left: auto; font-size: 9px; padding: 1px 6px; border-radius: 4px;
+  background: rgba(91,141,239,.15); color: var(--accent2);
+  border: 1px solid rgba(91,141,239,.25); white-space: nowrap;
+}
+
+/* ── Right detail panel ── */
+.detail-panel {
+  position: fixed; top: 0; right: 0; height: 100vh; width: 300px;
+  background: var(--surface); border-left: 1px solid var(--border);
+  z-index: 300; transform: translateX(100%);
+  transition: transform .25s cubic-bezier(.4,0,.2,1);
+  display: flex; flex-direction: column;
+}
+.detail-panel.open { transform: translateX(0); }
+.detail-overlay {
+  position: fixed; inset: 0; z-index: 299;
+  background: rgba(0,0,0,.25); display: none;
+}
+.detail-overlay.open { display: block; }
+.detail-hd {
+  padding: 18px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.detail-hd-label { font-size: 11px; font-family: 'DM Mono', monospace; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); }
+.detail-close { background: none; border: none; color: var(--text-dim); font-size: 17px; cursor: pointer; padding: 4px 6px; border-radius: 6px; transition: all .2s; }
+.detail-close:hover { background: var(--surface2); color: var(--text); }
+.detail-body { padding: 24px 20px; overflow-y: auto; flex: 1; }
+.detail-avatar-wrap { text-align: center; margin-bottom: 18px; }
+.detail-av-lg {
+  width: 64px; height: 64px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 700;
+}
+.detail-dname { font-size: 18px; font-weight: 700; text-align: center; margin-top: 12px; }
+.detail-dpos  { font-size: 13px; color: var(--text-dim); text-align: center; margin-top: 3px; }
+.detail-dept-chip {
+  display: inline-block; margin-top: 8px; padding: 3px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 500;
+}
+hr.dp { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+.detail-row { display: flex; gap: 10px; margin-bottom: 14px; align-items: flex-start; }
+.detail-row-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; padding-top: 1px; }
+.detail-row-label { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; text-transform: uppercase; letter-spacing: .5px; }
+.detail-row-val { font-size: 13px; }
+
+/* Loading / empty */
+.org-loading { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 13px; }
+</style>
+</head>
+<body data-page="orgchart">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">組織圖</div>
+        <div class="page-sub">公司人員架構與部門組織總覽</div>
+      </div>
+    </div>
+
+    <!-- 工具列 -->
+    <div class="view-toolbar">
+      <div class="view-seg">
+        <button class="active" id="vb-tree" onclick="setView('tree',this)">🌲 樹狀圖</button>
+        <button id="vb-dept" onclick="setView('dept',this)">🏢 部門卡片</button>
+      </div>
+      <div class="toolbar-sep"></div>
+      <div id="tree-btns" style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="expandAll()">全部展開</button>
+        <button class="btn btn-ghost btn-sm" onclick="collapseAll()">全部收合</button>
+      </div>
+    </div>
+
+    <!-- 樹狀圖 -->
+    <div id="tree-view">
+      <div class="org-scroll">
+        <div id="org-tree" class="org-root">
+          <div class="org-loading">載入中…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 部門卡片 -->
+    <div id="dept-view" style="display:none">
+      <div class="dept-oc-grid" id="dept-cards">
+        <div class="org-loading">載入中…</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 右側詳細面板 -->
+<div class="detail-overlay" id="detail-overlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-hd">
+    <span class="detail-hd-label">員工資料</span>
+    <button class="detail-close" onclick="closeDetail()">✕</button>
+  </div>
+  <div class="detail-body" id="detail-body"></div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+</script>
+<script src="/js/layout.js"></script>
+<script>
+let allEmployees = [];
+let allDepts     = [];
+let deptColorMap = {};
+const ROLE_PRIORITY = { chairman:0, ceo:1, admin:2, hr:2, manager:3, employee:4 };
+const ROLE_LABEL    = { chairman:'董事長', ceo:'執行長', manager:'主管', hr:'人資', admin:'管理員' };
+
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 650));
+  try {
+    [allEmployees, allDepts] = await Promise.all([
+      api('/api/employees?status=active'),
+      api('/api/departments'),
+    ]);
+    deptColorMap = {};
+    allDepts.forEach(d => { deptColorMap[d.name] = d.color || '#5B8DEF'; });
+    renderTree();
+    renderDeptCards();
+  } catch(e) {
+    document.getElementById('org-tree').innerHTML = `<div class="org-loading">載入失敗：${esc(e.message)}</div>`;
+    toast('載入失敗：' + e.message, 'error');
+  }
+};
+
+/* ── Build tree from manager_id relationships ── */
+function buildTree() {
+  const map = {};
+  allEmployees.forEach(e => { map[e.id] = { ...e, children: [] }; });
+  const roots = [];
+
+  allEmployees.forEach(e => {
+    if (e.manager_id && map[e.manager_id]) {
+      map[e.manager_id].children.push(map[e.id]);
+    } else {
+      roots.push(map[e.id]);
+    }
+  });
+
+  const byRole = arr => arr.sort((a, b) => (ROLE_PRIORITY[a.role]||5) - (ROLE_PRIORITY[b.role]||5));
+  byRole(roots);
+  Object.values(map).forEach(e => byRole(e.children));
+  return roots;
+}
+
+/* ── Render tree ── */
+function nodeHTML(emp) {
+  const color = deptColorMap[emp.dept] || '#5B8DEF';
+  const hasKids = emp.children && emp.children.length > 0;
+  const badge = ROLE_LABEL[emp.role];
+  return `
+    <div class="org-node" data-id="${emp.id}">
+      <div class="node-card" style="border-top:2px solid ${color}" onclick="openDetail('${emp.id}')">
+        <div class="node-avatar" style="background:${color}22;color:${color}">${esc(emp.avatar || emp.name[0])}</div>
+        <div class="node-info">
+          <div class="node-name">${esc(emp.name)}</div>
+          <div class="node-pos">${esc(emp.position)}</div>
+          ${badge ? `<span class="node-badge" style="background:${color}22;color:${color}">${badge}</span>` : ''}
+        </div>
+        ${hasKids ? `<button class="node-toggle" onclick="toggleNode(event,'${emp.id}')">▾</button>` : ''}
+      </div>
+      ${hasKids ? `<div class="org-children" id="ch-${emp.id}">${emp.children.map(nodeHTML).join('')}</div>` : ''}
+    </div>`;
+}
+
+function renderTree() {
+  const roots = buildTree();
+  const el = document.getElementById('org-tree');
+  if (!roots.length) { el.innerHTML = '<div class="org-loading">暫無員工資料</div>'; return; }
+  el.innerHTML = roots.map(nodeHTML).join('');
+}
+
+/* ── Expand / Collapse ── */
+function toggleNode(e, id) {
+  e.stopPropagation();
+  const ch  = document.getElementById('ch-' + id);
+  const btn = e.currentTarget;
+  if (!ch) return;
+  const hidden = ch.style.display === 'none';
+  ch.style.display = hidden ? '' : 'none';
+  btn.textContent  = hidden ? '▾' : '▸';
+}
+function expandAll() {
+  document.querySelectorAll('.org-children').forEach(el => { el.style.display = ''; });
+  document.querySelectorAll('.node-toggle').forEach(b => { b.textContent = '▾'; });
+}
+function collapseAll() {
+  document.querySelectorAll('.org-children').forEach(el => { el.style.display = 'none'; });
+  document.querySelectorAll('.node-toggle').forEach(b => { b.textContent = '▸'; });
+}
+
+/* ── Department card view ── */
+function renderDeptCards() {
+  const container = document.getElementById('dept-cards');
+  if (!allDepts.length) { container.innerHTML = '<div class="org-loading">暫無部門資料</div>'; return; }
+  const mgrRoles = new Set(['chairman','ceo','manager','hr','admin']);
+
+  container.innerHTML = allDepts.map(dept => {
+    const color   = dept.color || '#5B8DEF';
+    const members = allEmployees.filter(e => e.dept === dept.name)
+      .sort((a, b) => (ROLE_PRIORITY[a.role]||5) - (ROLE_PRIORITY[b.role]||5));
+    return `
+      <div class="dept-oc-card">
+        <div class="dept-oc-header">
+          <div class="dept-oc-dot" style="background:${color}"></div>
+          <div class="dept-oc-name">${esc(dept.name)}</div>
+          <div class="dept-oc-count">${members.length} 人</div>
+        </div>
+        <div class="dept-oc-members">
+          ${members.length ? members.map(m => `
+            <div class="dept-member-row" onclick="openDetail('${m.id}')">
+              <div class="dept-member-av" style="background:${color}22;color:${color}">${esc(m.avatar || m.name[0])}</div>
+              <div>
+                <div class="dept-member-name">${esc(m.name)}</div>
+                <div class="dept-member-pos">${esc(m.position)}</div>
+              </div>
+              ${mgrRoles.has(m.role) ? `<span class="dept-mgr-badge">${ROLE_LABEL[m.role]||'主管'}</span>` : ''}
+            </div>`).join('') :
+            '<div style="padding:10px 8px;color:var(--text-dim);font-size:12px">暫無成員</div>'}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/* ── View toggle ── */
+function setView(v, btn) {
+  document.querySelectorAll('.view-seg button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tree-view').style.display = v === 'tree' ? '' : 'none';
+  document.getElementById('dept-view').style.display  = v === 'dept' ? '' : 'none';
+  document.getElementById('tree-btns').style.display  = v === 'tree' ? 'flex' : 'none';
+}
+
+/* ── Detail panel ── */
+function openDetail(empId) {
+  const emp = allEmployees.find(e => e.id === empId);
+  if (!emp) return;
+  const color = deptColorMap[emp.dept] || '#5B8DEF';
+  const roleLabel = { chairman:'董事長', ceo:'執行長', manager:'部門主管', hr:'人資專員', admin:'管理員', employee:'員工' };
+
+  document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
+  const card = document.querySelector(`.org-node[data-id="${empId}"] > .node-card`);
+  if (card) card.classList.add('selected');
+
+  document.getElementById('detail-body').innerHTML = `
+    <div class="detail-avatar-wrap">
+      <div class="detail-av-lg" style="background:${color}22;color:${color}">${esc(emp.avatar || emp.name[0])}</div>
+      <div class="detail-dname">${esc(emp.name)}</div>
+      <div class="detail-dpos">${esc(emp.position)}</div>
+      <span class="detail-dept-chip" style="background:${color}22;color:${color}">${esc(emp.dept || '—')}</span>
+    </div>
+    <hr class="dp">
+    ${dRow('👤','角色', roleLabel[emp.role] || emp.role || '—')}
+    ${dRow('📧','電子郵件', emp.email || '—')}
+    ${dRow('📱','電話', emp.phone || '—')}
+    ${dRow('📅','到職日', emp.hire_date || '—')}
+    ${emp.base_salary ? dRow('💰','底薪', '$' + Number(emp.base_salary).toLocaleString()) : ''}
+  `;
+  document.getElementById('detail-panel').classList.add('open');
+  document.getElementById('detail-overlay').classList.add('open');
+}
+
+function dRow(icon, label, value) {
+  return `<div class="detail-row">
+    <div class="detail-row-icon">${icon}</div>
+    <div><div class="detail-row-label">${label}</div><div class="detail-row-val">${esc(String(value))}</div></div>
+  </div>`;
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

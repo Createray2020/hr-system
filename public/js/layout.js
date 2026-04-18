@@ -41,6 +41,7 @@
     { page:'leave',      icon:'📋', label:'請假審批', href:'/leave.html' },
     { page:'attendance', icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
     { page:'employees',   icon:'👥', label:'員工資料', href:'/employees.html' },
+    { page:'orgchart',    icon:'🗂️', label:'組織圖',   href:'/orgchart.html' },
     { page:'departments', icon:'🏢', label:'部門管理', href:'/departments.html' },
     { page:'salary',      icon:'💰', label:'薪資管理', href:'/salary.html' },
   ];
