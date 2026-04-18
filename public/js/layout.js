@@ -40,8 +40,9 @@
     { page:'dashboard',  icon:'🏠', label:'總覽',     href:'/dashboard.html' },
     { page:'leave',      icon:'📋', label:'請假審批', href:'/leave.html' },
     { page:'attendance', icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
-    { page:'employees',  icon:'👥', label:'員工資料', href:'/employees.html' },
-    { page:'salary',     icon:'💰', label:'薪資管理', href:'/salary.html' },
+    { page:'employees',   icon:'👥', label:'員工資料', href:'/employees.html' },
+    { page:'departments', icon:'🏢', label:'部門管理', href:'/departments.html' },
+    { page:'salary',      icon:'💰', label:'薪資管理', href:'/salary.html' },
   ];
 
   const sidebar = document.getElementById('sidebar');

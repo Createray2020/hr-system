@@ -8,6 +8,7 @@
     { "source": "/attendance",           "destination": "/public/attendance.html" },
     { "source": "/employees",            "destination": "/public/employees.html" },
     { "source": "/salary",               "destination": "/public/salary.html" },
+    { "source": "/api/departments",       "destination": "/api/departments" },
     { "source": "/((?!api/).*)",         "destination": "/public/$1" }
   ],
   "headers": [

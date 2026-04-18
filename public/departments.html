@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>部門管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .dept-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-bottom:28px}
+  .dept-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:0;overflow:hidden;transition:all .2s}
+  .dept-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+  .dept-card-bar{height:4px;width:100%}
+  .dept-card-body{padding:20px}
+  .dept-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .dept-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+  .dept-card-actions{display:flex;gap:6px;opacity:0;transition:opacity .2s}
+  .dept-card:hover .dept-card-actions{opacity:1}
+  .dept-name{font-size:17px;font-weight:700;margin-bottom:4px}
+  .dept-desc{font-size:12px;color:var(--text-dim);margin-bottom:16px;min-height:18px}
+  .dept-stats{display:flex;gap:20px}
+  .dept-stat{text-align:center}
+  .dept-stat-val{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;line-height:1}
+  .dept-stat-label{font-size:10px;color:var(--text-dim);margin-top:3px;text-transform:uppercase;letter-spacing:.5px}
+  .dept-manager{display:flex;align-items:center;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--text-dim)}
+  .dept-manager .avatar-xs{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--purple));display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+
+  /* 顏色選擇器 */
+  .color-picker{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .color-swatch{width:28px;height:28px;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:all .15s;flex-shrink:0}
+  .color-swatch.selected{border-color:#fff;transform:scale(1.15);box-shadow:0 0 0 2px rgba(255,255,255,.3)}
+
+  .empty-state{text-align:center;padding:60px 20px;color:var(--text-dim)}
+  .empty-state .icon{font-size:40px;margin-bottom:12px}
+</style>
+</head>
+<body data-page="departments">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">部門管理</div>
+        <div class="page-sub">管理公司組織架構與部門人員配置</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" onclick="openAddModal()">＋ 新增部門</button>
+      </div>
+    </div>
+
+    <!-- 統計卡 -->
+    <div class="stats-row stats-row-3" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-card blue">
+        <div class="stat-label">部門總數</div>
+        <div class="stat-value" id="st-total">—</div>
+        <div class="stat-hint">個部門</div>
+      </div>
+      <div class="stat-card green">
+        <div class="stat-label">在職總人數</div>
+        <div class="stat-value" id="st-emps">—</div>
+        <div class="stat-hint">名員工</div>
+      </div>
+      <div class="stat-card orange">
+        <div class="stat-label">平均人數</div>
+        <div class="stat-value" id="st-avg">—</div>
+        <div class="stat-hint">人 / 部門</div>
+      </div>
+    </div>
+
+    <!-- 部門卡片 -->
+    <div class="dept-grid" id="dept-grid"></div>
+    <div id="dept-empty" class="empty-state" style="display:none">
+      <div class="icon">🏢</div>
+      <div>尚無任何部門</div>
+    </div>
+  </main>
+</div>
+
+<!-- 新增 / 編輯部門 Modal -->
+<div class="modal-bg" id="dept-modal">
+  <div class="modal">
+    <div class="modal-title" id="dept-modal-title">🏢 新增部門</div>
+
+    <div class="form-row">
+      <label class="form-label">部門名稱 *</label>
+      <input class="form-input" id="f-name" placeholder="例：研發部">
+    </div>
+    <div class="form-row">
+      <label class="form-label">部門描述</label>
+      <input class="form-input" id="f-desc" placeholder="選填，簡短說明部門職能">
+    </div>
+    <div class="form-row">
+      <label class="form-label">部門主管</label>
+      <select class="form-select" id="f-manager">
+        <option value="">— 未指定 —</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="form-label">代表顏色</label>
+      <div class="color-picker" id="color-picker">
+        <div class="color-swatch selected" data-color="#5B8DEF" style="background:#5B8DEF"></div>
+        <div class="color-swatch" data-color="#4ADE80" style="background:#4ADE80"></div>
+        <div class="color-swatch" data-color="#FB923C" style="background:#FB923C"></div>
+        <div class="color-swatch" data-color="#F87171" style="background:#F87171"></div>
+        <div class="color-swatch" data-color="#C084FC" style="background:#C084FC"></div>
+        <div class="color-swatch" data-color="#22D3EE" style="background:#22D3EE"></div>
+        <div class="color-swatch" data-color="#FCD34D" style="background:#FCD34D"></div>
+        <div class="color-swatch" data-color="#7FBBFF" style="background:#7FBBFF"></div>
+        <div class="color-swatch" data-color="#F472B6" style="background:#F472B6"></div>
+        <div class="color-swatch" data-color="#A78BFA" style="background:#A78BFA"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('dept-modal')">取消</button>
+      <button class="btn btn-primary" onclick="saveDept()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/layout.js"></script>
+<script>
+let allDepts = [];
+let allManagers = [];
+let editingId = null;
+let selectedColor = '#5B8DEF';
+
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 600));
+  try {
+    await Promise.all([loadDepts(), loadManagers()]);
+  } catch(e) { toast('載入失敗：' + e.message, 'error'); }
+};
+
+async function loadDepts() {
+  allDepts = await api('/api/departments');
+  updateStats();
+  renderDepts();
+}
+
+async function loadManagers() {
+  const emps = await api('/api/employees?status=active');
+  allManagers = emps.filter(e => ['manager','hr','admin'].includes(e.role));
+}
+
+function updateStats() {
+  const totalEmps = allDepts.reduce((s, d) => s + (d.emp_count || 0), 0);
+  const avg = allDepts.length ? (totalEmps / allDepts.length).toFixed(1) : 0;
+  document.getElementById('st-total').textContent = allDepts.length;
+  document.getElementById('st-emps').textContent  = totalEmps;
+  document.getElementById('st-avg').textContent   = avg;
+}
+
+function renderDepts() {
+  const grid  = document.getElementById('dept-grid');
+  const empty = document.getElementById('dept-empty');
+  if (!allDepts.length) { grid.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  grid.innerHTML = allDepts.map(d => {
+    const color = d.color || '#5B8DEF';
+    const initials = d.name.slice(0, 2);
+    return `
+    <div class="dept-card">
+      <div class="dept-card-bar" style="background:${color}"></div>
+      <div class="dept-card-body">
+        <div class="dept-card-top">
+          <div class="dept-icon" style="background:${color}22;color:${color}">${initials}</div>
+          <div class="dept-card-actions">
+            <button class="btn btn-ghost btn-sm" onclick="openEditModal('${d.id}')">編輯</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteDept('${d.id}','${escHtml(d.name)}')">刪除</button>
+          </div>
+        </div>
+        <div class="dept-name">${escHtml(d.name)}</div>
+        <div class="dept-desc">${escHtml(d.description || '')}</div>
+        <div class="dept-stats">
+          <div class="dept-stat">
+            <div class="dept-stat-val" style="color:${color}">${d.emp_count || 0}</div>
+            <div class="dept-stat-label">在職人數</div>
+          </div>
+        </div>
+        ${d.manager_name ? `
+        <div class="dept-manager">
+          <div class="avatar-xs">${d.manager_name[0]}</div>
+          <span>主管：${escHtml(d.manager_name)}</span>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function openAddModal() {
+  editingId = null;
+  document.getElementById('dept-modal-title').textContent = '🏢 新增部門';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-desc').value = '';
+  document.getElementById('f-manager').value = '';
+  fillManagerSelect(null);
+  setColor('#5B8DEF');
+  document.getElementById('dept-modal').classList.add('open');
+}
+
+function openEditModal(id) {
+  const d = allDepts.find(x => x.id === id);
+  if (!d) return;
+  editingId = id;
+  document.getElementById('dept-modal-title').textContent = `✏️ 編輯部門：${d.name}`;
+  document.getElementById('f-name').value = d.name || '';
+  document.getElementById('f-desc').value = d.description || '';
+  fillManagerSelect(d.manager_id);
+  setColor(d.color || '#5B8DEF');
+  document.getElementById('dept-modal').classList.add('open');
+}
+
+function fillManagerSelect(currentManagerId) {
+  const sel = document.getElementById('f-manager');
+  sel.innerHTML = '<option value="">— 未指定 —</option>' +
+    allManagers.map(e =>
+      `<option value="${e.id}" ${e.id === currentManagerId ? 'selected' : ''}>${escHtml(e.name)} (${e.position})</option>`
+    ).join('');
+}
+
+function setColor(color) {
+  selectedColor = color;
+  document.querySelectorAll('#color-picker .color-swatch').forEach(el => {
+    el.classList.toggle('selected', el.dataset.color === color);
+  });
+}
+
+// 顏色選擇器點擊
+document.getElementById('color-picker').addEventListener('click', e => {
+  const swatch = e.target.closest('.color-swatch');
+  if (swatch) setColor(swatch.dataset.color);
+});
+
+async function saveDept() {
+  const name = document.getElementById('f-name').value.trim();
+  if (!name) { toast('請輸入部門名稱', 'error'); return; }
+  const payload = {
+    name,
+    description: document.getElementById('f-desc').value.trim(),
+    color:       selectedColor,
+    manager_id:  document.getElementById('f-manager').value || null,
+  };
+  try {
+    if (editingId) {
+      await api(`/api/departments?id=${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      toast('✅ 部門已更新', 'success');
+    } else {
+      await api('/api/departments', { method: 'POST', body: JSON.stringify(payload) });
+      toast('✅ 部門已新增', 'success');
+    }
+    closeModal('dept-modal');
+    await loadDepts();
+  } catch(e) { toast('儲存失敗：' + e.message, 'error'); }
+}
+
+async function deleteDept(id, name) {
+  if (!confirm(`確定要刪除「${name}」部門？\n此操作無法復原。`)) return;
+  try {
+    await api(`/api/departments?id=${id}`, { method: 'DELETE' });
+    toast('已刪除部門', 'success');
+    await loadDepts();
+  } catch(e) { toast('刪除失敗：' + e.message, 'error'); }
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+</body>
+</html>
