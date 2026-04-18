@@ -37,6 +37,12 @@
   .check-row input[type=checkbox]{width:16px;height:16px;cursor:pointer}
   .check-row label{font-size:13px;cursor:pointer}
   .seniority-badge{display:inline-block;padding:3px 10px;background:rgba(91,141,239,.12);color:var(--accent2);border-radius:20px;font-size:12px;font-weight:500;font-family:'DM Mono',monospace}
+  .emp-type-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;letter-spacing:.3px}
+  .emp-type-full{background:rgba(91,141,239,.15);color:#7EB3FF;border:1px solid rgba(91,141,239,.3)}
+  .emp-type-part{background:rgba(255,160,80,.15);color:#FFA050;border:1px solid rgba(255,160,80,.3)}
+  .radio-row{display:flex;align-items:center;gap:16px;padding-top:6px}
+  .radio-row label{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+  .radio-row input[type=radio]{cursor:pointer}
 </style>
 </head>
 <body data-page="employees">
@@ -111,7 +117,7 @@
       <div class="detail-section-title">基本資料</div>
       <div class="detail-grid">
         <div class="form-row"><label class="form-label">姓名 *</label><input class="form-input" id="f-name"></div>
-        <div class="form-row"><label class="form-label">員工編號</label><input class="form-input" id="f-emp-no" placeholder="自動產生（EMP-001）"></div>
+        <div class="form-row"><label class="form-label">員工編號</label><input class="form-input readonly-field" id="f-emp-no" placeholder="選雇用類型+入職日後自動產生" readonly></div>
         <div class="form-row"><label class="form-label">電子郵件</label><input class="form-input" id="f-email" type="email"></div>
         <div class="form-row"><label class="form-label">電話</label><input class="form-input" id="f-phone"></div>
         <div class="form-row"><label class="form-label">身分證字號</label><input class="form-input" id="f-id-num"></div>
@@ -126,6 +132,12 @@
     <div class="detail-section">
       <div class="detail-section-title">職務資訊</div>
       <div class="detail-grid">
+        <div class="form-row" style="grid-column:span 2"><label class="form-label">雇用類型 *</label>
+          <div class="radio-row">
+            <label><input type="radio" name="f-emp-type" id="f-type-full" value="full_time" checked onchange="onEmpTypeOrHireChange()"> 正職（full_time）</label>
+            <label><input type="radio" name="f-emp-type" id="f-type-part" value="part_time" onchange="onEmpTypeOrHireChange()"> 兼職（part_time）</label>
+          </div>
+        </div>
         <div class="form-row"><label class="form-label">部門 *</label>
           <select class="form-select" id="f-dept">
             <option value="研發部">研發部</option><option value="行銷部">行銷部</option>
@@ -158,7 +170,7 @@
           <label for="f-is-manager">擔任主管職</label>
           <span id="mgr-note" style="font-size:11px;color:var(--text-dim);margin-left:4px"></span>
         </div>
-        <div class="form-row"><label class="form-label">到職日</label><input class="form-input" id="f-hire" type="date"></div>
+        <div class="form-row"><label class="form-label">到職日</label><input class="form-input" id="f-hire" type="date" oninput="onEmpTypeOrHireChange(); document.getElementById('f-seniority').textContent=calcSeniority(this.value)"></div>
         <div class="form-row"><label class="form-label">離職日期</label><input class="form-input" id="f-resign-date" type="date"></div>
         <div class="form-row"><label class="form-label">狀態</label>
           <select class="form-select" id="f-status">
@@ -299,7 +311,9 @@ function renderCards() {
         <div class="avatar-lg">${e.avatar||e.name[0]}</div>
         <div>
           <div class="emp-card-name">${e.name}</div>
-          <div class="emp-card-pos">${e.dept} · ${e.position}</div>
+          <div class="emp-card-pos">${e.dept} · ${e.position}
+            <span class="emp-type-badge ${e.employment_type==='part_time'?'emp-type-part':'emp-type-full'}" style="margin-left:4px">${e.employment_type==='part_time'?'兼職':'正職'}</span>
+          </div>
         </div>
       </div>
       <div class="emp-card-info">
@@ -325,7 +339,10 @@ function renderTable() {
       <td style="font-size:12px;color:var(--text-dim)">${e.email||'—'}</td>
       <td style="font-family:'DM Mono',monospace;font-size:12px">${e.hire_date||'—'}</td>
       <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--accent2)">${total?'$'+total.toLocaleString():'—'}</td>
-      <td><span class="badge badge-${e.status}"><span class="badge-dot badge-dot-${e.status}"></span>${e.status==='active'?'在職':e.status==='resigned'?'已離職':'暫停'}</span></td>
+      <td>
+        <span class="badge badge-${e.status}"><span class="badge-dot badge-dot-${e.status}"></span>${e.status==='active'?'在職':e.status==='resigned'?'已離職':'暫停'}</span>
+        <span class="emp-type-badge ${e.employment_type==='part_time'?'emp-type-part':'emp-type-full'}" style="margin-left:4px">${e.employment_type==='part_time'?'兼職':'正職'}</span>
+      </td>
       <td><div class="action-btns">
         <button class="btn btn-ghost btn-sm" onclick="openEditModal('${e.id}')">編輯</button>
       </div></td>
@@ -348,6 +365,47 @@ function setView(v, el) {
   document.getElementById('card-view').style.display  = v==='card'  ? '' : 'none';
   document.getElementById('table-view').style.display = v==='table' ? '' : 'none';
   renderList();
+}
+
+/* ── Employment type + emp_no auto-generation ── */
+function generateEmpNo(employmentType, hireDate) {
+  if (!hireDate) return '';
+  const type = employmentType === 'part_time' ? '02' : '01';
+  const d  = new Date(hireDate);
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return type + yy + mm + dd;
+}
+
+function getSelectedEmpType() {
+  return document.getElementById('f-type-part').checked ? 'part_time' : 'full_time';
+}
+
+function onEmpTypeOrHireChange() {
+  // Only auto-generate in add mode (editingId === null)
+  if (editingId !== null) return;
+  const hireDate = document.getElementById('f-hire').value;
+  const empType  = getSelectedEmpType();
+  const base = generateEmpNo(empType, hireDate);
+  if (!base) { document.getElementById('f-emp-no').value = ''; return; }
+
+  // Check for duplicate among existing employees and append A/B/C suffix
+  const existing = allEmployees
+    .map(e => e.emp_no || '')
+    .filter(n => n === base || n.startsWith(base) && n.length === base.length + 1);
+
+  if (!existing.includes(base)) {
+    document.getElementById('f-emp-no').value = base;
+  } else {
+    // Find next available suffix A-Z
+    let suffix = '';
+    for (let i = 0; i < 26; i++) {
+      const candidate = base + String.fromCharCode(65 + i);
+      if (!existing.includes(candidate)) { suffix = String.fromCharCode(65 + i); break; }
+    }
+    document.getElementById('f-emp-no').value = base + suffix;
+  }
 }
 
 /* ── Grade / Level UI helpers ── */
@@ -416,8 +474,9 @@ function openAddModal() {
   document.getElementById('f-dept').value   = '研發部';
   document.getElementById('f-role').value   = 'employee';
   document.getElementById('f-status').value = 'active';
-  document.getElementById('f-salary') && (document.getElementById('f-salary').value = '');
+  document.getElementById('f-type-full').checked = true;
   document.getElementById('f-hire').value   = new Date().toISOString().split('T')[0];
+  onEmpTypeOrHireChange(); // auto-generate emp_no from today's date
   document.getElementById('f-grade').value       = '';
   document.getElementById('f-grade-level').innerHTML = '<option value="">— 先選職等 —</option>';
   document.getElementById('f-is-manager').checked   = false;
@@ -436,6 +495,10 @@ function openEditModal(id) {
 
   document.getElementById('f-name').value        = e.name        || '';
   document.getElementById('f-emp-no').value      = e.emp_no      || '';
+  // Employment type radios
+  const isPart = e.employment_type === 'part_time';
+  document.getElementById('f-type-full').checked = !isPart;
+  document.getElementById('f-type-part').checked =  isPart;
   document.getElementById('f-email').value       = e.email       || '';
   document.getElementById('f-phone').value       = e.phone       || '';
   document.getElementById('f-id-num').value      = e.id_number   || '';
@@ -474,8 +537,9 @@ function resetSalaryDisplay() {
 /* ── Save ── */
 async function saveEmployee() {
   const payload = {
-    name:         document.getElementById('f-name').value.trim(),
-    emp_no:       document.getElementById('f-emp-no').value.trim() || null,
+    name:            document.getElementById('f-name').value.trim(),
+    emp_no:          document.getElementById('f-emp-no').value.trim() || null,
+    employment_type: getSelectedEmpType(),
     email:        document.getElementById('f-email').value.trim()  || null,
     phone:        document.getElementById('f-phone').value.trim()  || null,
     id_number:    document.getElementById('f-id-num').value.trim() || null,

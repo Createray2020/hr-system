@@ -23,21 +23,32 @@ export default async function handler(req, res) {
     const body = { ...req.body };
     const id = 'E' + Date.now();
 
-    // ── 自動產生員工編號（若未傳入）EMP-001, EMP-002... ──
-    if (!body.emp_no) {
+    // ── 自動產生員工編號（若未傳入）格式：01YYMMDD / 02YYMMDD，重複加 A/B/C ──
+    if (!body.emp_no && body.hire_date) {
+      const empType = body.employment_type === 'part_time' ? '02' : '01';
+      const d  = new Date(body.hire_date);
+      const yy = String(d.getFullYear()).slice(-2);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const base = empType + yy + mm + dd;
+
+      // 查詢是否已有相同前綴的編號
       const { data: existing } = await supabase
         .from('employees')
         .select('emp_no')
-        .like('emp_no', 'EMP-%')
-        .order('emp_no', { ascending: false })
-        .limit(1);
-      let nextNum = 1;
-      if (existing && existing.length > 0) {
-        const last = existing[0].emp_no; // e.g. "EMP-042"
-        const parsed = parseInt(last.replace('EMP-', ''), 10);
-        if (!isNaN(parsed)) nextNum = parsed + 1;
+        .like('emp_no', base + '%');
+      const taken = new Set((existing || []).map(e => e.emp_no));
+
+      if (!taken.has(base)) {
+        body.emp_no = base;
+      } else {
+        let suffix = '';
+        for (let i = 0; i < 26; i++) {
+          const candidate = base + String.fromCharCode(65 + i); // A, B, C...
+          if (!taken.has(candidate)) { suffix = String.fromCharCode(65 + i); break; }
+        }
+        body.emp_no = base + suffix;
       }
-      body.emp_no = 'EMP-' + String(nextNum).padStart(3, '0');
     }
 
     const { error } = await supabase.from('employees').insert([{ id, ...body }]);
