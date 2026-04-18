@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
   // 取得所有在職員工
   const { data: emps, error: empErr } = await supabase
-    .from('employees').select('id, base_salary').eq('status', 'active');
+    .from('employees').select('id, base_salary, extra_allowance').eq('status', 'active');
   if (empErr) return res.status(500).json({ error: empErr.message });
 
   // 查詢本月出勤以計算加班費（每小時加班費 = 底薪/240 * 1.33）
@@ -51,18 +51,20 @@ export default async function handler(req, res) {
     const healthIns    = Math.round(insBase * HEALTH_INS_RATE * 0.3);
     const grossEst     = base + otPay;
     const tax          = grossEst > 88501 ? Math.round((grossEst - 88501) * TAX_RATE) : 0;
-    const allowance    = 2000; // 固定交通津貼
+    const allowance      = 2000; // 固定交通津貼
+    const extraAllowance = parseFloat(emp.extra_allowance) || 0;
 
     records.push({
-      id:               `S${emp.id}${year}${String(month).padStart(2,'0')}`,
-      employee_id:      emp.id,
-      year:             parseInt(year),
-      month:            parseInt(month),
-      base_salary:      base,
-      overtime_pay:     otPay,
-      bonus:            0,
+      id:                  `S${emp.id}${year}${String(month).padStart(2,'0')}`,
+      employee_id:         emp.id,
+      year:                parseInt(year),
+      month:               parseInt(month),
+      base_salary:         base,
+      overtime_pay:        otPay,
+      bonus:               0,
       allowance,
-      deduct_absence:   deductAbsent,
+      extra_allowance:     extraAllowance,
+      deduct_absence:      deductAbsent,
       deduct_labor_ins: laborIns,
       deduct_health_ins:healthIns,
       deduct_tax:       tax,

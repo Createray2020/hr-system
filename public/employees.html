@@ -208,6 +208,18 @@
           <div class="sal-val" id="disp-total">—</div>
         </div>
       </div>
+      <!-- 額外加給（可編輯） -->
+      <div class="detail-grid" style="margin-top:12px">
+        <div class="form-row">
+          <label class="form-label">額外加給</label>
+          <input class="form-input" type="number" id="f-extra-allow" min="0" placeholder="0"
+                 oninput="onExtraAllowChange()">
+        </div>
+        <div class="form-row">
+          <label class="form-label">加給說明</label>
+          <input class="form-input" id="f-extra-allow-note" placeholder="例：交通補貼、技術加給">
+        </div>
+      </div>
     </div>
 
     <hr class="form-divider">
@@ -362,10 +374,25 @@ function renderTable() {
 
 function calcTotal(e) {
   const base = 30000;
-  const ga   = Number(e.grade_allowance  || 0);
-  const ab   = Number(e.attendance_bonus || 0);
-  const ma   = Number(e.manager_allowance|| 0);
-  return base + ga + ab + ma;
+  const ga   = Number(e.grade_allowance   || 0);
+  const ab   = Number(e.attendance_bonus  || 0);
+  const ma   = Number(e.manager_allowance || 0);
+  const ea   = Number(e.extra_allowance   || 0);
+  return base + ga + ab + ma + ea;
+}
+
+function onExtraAllowChange() {
+  // Recompute the displayed total when extra_allowance input changes
+  const row    = currentGradeRow();
+  const base   = 30000;
+  const ga     = row?.grade_allowance   || 0;
+  const ab     = row?.attendance_bonus  || 0;
+  const isMgr  = document.getElementById('f-is-manager').checked;
+  const canMgr = row ? !!row.can_be_manager : false;
+  const ma     = (isMgr && canMgr) ? (row?.manager_allowance || 0) : 0;
+  const ea     = parseFloat(document.getElementById('f-extra-allow').value) || 0;
+  const total  = base + ga + ab + ma + ea;
+  document.getElementById('disp-total').textContent = '$' + total.toLocaleString();
 }
 
 function setView(v, el) {
@@ -501,6 +528,8 @@ function openAddModal() {
   document.getElementById('f-is-manager').disabled  = true;
   document.getElementById('f-seniority').textContent = '—';
   document.getElementById('btn-resign').style.display = 'none';
+  document.getElementById('f-extra-allow').value      = '';
+  document.getElementById('f-extra-allow-note').value = '';
   resetSalaryDisplay();
   document.getElementById('emp-modal').classList.add('open');
 }
@@ -536,6 +565,10 @@ function openEditModal(id) {
   if (e.grade_level) document.getElementById('f-grade-level').value = e.grade_level;
   document.getElementById('f-is-manager').checked = !!e.is_manager;
   onGradeLevelChange(); // update display
+
+  // Extra allowance
+  document.getElementById('f-extra-allow').value      = e.extra_allowance      || '';
+  document.getElementById('f-extra-allow-note').value = e.extra_allowance_note || '';
 
   // Seniority
   document.getElementById('f-seniority').textContent = calcSeniority(e.hire_date);
@@ -577,6 +610,8 @@ async function saveEmployee() {
       return (document.getElementById('f-is-manager').checked && row?.can_be_manager)
         ? (row?.manager_allowance ?? 0) : 0;
     })(),
+    extra_allowance:      parseFloat(document.getElementById('f-extra-allow').value) || 0,
+    extra_allowance_note: document.getElementById('f-extra-allow-note').value.trim() || null,
     hire_date:    document.getElementById('f-hire').value          || null,
     resign_date:  document.getElementById('f-resign-date').value   || null,
     status:       document.getElementById('f-status').value,

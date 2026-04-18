@@ -102,6 +102,7 @@
         <div class="salary-line"><span>加班費</span><span class="sal-pos" id="sal-ot">—</span></div>
         <div class="salary-line"><span>獎金</span><span class="sal-pos" id="sal-bonus">—</span></div>
         <div class="salary-line"><span>津貼</span><span class="sal-pos" id="sal-allow">—</span></div>
+        <div class="salary-line"><span>額外加給</span><span class="sal-pos" id="sal-extra-allow">—</span></div>
         <div class="salary-line total"><span>應發合計</span><span class="sal-pos" id="sal-gross">—</span></div>
       </div>
       <div class="salary-col">
@@ -122,6 +123,8 @@
         <div class="form-row"><label class="form-label">加班費</label><input class="form-input" type="number" id="e-ot" min="0"></div>
         <div class="form-row"><label class="form-label">獎金</label><input class="form-input" type="number" id="e-bonus" min="0"></div>
         <div class="form-row"><label class="form-label">津貼</label><input class="form-input" type="number" id="e-allow" min="0"></div>
+        <div class="form-row"><label class="form-label">額外加給</label><input class="form-input" type="number" id="e-extra-allow" min="0"></div>
+        <div class="form-row" style="grid-column:span 2"><label class="form-label">加給說明</label><input class="form-input" id="e-extra-allow-note" placeholder="例：交通補貼、技術加給"></div>
         <div class="form-row"><label class="form-label">缺曠扣款</label><input class="form-input" type="number" id="e-absence" min="0"></div>
         <div class="form-row"><label class="form-label">勞保費</label><input class="form-input" type="number" id="e-labor" min="0"></div>
         <div class="form-row"><label class="form-label">健保費</label><input class="form-input" type="number" id="e-health" min="0"></div>
@@ -254,6 +257,7 @@ function openSalaryModal(id) {
   document.getElementById('sal-ot').textContent          = fmt(r.overtime_pay);
   document.getElementById('sal-bonus').textContent       = fmt(r.bonus);
   document.getElementById('sal-allow').textContent       = fmt(r.allowance);
+  document.getElementById('sal-extra-allow').textContent = r.extra_allowance > 0 ? fmt(r.extra_allowance) : '—';
   document.getElementById('sal-gross').textContent       = fmt(r.gross_salary);
   document.getElementById('sal-absence').textContent     = fmt(r.deduct_absence);
   document.getElementById('sal-labor').textContent       = fmt(r.deduct_labor_ins);
@@ -262,10 +266,12 @@ function openSalaryModal(id) {
   document.getElementById('sal-deduct-total').textContent= fmt(totalDeduct);
 
   // Edit fields
-  document.getElementById('e-ot').value     = r.overtime_pay||0;
-  document.getElementById('e-bonus').value  = r.bonus||0;
-  document.getElementById('e-allow').value  = r.allowance||0;
-  document.getElementById('e-absence').value= r.deduct_absence||0;
+  document.getElementById('e-ot').value              = r.overtime_pay||0;
+  document.getElementById('e-bonus').value           = r.bonus||0;
+  document.getElementById('e-allow').value           = r.allowance||0;
+  document.getElementById('e-extra-allow').value     = r.extra_allowance||0;
+  document.getElementById('e-extra-allow-note').value= r.extra_allowance_note||'';
+  document.getElementById('e-absence').value         = r.deduct_absence||0;
   document.getElementById('e-labor').value  = r.deduct_labor_ins||0;
   document.getElementById('e-health').value = r.deduct_health_ins||0;
   document.getElementById('e-tax').value    = r.deduct_tax||0;
@@ -282,10 +288,12 @@ function openSalaryModal(id) {
 
 async function saveSalary() {
   const payload = {
-    overtime_pay:      parseFloat(document.getElementById('e-ot').value)||0,
-    bonus:             parseFloat(document.getElementById('e-bonus').value)||0,
-    allowance:         parseFloat(document.getElementById('e-allow').value)||0,
-    deduct_absence:    parseFloat(document.getElementById('e-absence').value)||0,
+    overtime_pay:        parseFloat(document.getElementById('e-ot').value)||0,
+    bonus:               parseFloat(document.getElementById('e-bonus').value)||0,
+    allowance:           parseFloat(document.getElementById('e-allow').value)||0,
+    extra_allowance:     parseFloat(document.getElementById('e-extra-allow').value)||0,
+    extra_allowance_note:document.getElementById('e-extra-allow-note').value.trim()||null,
+    deduct_absence:      parseFloat(document.getElementById('e-absence').value)||0,
     deduct_labor_ins:  parseFloat(document.getElementById('e-labor').value)||0,
     deduct_health_ins: parseFloat(document.getElementById('e-health').value)||0,
     deduct_tax:        parseFloat(document.getElementById('e-tax').value)||0,
