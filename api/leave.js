@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PUT') {
-    const caller = await requireRole(req, res, ['hr', 'admin']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'manager']);
     if (!caller) return;
     const { status, handler_note } = req.body;
     if (!['approved','rejected'].includes(status))
