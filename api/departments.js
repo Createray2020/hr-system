@@ -4,11 +4,15 @@
 //   ALTER TABLE departments ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
 //   ALTER TABLE departments ADD COLUMN IF NOT EXISTS color TEXT DEFAULT '#5B8DEF';
 import { supabase } from '../lib/supabase.js';
-import { requireRole } from '../lib/auth.js';
+import { requireRoleOrPass } from '../lib/auth.js';
+
+const WRITE_ROLES  = ['hr', 'ceo', 'chairman', 'manager', 'admin'];
+const DELETE_ROLES = ['hr', 'ceo', 'chairman', 'manager', 'admin'];
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // GET — 不需要權限驗證
   if (req.method === 'GET') {
     try {
       // 步驟一：查詢所有部門
@@ -42,7 +46,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo', 'chairman', 'manager']);
+    const caller = await requireRoleOrPass(req, res, WRITE_ROLES);
     if (!caller) return;
     const { name, description, color, manager_id } = req.body;
     if (!name) return res.status(400).json({ error: '缺少部門名稱' });
@@ -59,7 +63,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PUT') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo', 'chairman', 'manager']);
+    const caller = await requireRoleOrPass(req, res, WRITE_ROLES);
     if (!caller) return;
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: '缺少 id' });
@@ -72,7 +76,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo', 'chairman']);
+    const caller = await requireRoleOrPass(req, res, DELETE_ROLES);
     if (!caller) return;
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: '缺少 id' });
