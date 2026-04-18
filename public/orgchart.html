@@ -7,89 +7,161 @@
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-/* ── Org scroll wrapper ── */
+/* ────────────────────────────────────────────
+   Org-chart scroll shell
+──────────────────────────────────────────── */
 .org-scroll {
-  overflow-x: auto; overflow-y: visible;
-  padding: 32px 40px 48px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); min-height: 200px;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 40px 48px 56px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 220px;
 }
+
+/* Root container — direct children are root tree-nodes (no connectors) */
 .org-root {
-  display: flex; flex-direction: row;
-  align-items: flex-start; justify-content: center;
-  gap: 0; min-width: max-content;
+  display: inline-flex;       /* shrink-wrap so centering works */
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 24px;
+  min-width: max-content;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-/* ── Each node: vertical stack (card → vline → kids-row) ── */
+/* ────────────────────────────────────────────
+   Core tree primitives
+──────────────────────────────────────────── */
+
+/* A node: its card stacked ABOVE its children (vertical axis) */
 .tree-node {
-  display: flex; flex-direction: column; align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-/* ── Vertical connector from card down to kids-row ── */
+/* Vertical connector: card → kids-row */
 .vline {
-  width: 1px; height: 24px;
-  background: var(--border); flex-shrink: 0;
+  width: 1px;
+  height: 28px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
-/* ── Row of children ── */
+/* Children row: siblings side-by-side (horizontal axis) */
 .kids-row {
-  display: flex; flex-direction: row;
+  display: flex;
+  flex-direction: row;
   align-items: flex-start;
 }
 
-/* ── Wrapper for each child node — carries connector lines ── */
+/* Per-child wrapper: carries the T-connector lines */
 .kid-wrap {
-  display: flex; flex-direction: column; align-items: center;
-  padding: 24px 12px 0; position: relative;
-}
-/* horizontal bar at the top of each kid-wrap */
-.kid-wrap::before {
-  content: ''; position: absolute; top: 0;
-  left: 0; right: 0; height: 1px;
-  background: var(--border);
-}
-.kid-wrap:first-child::before  { left: 50%; }
-.kid-wrap:last-child::before   { right: 50%; }
-.kid-wrap:only-child::before   { display: none; }
-/* vertical drop from horizontal bar to card */
-.kid-wrap::after {
-  content: ''; position: absolute; top: 0; left: 50%;
-  transform: translateX(-0.5px);
-  width: 1px; height: 24px; background: var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 12px 0;
+  position: relative;
 }
 
-/* ── Node card ── */
+/* Horizontal bar at the top — trimmed at ends */
+.kid-wrap::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: var(--border);
+}
+.kid-wrap:first-child::before { left:  50%; }   /* no bar to the left of first child  */
+.kid-wrap:last-child::before  { right: 50%; }   /* no bar to the right of last child  */
+.kid-wrap:only-child::before  { display: none; }/* single child: skip horizontal bar   */
+
+/* Vertical drop from horizontal bar down to child card */
+.kid-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-0.5px);
+  width: 1px; height: 28px;
+  background: var(--border);
+}
+
+/* ────────────────────────────────────────────
+   Node card
+──────────────────────────────────────────── */
 .node-card {
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: 10px; padding: 10px 12px;
-  display: flex; align-items: center; gap: 9px;
-  cursor: pointer; transition: all .2s;
-  width: 148px; box-sizing: border-box; position: relative;
+  width: 140px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 10px 14px;   /* bottom padding leaves room for toggle btn */
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  transition: border-color .2s, box-shadow .2s, transform .15s;
+  box-sizing: border-box;
   flex-shrink: 0;
+  position: relative;
 }
-.node-card:hover  { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
-.node-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91,141,239,.3); }
+.node-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.35);
+}
+.node-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(91,141,239,.3);
+}
+/* Top-tier (chairman / ceo) — wider + stronger border */
+.node-card.tier-top {
+  width: 160px;
+  border-width: 2px;
+}
+
 .node-avatar {
-  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  width: 30px; height: 30px;
+  border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700;
+  font-size: 12px; font-weight: 700;
 }
+.tier-top .node-avatar { width: 36px; height: 36px; font-size: 14px; }
+
 .node-info { flex: 1; min-width: 0; }
-.node-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.node-pos  { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.node-name {
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tier-top .node-name { font-size: 13px; }
+.node-pos {
+  font-size: 10px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin-top: 1px;
+}
 .node-badge {
   display: inline-block; font-size: 9px; padding: 1px 5px;
   border-radius: 4px; margin-top: 3px; font-weight: 500;
 }
-.node-toggle {
-  background: none; border: none; color: var(--text-dim);
-  cursor: pointer; font-size: 11px; padding: 0; flex-shrink: 0;
-  line-height: 1; transition: color .15s;
-}
-.node-toggle:hover { color: var(--text); }
 
-/* ── View toolbar ── */
-.view-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+/* Collapse/expand toggle — bottom-right of card */
+.node-toggle {
+  position: absolute; bottom: 4px; right: 5px;
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 10px; padding: 1px 4px;
+  line-height: 1; border-radius: 3px; transition: all .15s;
+}
+.node-toggle:hover { color: var(--text); background: rgba(255,255,255,.07); }
+
+/* ────────────────────────────────────────────
+   View toolbar
+──────────────────────────────────────────── */
+.view-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
 .view-seg {
   display: flex; background: var(--surface2);
   border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
@@ -102,16 +174,28 @@
 .view-seg button.active { background: var(--accent); color: #fff; }
 .toolbar-sep { flex: 1; }
 
-/* ── Department card view ── */
-.dept-oc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
-.dept-oc-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+/* ────────────────────────────────────────────
+   Department card view
+──────────────────────────────────────────── */
+.dept-oc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+.dept-oc-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
 .dept-oc-header {
   padding: 14px 18px; display: flex; align-items: center; gap: 10px;
   border-bottom: 1px solid var(--border);
 }
-.dept-oc-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.dept-oc-dot  { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .dept-oc-name { font-size: 15px; font-weight: 600; }
-.dept-oc-count { margin-left: auto; font-size: 11px; color: var(--text-dim); font-family: 'DM Mono', monospace; }
+.dept-oc-count {
+  margin-left: auto; font-size: 11px; color: var(--text-dim);
+  font-family: 'DM Mono', monospace;
+}
 .dept-oc-members { padding: 6px 10px 10px; }
 .dept-member-row {
   display: flex; align-items: center; gap: 9px;
@@ -131,7 +215,9 @@
   border: 1px solid rgba(91,141,239,.25); white-space: nowrap;
 }
 
-/* ── Right detail panel ── */
+/* ────────────────────────────────────────────
+   Right detail panel
+──────────────────────────────────────────── */
 .detail-panel {
   position: fixed; top: 0; right: 0; height: 100vh; width: 300px;
   background: var(--surface); border-left: 1px solid var(--border);
@@ -149,8 +235,14 @@
   padding: 18px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
 }
-.detail-hd-label { font-size: 11px; font-family: 'DM Mono', monospace; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); }
-.detail-close { background: none; border: none; color: var(--text-dim); font-size: 17px; cursor: pointer; padding: 4px 6px; border-radius: 6px; transition: all .2s; }
+.detail-hd-label {
+  font-size: 11px; font-family: 'DM Mono', monospace;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+}
+.detail-close {
+  background: none; border: none; color: var(--text-dim);
+  font-size: 17px; cursor: pointer; padding: 4px 6px; border-radius: 6px; transition: all .2s;
+}
 .detail-close:hover { background: var(--surface2); color: var(--text); }
 .detail-body { padding: 24px 20px; overflow-y: auto; flex: 1; }
 .detail-avatar-wrap { text-align: center; margin-bottom: 18px; }
@@ -168,10 +260,13 @@
 hr.dp { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .detail-row { display: flex; gap: 10px; margin-bottom: 14px; align-items: flex-start; }
 .detail-row-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; padding-top: 1px; }
-.detail-row-label { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; text-transform: uppercase; letter-spacing: .5px; }
+.detail-row-label {
+  font-size: 10px; color: var(--text-dim); margin-bottom: 2px;
+  text-transform: uppercase; letter-spacing: .5px;
+}
 .detail-row-val { font-size: 13px; }
 
-/* Loading / empty */
+/* Misc */
 .org-loading { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 13px; }
 </style>
 </head>
@@ -179,6 +274,7 @@ hr.dp { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 <div class="shell">
   <aside class="sidebar" id="sidebar"></aside>
   <main class="main">
+
     <div class="page-header">
       <div>
         <div class="page-title">組織圖</div>
@@ -190,7 +286,7 @@ hr.dp { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
     <div class="view-toolbar">
       <div class="view-seg">
         <button class="active" id="vb-tree" onclick="setView('tree',this)">🌲 樹狀圖</button>
-        <button id="vb-dept" onclick="setView('dept',this)">🏢 部門卡片</button>
+        <button id="vb-dept"               onclick="setView('dept',this)">🏢 部門卡片</button>
       </div>
       <div class="toolbar-sep"></div>
       <div id="tree-btns" style="display:flex;gap:6px">
@@ -214,6 +310,7 @@ hr.dp { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
         <div class="org-loading">載入中…</div>
       </div>
     </div>
+
   </main>
 </div>
 
@@ -236,12 +333,21 @@ function toast(msg, type='success') {
 </script>
 <script src="/js/layout.js"></script>
 <script>
+/* ──────────────────────────────────────────────────────
+   State & constants
+────────────────────────────────────────────────────── */
 let allEmployees = [];
 let allDepts     = [];
 let deptColorMap = {};
+
 const ROLE_PRIORITY = { chairman:0, ceo:1, admin:2, hr:2, manager:3, employee:4 };
 const ROLE_LABEL    = { chairman:'董事長', ceo:'執行長', manager:'主管', hr:'人資', admin:'管理員' };
+const TOP_ROLES     = new Set(['chairman', 'ceo']);
+const MID_ROLES     = new Set(['manager', 'hr', 'admin']);
 
+/* ──────────────────────────────────────────────────────
+   Init
+────────────────────────────────────────────────────── */
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
   try {
@@ -254,38 +360,89 @@ window.onload = async () => {
     renderTree();
     renderDeptCards();
   } catch(e) {
-    document.getElementById('org-tree').innerHTML = `<div class="org-loading">載入失敗：${esc(e.message)}</div>`;
+    document.getElementById('org-tree').innerHTML =
+      `<div class="org-loading">載入失敗：${esc(e.message)}</div>`;
     toast('載入失敗：' + e.message, 'error');
   }
 };
 
-/* ── Build tree from manager_id relationships ── */
+/* ──────────────────────────────────────────────────────
+   Tree builder
+   Priority:
+     1. Use manager_id if any real relationships exist
+     2. Fall back to synthetic role-based hierarchy:
+        chairman → ceo → managers/hr → employees (by dept)
+────────────────────────────────────────────────────── */
 function buildTree() {
+  // Deep-clone employees and attach empty children array
   const map = {};
   allEmployees.forEach(e => { map[e.id] = { ...e, children: [] }; });
-  const roots = [];
 
-  allEmployees.forEach(e => {
-    if (e.manager_id && map[e.manager_id]) {
-      map[e.manager_id].children.push(map[e.id]);
-    } else {
-      roots.push(map[e.id]);
-    }
+  // ── Try real manager_id relationships ──
+  const hasRelations = allEmployees.some(e => e.manager_id && map[e.manager_id]);
+
+  if (hasRelations) {
+    const roots = [];
+    allEmployees.forEach(e => {
+      if (e.manager_id && map[e.manager_id]) {
+        map[e.manager_id].children.push(map[e.id]);
+      } else {
+        roots.push(map[e.id]);
+      }
+    });
+    const sort = arr => arr.sort((a, b) => (ROLE_PRIORITY[a.role]||5) - (ROLE_PRIORITY[b.role]||5));
+    sort(roots);
+    Object.values(map).forEach(n => sort(n.children));
+    return roots;
+  }
+
+  // ── Synthetic hierarchy (no manager_id set in DB) ──
+  const byRoleSort = (a, b) => (ROLE_PRIORITY[a.role]||5) - (ROLE_PRIORITY[b.role]||5);
+
+  const tier0 = allEmployees.filter(e => e.role === 'chairman').sort(byRoleSort);  // 董事長
+  const tier1 = allEmployees.filter(e => e.role === 'ceo').sort(byRoleSort);        // 執行長
+  const tier2 = allEmployees.filter(e => MID_ROLES.has(e.role)).sort(byRoleSort);   // 主管層
+  const tier3 = allEmployees.filter(e => !TOP_ROLES.has(e.role) && !MID_ROLES.has(e.role)); // 員工
+
+  // tier3 → dept manager (or first tier2, or first tier1)
+  tier3.forEach(emp => {
+    const deptMgr = tier2.find(m => m.dept === emp.dept);
+    const parent  = deptMgr || tier2[0] || tier1[0] || tier0[0];
+    if (parent) map[parent.id].children.push(map[emp.id]);
   });
 
-  const byRole = arr => arr.sort((a, b) => (ROLE_PRIORITY[a.role]||5) - (ROLE_PRIORITY[b.role]||5));
-  byRole(roots);
-  Object.values(map).forEach(e => byRole(e.children));
-  return roots;
+  // tier2 → first ceo (or first chairman if no ceo)
+  const midParent = tier1[0] || tier0[0];
+  if (midParent) {
+    tier2.forEach(m => map[midParent.id].children.push(map[m.id]));
+  }
+
+  // tier1 (extra ceos after first) → first chairman
+  // tier1[0] already has tier2 as children; extra ceos go under chairman too
+  if (tier0.length > 0) {
+    tier1.forEach(c => map[tier0[0].id].children.push(map[c.id]));
+  }
+
+  // Determine root tier
+  const rootList = tier0.length > 0 ? tier0
+                 : tier1.length > 0 ? tier1
+                 : tier2.length > 0 ? tier2
+                 : allEmployees;
+
+  return rootList.map(e => map[e.id]);
 }
 
-/* ── Render one tree node (recursive) ── */
+/* ──────────────────────────────────────────────────────
+   Node HTML (recursive)
+────────────────────────────────────────────────────── */
 function nodeHTML(emp) {
   const color   = deptColorMap[emp.dept] || '#5B8DEF';
   const hasKids = emp.children && emp.children.length > 0;
   const badge   = ROLE_LABEL[emp.role];
+  const isTop   = TOP_ROLES.has(emp.role);
 
-  const childrenHTML = hasKids ? `
+  // children: each wrapped in .kid-wrap to get connector lines
+  const kidsHTML = hasKids ? `
     <div class="vline"></div>
     <div class="kids-row" id="ch-${emp.id}">
       ${emp.children.map(c => `<div class="kid-wrap">${nodeHTML(c)}</div>`).join('')}
@@ -293,8 +450,12 @@ function nodeHTML(emp) {
 
   return `
     <div class="tree-node" data-id="${emp.id}">
-      <div class="node-card" style="border-top:2px solid ${color}" onclick="openDetail('${emp.id}')">
-        <div class="node-avatar" style="background:${color}22;color:${color}">${esc(emp.avatar || emp.name[0])}</div>
+      <div class="node-card ${isTop ? 'tier-top' : ''}"
+           style="border-top: 3px solid ${color}"
+           onclick="openDetail('${emp.id}')">
+        <div class="node-avatar" style="background:${color}22;color:${color}">
+          ${esc(emp.avatar || emp.name[0])}
+        </div>
         <div class="node-info">
           <div class="node-name">${esc(emp.name)}</div>
           <div class="node-pos">${esc(emp.position || emp.dept || '')}</div>
@@ -302,58 +463,74 @@ function nodeHTML(emp) {
         </div>
         ${hasKids ? `<button class="node-toggle" onclick="toggleNode(event,'${emp.id}')">▾</button>` : ''}
       </div>
-      ${childrenHTML}
+      ${kidsHTML}
     </div>`;
 }
 
+/* ──────────────────────────────────────────────────────
+   Render tree
+────────────────────────────────────────────────────── */
 function renderTree() {
   const roots = buildTree();
-  const el = document.getElementById('org-tree');
-  if (!roots.length) { el.innerHTML = '<div class="org-loading">暫無員工資料</div>'; return; }
-  // Root nodes are wrapped in kid-wrap only if more than one root (for horizontal connectors)
+  const el    = document.getElementById('org-tree');
+
+  if (!roots.length) {
+    el.innerHTML = '<div class="org-loading">暫無員工資料</div>';
+    return;
+  }
+
   if (roots.length === 1) {
+    // Single root: render directly, centred in .org-root
     el.innerHTML = nodeHTML(roots[0]);
   } else {
-    el.innerHTML = roots.map(r => `<div class="kid-wrap" style="--no-hline:1">${nodeHTML(r)}</div>`).join('');
-    // Remove horizontal connector lines at root level (no parent to connect to)
-    el.querySelectorAll('.org-root > .kid-wrap').forEach(kw => {
-      kw.style.setProperty('--root', '1');
-    });
+    // Multiple roots: wrap in a row; no connector lines needed above them
+    // We use a plain flex row without .kid-wrap so no ::before/::after connectors fire
+    el.innerHTML = `<div style="display:flex;flex-direction:row;align-items:flex-start;gap:24px;justify-content:center;min-width:max-content">` +
+      roots.map(r => nodeHTML(r)).join('') +
+      `</div>`;
   }
 }
 
-/* ── Expand / Collapse ── */
+/* ──────────────────────────────────────────────────────
+   Expand / Collapse
+────────────────────────────────────────────────────── */
 function toggleNode(e, id) {
   e.stopPropagation();
-  const ch  = document.getElementById('ch-' + id);
-  const vl  = ch ? ch.previousElementSibling : null; // the .vline before kids-row
-  const btn = e.currentTarget;
-  if (!ch) return;
-  const hidden = ch.style.display === 'none';
-  ch.style.display = hidden ? '' : 'none';
+  const kidsRow = document.getElementById('ch-' + id);
+  const vl      = kidsRow && kidsRow.previousElementSibling; // .vline
+  const btn     = e.currentTarget;
+  if (!kidsRow) return;
+  const hidden = kidsRow.style.display === 'none';
+  kidsRow.style.display = hidden ? '' : 'none';
   if (vl && vl.classList.contains('vline')) vl.style.display = hidden ? '' : 'none';
-  btn.textContent  = hidden ? '▾' : '▸';
+  btn.textContent = hidden ? '▾' : '▸';
 }
+
 function expandAll() {
   document.querySelectorAll('.kids-row').forEach(el => { el.style.display = ''; });
-  document.querySelectorAll('.vline').forEach(el => { el.style.display = ''; });
+  document.querySelectorAll('.vline').forEach(el    => { el.style.display = ''; });
   document.querySelectorAll('.node-toggle').forEach(b => { b.textContent = '▾'; });
 }
 function collapseAll() {
   document.querySelectorAll('.kids-row').forEach(el => { el.style.display = 'none'; });
-  document.querySelectorAll('.vline').forEach(el => { el.style.display = 'none'; });
+  document.querySelectorAll('.vline').forEach(el    => { el.style.display = 'none'; });
   document.querySelectorAll('.node-toggle').forEach(b => { b.textContent = '▸'; });
 }
 
-/* ── Department card view ── */
+/* ──────────────────────────────────────────────────────
+   Department card view
+────────────────────────────────────────────────────── */
 function renderDeptCards() {
   const container = document.getElementById('dept-cards');
-  if (!allDepts.length) { container.innerHTML = '<div class="org-loading">暫無部門資料</div>'; return; }
-  const mgrRoles = new Set(['chairman','ceo','manager','hr','admin']);
+  if (!allDepts.length) {
+    container.innerHTML = '<div class="org-loading">暫無部門資料</div>';
+    return;
+  }
 
   container.innerHTML = allDepts.map(dept => {
     const color   = dept.color || '#5B8DEF';
-    const members = allEmployees.filter(e => e.dept === dept.name)
+    const members = allEmployees
+      .filter(e => e.dept === dept.name)
       .sort((a, b) => (ROLE_PRIORITY[a.role]||5) - (ROLE_PRIORITY[b.role]||5));
     return `
       <div class="dept-oc-card">
@@ -365,34 +542,45 @@ function renderDeptCards() {
         <div class="dept-oc-members">
           ${members.length ? members.map(m => `
             <div class="dept-member-row" onclick="openDetail('${m.id}')">
-              <div class="dept-member-av" style="background:${color}22;color:${color}">${esc(m.avatar || m.name[0])}</div>
+              <div class="dept-member-av" style="background:${color}22;color:${color}">
+                ${esc(m.avatar || m.name[0])}
+              </div>
               <div>
                 <div class="dept-member-name">${esc(m.name)}</div>
                 <div class="dept-member-pos">${esc(m.position)}</div>
               </div>
-              ${mgrRoles.has(m.role) ? `<span class="dept-mgr-badge">${ROLE_LABEL[m.role]||'主管'}</span>` : ''}
-            </div>`).join('') :
-            '<div style="padding:10px 8px;color:var(--text-dim);font-size:12px">暫無成員</div>'}
+              ${(TOP_ROLES.has(m.role)||MID_ROLES.has(m.role))
+                ? `<span class="dept-mgr-badge">${ROLE_LABEL[m.role]||'主管'}</span>` : ''}
+            </div>`).join('')
+          : '<div style="padding:10px 8px;color:var(--text-dim);font-size:12px">暫無成員</div>'}
         </div>
       </div>`;
   }).join('');
 }
 
-/* ── View toggle ── */
+/* ──────────────────────────────────────────────────────
+   View toggle
+────────────────────────────────────────────────────── */
 function setView(v, btn) {
   document.querySelectorAll('.view-seg button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('tree-view').style.display = v === 'tree' ? '' : 'none';
-  document.getElementById('dept-view').style.display  = v === 'dept' ? '' : 'none';
-  document.getElementById('tree-btns').style.display  = v === 'tree' ? 'flex' : 'none';
+  document.getElementById('dept-view').style.display = v === 'dept' ? '' : 'none';
+  document.getElementById('tree-btns').style.display = v === 'tree' ? 'flex' : 'none';
 }
 
-/* ── Detail panel ── */
+/* ──────────────────────────────────────────────────────
+   Detail panel
+────────────────────────────────────────────────────── */
+const ROLE_FULL = {
+  chairman:'董事長', ceo:'執行長', manager:'部門主管',
+  hr:'人資專員', admin:'管理員', employee:'員工',
+};
+
 function openDetail(empId) {
   const emp = allEmployees.find(e => e.id === empId);
   if (!emp) return;
   const color = deptColorMap[emp.dept] || '#5B8DEF';
-  const roleLabel = { chairman:'董事長', ceo:'執行長', manager:'部門主管', hr:'人資專員', admin:'管理員', employee:'員工' };
 
   document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
   const card = document.querySelector(`.tree-node[data-id="${empId}"] > .node-card`);
@@ -400,17 +588,21 @@ function openDetail(empId) {
 
   document.getElementById('detail-body').innerHTML = `
     <div class="detail-avatar-wrap">
-      <div class="detail-av-lg" style="background:${color}22;color:${color}">${esc(emp.avatar || emp.name[0])}</div>
+      <div class="detail-av-lg" style="background:${color}22;color:${color}">
+        ${esc(emp.avatar || emp.name[0])}
+      </div>
       <div class="detail-dname">${esc(emp.name)}</div>
       <div class="detail-dpos">${esc(emp.position)}</div>
-      <span class="detail-dept-chip" style="background:${color}22;color:${color}">${esc(emp.dept || '—')}</span>
+      <span class="detail-dept-chip" style="background:${color}22;color:${color}">
+        ${esc(emp.dept || '—')}
+      </span>
     </div>
     <hr class="dp">
-    ${dRow('👤','角色', roleLabel[emp.role] || emp.role || '—')}
+    ${dRow('👤','角色',   ROLE_FULL[emp.role] || emp.role || '—')}
     ${dRow('📧','電子郵件', emp.email || '—')}
-    ${dRow('📱','電話', emp.phone || '—')}
+    ${dRow('📱','電話',   emp.phone || '—')}
     ${dRow('📅','到職日', emp.hire_date || '—')}
-    ${emp.base_salary ? dRow('💰','底薪', '$' + Number(emp.base_salary).toLocaleString()) : ''}
+    ${emp.base_salary ? dRow('💰','底薪','$'+Number(emp.base_salary).toLocaleString()) : ''}
   `;
   document.getElementById('detail-panel').classList.add('open');
   document.getElementById('detail-overlay').classList.add('open');
@@ -419,7 +611,10 @@ function openDetail(empId) {
 function dRow(icon, label, value) {
   return `<div class="detail-row">
     <div class="detail-row-icon">${icon}</div>
-    <div><div class="detail-row-label">${label}</div><div class="detail-row-val">${esc(String(value))}</div></div>
+    <div>
+      <div class="detail-row-label">${label}</div>
+      <div class="detail-row-val">${esc(String(value))}</div>
+    </div>
   </div>`;
 }
 
@@ -430,7 +625,9 @@ function closeDetail() {
 }
 
 function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s||'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 </body>
