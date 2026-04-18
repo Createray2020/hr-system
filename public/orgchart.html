@@ -316,6 +316,12 @@ hr.dp { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
       </div>
     </div>
 
+    <!-- 設定說明提示 -->
+    <div style="font-size:12px;color:var(--text-dim);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 14px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
+      <span>ℹ️</span>
+      <span>組織圖依員工角色自動產生，請在員工資料中設定正確角色（董事長 chairman／執行長 ceo／主管 manager／人資 hr／員工 employee）</span>
+    </div>
+
     <!-- 樹狀圖 -->
     <div id="tree-view">
       <div class="org-scroll">
@@ -406,12 +412,29 @@ function cardHTML(emp) {
 }
 
 /* ════════════════════════════════════════════
+   PLACEHOLDER CARD — shown when a tier is empty
+════════════════════════════════════════════ */
+function placeholderCard(label) {
+  return `
+    <div class="node-card tier-top"
+         style="opacity:.45;border-style:dashed;cursor:default">
+      <div class="node-avatar"
+           style="background:rgba(255,255,255,.06);color:var(--text-dim)">?</div>
+      <div class="node-info">
+        <div class="node-name" style="color:var(--text-dim)">尚未設定此職位</div>
+        <div class="node-pos">${label}</div>
+      </div>
+    </div>`;
+}
+
+/* ════════════════════════════════════════════
    RENDER TREE
    Fixed 4-level hierarchy:
-     L1  chairman
-     L2  ceo
-     L3  manager / hr / admin  (one .org-branch per person)
-     L4  employee               (inside their manager's branch)
+     L1  chairman   (role='chairman')
+     L2  ceo        (role='ceo')
+     L3  manager/hr (role='manager' or 'hr'; admin also here)
+     L4  employee   (everything else)
+   If L1 or L2 has no one, a dashed placeholder is shown.
 ════════════════════════════════════════════ */
 function renderTree() {
   const el = document.getElementById('org-tree');
@@ -437,38 +460,31 @@ function renderTree() {
   const unassigned = [];
 
   employees.forEach(emp => {
-    // 1. real manager_id
     if (emp.manager_id && empsByMgr[emp.manager_id] !== undefined) {
-      empsByMgr[emp.manager_id].push(emp);
-      return;
+      empsByMgr[emp.manager_id].push(emp); return;
     }
-    // 2. same dept
     const deptMgr = managers.find(m => m.dept === emp.dept);
     if (deptMgr) { empsByMgr[deptMgr.id].push(emp); return; }
-    // 3. first manager
     if (managers.length > 0) { empsByMgr[managers[0].id].push(emp); return; }
-    // 4. no manager at all
     unassigned.push(emp);
   });
 
   let html = '';
 
-  /* ── Level 1: Chairman ── */
-  if (chairmen.length > 0) {
-    html += `<div class="org-level">${chairmen.map(cardHTML).join('')}</div>`;
-    html += `<div class="org-connector-v"></div>`;
-  }
+  /* ── Level 1: Chairman (always shown, placeholder if empty) ── */
+  html += `<div class="org-level">
+    ${chairmen.length ? chairmen.map(cardHTML).join('') : placeholderCard('董事長')}
+  </div>`;
+  html += `<div class="org-connector-v"></div>`;
 
-  /* ── Level 2: CEO ── */
-  if (ceos.length > 0) {
-    html += `<div class="org-level">${ceos.map(cardHTML).join('')}</div>`;
-    if (managers.length > 0 || unassigned.length > 0) {
-      html += `<div class="org-connector-v"></div>`;
-    }
-  }
+  /* ── Level 2: CEO (always shown, placeholder if empty) ── */
+  html += `<div class="org-level">
+    ${ceos.length ? ceos.map(cardHTML).join('') : placeholderCard('執行長')}
+  </div>`;
 
   /* ── Level 3+4: Managers + their employees as branches ── */
   if (managers.length > 0) {
+    html += `<div class="org-connector-v"></div>`;
     const branchesHTML = managers.map(mgr => {
       const emps = empsByMgr[mgr.id] || [];
       const hasEmps = emps.length > 0;
@@ -485,19 +501,16 @@ function renderTree() {
                   style="position:static;margin-top:4px;${!hasEmps?'display:none':''}">▾</button>
         </div>`;
     }).join('');
-
     html += `<div class="org-branches">${branchesHTML}</div>`;
   }
 
   /* ── Unassigned employees (no manager exists) ── */
   if (unassigned.length > 0 && managers.length === 0) {
-    if (ceos.length > 0 || chairmen.length > 0) {
-      html += `<div class="org-connector-v"></div>`;
-    }
+    html += `<div class="org-connector-v"></div>`;
     html += `<div class="org-level">${unassigned.map(cardHTML).join('')}</div>`;
   }
 
-  el.innerHTML = html || '<div class="org-loading">暫無員工資料</div>';
+  el.innerHTML = html;
 }
 
 /* ── Toggle a manager branch ── */

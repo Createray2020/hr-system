@@ -1,6 +1,9 @@
 // api/employees/index.js — GET all / POST new
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../lib/supabase.js';
 import { requireRoleOrPass } from '../../lib/auth.js';
+
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -53,7 +56,34 @@ export default async function handler(req, res) {
 
     const { error } = await supabase.from('employees').insert([{ id, ...body }]);
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(201).json({ id, emp_no: body.emp_no, message: '員工已建立' });
+
+    // ── 自動建立 Supabase Auth 帳號 ──
+    let authEmail = null;
+    if (SUPABASE_SERVICE_KEY) {
+      try {
+        const adminClient = createClient(process.env.SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        authEmail = body.email || `${body.emp_no || id}@chuwa.hr`;
+        const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
+          email: authEmail,
+          password: '123456',
+          email_confirm: true,
+          user_metadata: { name: body.name, emp_no: body.emp_no || id },
+        });
+        if (authError) {
+          console.warn('[Auth] 建立帳號失敗:', authError.message);
+          authEmail = null;
+        } else if (authData?.user?.id) {
+          await supabase.from('employees')
+            .update({ auth_user_id: authData.user.id })
+            .eq('id', id);
+        }
+      } catch (e) {
+        console.warn('[Auth] 例外錯誤:', e.message);
+        authEmail = null;
+      }
+    }
+
+    return res.status(201).json({ id, emp_no: body.emp_no, auth_email: authEmail, message: '員工已建立' });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
