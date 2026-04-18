@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排班管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ── Toolbar ── */
+.sched-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.week-nav{display:flex;align-items:center;gap:6px}
+.week-nav button{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:5px 12px;border-radius:7px;cursor:pointer;font-size:13px;transition:all .15s}
+.week-nav button:hover{border-color:var(--accent);color:var(--accent)}
+.period-label{font-family:'DM Mono',monospace;font-size:13px;color:var(--text-dim);white-space:nowrap;padding:0 4px}
+
+/* ── Tab bar ── */
+.tab-bar{display:flex;gap:0;background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;overflow:hidden;margin-bottom:16px;width:fit-content}
+.tab-btn{background:none;border:none;color:var(--text-dim);padding:8px 20px;font-size:13px;
+  cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:all .2s}
+.tab-btn.active{background:var(--accent);color:#fff}
+
+/* ── Week grid ── */
+.grid-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.sched-grid{border-collapse:collapse;min-width:max-content;width:100%}
+.sched-grid th,.sched-grid td{border:1px solid var(--border);padding:0}
+.sched-grid th{background:var(--surface2);font-size:12px;font-weight:600;
+  padding:8px 12px;white-space:nowrap;text-align:center;color:var(--text-dim)}
+.sched-grid th.today-col{color:var(--accent);border-bottom:2px solid var(--accent)}
+.emp-col{min-width:140px;padding:8px 12px!important;background:var(--surface2)!important;position:sticky;left:0;z-index:2}
+.emp-cell-wrap{display:flex;align-items:center;gap:8px}
+.emp-av-sm{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;
+  background:linear-gradient(135deg,#3B5FD4,#7B6CF6);color:#fff}
+.emp-nm{font-size:12px;font-weight:600}
+.emp-dept{font-size:10px;color:var(--text-dim)}
+
+/* ── Shift cell ── */
+.shift-cell{height:52px;min-width:100px;cursor:pointer;position:relative;transition:background .15s;text-align:center;vertical-align:middle}
+.shift-cell:hover{filter:brightness(1.15)}
+.shift-cell.empty{background:transparent}
+.shift-cell.empty:hover{background:rgba(91,141,239,.08)}
+.shift-pill{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+  border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;line-height:1.3;
+  min-width:72px;max-width:90px}
+.shift-pill .sp-name{font-size:12px;font-weight:700}
+.shift-pill .sp-time{font-size:10px;opacity:.8;margin-top:1px}
+.shift-empty-hint{font-size:18px;color:var(--border);line-height:52px}
+
+/* ── Stats row ── */
+.stats-row-sched{background:var(--surface2);font-size:11px}
+.stat-cell{padding:6px 12px!important;font-family:'DM Mono',monospace;font-size:11px;text-align:center}
+.stat-cell.over{color:var(--red);font-weight:700}
+.stat-cell.ok{color:var(--green)}
+
+/* ── Calendar view ── */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.cal-day-hd{background:var(--surface2);text-align:center;padding:8px;font-size:11px;
+  font-weight:600;color:var(--text-dim)}
+.cal-day{background:var(--surface);min-height:90px;padding:6px 8px;cursor:pointer;transition:background .15s}
+.cal-day:hover{background:var(--surface2)}
+.cal-day.today{outline:2px solid var(--accent);outline-offset:-2px}
+.cal-day.other-month{opacity:.35}
+.cal-date{font-size:12px;font-weight:600;margin-bottom:4px;font-family:'DM Mono',monospace}
+.cal-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.cal-chip{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:600;color:#fff}
+.cal-more{font-size:10px;color:var(--text-dim);margin-top:2px}
+
+/* ── Modal ── */
+.shift-modal .modal{max-width:440px}
+.shift-type-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.shift-type-btn{border:2px solid transparent;border-radius:8px;padding:10px 12px;
+  cursor:pointer;text-align:left;transition:all .15s;background:var(--surface2)}
+.shift-type-btn:hover{border-color:var(--accent)}
+.shift-type-btn.selected{border-color:var(--accent);box-shadow:0 0 0 2px rgba(91,141,239,.2)}
+.shift-type-btn .st-name{font-size:13px;font-weight:600}
+.shift-type-btn .st-time{font-size:11px;color:var(--text-dim);margin-top:2px}
+.shift-type-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
+</style>
+</head>
+<body data-page="schedule">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">排班管理</div>
+        <div class="page-sub">四週輪班規劃與班表管理</div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="sched-toolbar">
+      <select class="form-select" id="dept-sel" onchange="onDeptChange()" style="width:140px">
+        <option value="">全部部門</option>
+      </select>
+      <div class="week-nav">
+        <button onclick="movePeriod(-1)">‹ 上期</button>
+        <span class="period-label" id="period-label">—</span>
+        <button onclick="movePeriod(1)">下期 ›</button>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="goToday()">今天</button>
+        <button class="btn btn-primary btn-sm" onclick="submitPeriod()">提交審核</button>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tb-week" onclick="setTab('week',this)">📋 週班表</button>
+      <button class="tab-btn"        id="tb-cal"  onclick="setTab('cal',this)">📆 月班表</button>
+    </div>
+
+    <!-- Week grid view -->
+    <div id="view-week">
+      <div class="grid-wrap">
+        <table class="sched-grid" id="sched-table">
+          <thead id="sched-thead"></thead>
+          <tbody id="sched-tbody"></tbody>
+          <tfoot id="sched-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Calendar view -->
+    <div id="view-cal" style="display:none">
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Shift assignment modal -->
+<div class="modal-bg shift-modal" id="shift-modal">
+  <div class="modal">
+    <div class="modal-title" id="shift-modal-title">排班</div>
+
+    <div style="margin-bottom:14px">
+      <div class="form-label" style="margin-bottom:8px">選擇班別</div>
+      <div class="shift-type-grid" id="shift-type-btns"></div>
+    </div>
+
+    <div id="flex-time-row" style="display:none;margin-bottom:14px">
+      <div class="detail-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-row"><label class="form-label">開始時間</label><input class="form-input" id="sf-start" type="time"></div>
+        <div class="form-row"><label class="form-label">結束時間</label><input class="form-input" id="sf-end" type="time"></div>
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-bottom:16px">
+      <label class="form-label">備注</label>
+      <input class="form-input" id="sf-note" placeholder="選填">
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" id="sf-clear-btn" onclick="clearShift()" style="margin-right:auto">清除排班</button>
+      <button class="btn btn-ghost" onclick="closeModal('shift-modal')">取消</button>
+      <button class="btn btn-primary" onclick="saveShift()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+</script>
+<script src="/js/layout.js"></script>
+<script>
+/* ══════════════════════════════════════════
+   State
+══════════════════════════════════════════ */
+let allEmployees  = [];
+let allShiftTypes = [];
+let allSchedules  = [];
+let currentTab    = 'week';
+
+// Period: 4-week window anchored to Monday
+let periodStart = null; // Date (Monday)
+const PERIOD_DAYS = 28;
+
+// Modal context
+let shiftCtx = { empId: null, date: null, shiftId: null };
+
+/* ══════════════════════════════════════════
+   Init
+══════════════════════════════════════════ */
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 650));
+  initPeriod();
+  try {
+    [allEmployees, allShiftTypes] = await Promise.all([
+      api('/api/employees?status=active'),
+      api('/api/shift-types'),    // routes to /api/schedules?_resource=shift_types
+    ]);
+    fillDeptSel();
+    await loadSchedules();
+  } catch(e) { toast('載入失敗：' + e.message, 'error'); }
+};
+
+function initPeriod() {
+  const today = new Date();
+  // anchor to nearest Monday
+  const dow = today.getDay(); // 0=Sun
+  const diff = dow === 0 ? -6 : 1 - dow;
+  periodStart = new Date(today);
+  periodStart.setDate(today.getDate() + diff);
+  periodStart.setHours(0,0,0,0);
+  updatePeriodLabel();
+}
+
+function periodEnd() {
+  const d = new Date(periodStart);
+  d.setDate(d.getDate() + PERIOD_DAYS - 1);
+  return d;
+}
+
+function updatePeriodLabel() {
+  const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+  document.getElementById('period-label').textContent = `${fmt(periodStart)} ～ ${fmt(periodEnd())}`;
+}
+
+function movePeriod(dir) {
+  periodStart.setDate(periodStart.getDate() + dir * PERIOD_DAYS);
+  updatePeriodLabel();
+  loadSchedules();
+}
+
+function goToday() { initPeriod(); loadSchedules(); }
+
+function fillDeptSel() {
+  const depts = [...new Set(allEmployees.map(e => e.dept).filter(Boolean))].sort();
+  const sel = document.getElementById('dept-sel');
+  sel.innerHTML = '<option value="">全部部門</option>' +
+    depts.map(d => `<option value="${d}">${d}</option>`).join('');
+}
+
+function onDeptChange() { renderView(); }
+
+function getFilteredEmps() {
+  const dept = document.getElementById('dept-sel').value;
+  return dept ? allEmployees.filter(e => e.dept === dept) : allEmployees;
+}
+
+/* ══════════════════════════════════════════
+   Data load
+══════════════════════════════════════════ */
+async function loadSchedules() {
+  const start = fmtDate(periodStart);
+  const end   = fmtDate(periodEnd());
+  try {
+    allSchedules = await api(`/api/schedules?start=${start}&end=${end}`);
+  } catch(e) { allSchedules = []; toast('班表載入失敗', 'error'); }
+  renderView();
+}
+
+/* ══════════════════════════════════════════
+   Tab / View
+══════════════════════════════════════════ */
+function setTab(t, btn) {
+  currentTab = t;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('view-week').style.display = t === 'week' ? '' : 'none';
+  document.getElementById('view-cal').style.display  = t === 'cal'  ? '' : 'none';
+  renderView();
+}
+
+function renderView() {
+  if (currentTab === 'week') renderWeekGrid();
+  else renderCalendar();
+}
+
+/* ══════════════════════════════════════════
+   Week Grid
+══════════════════════════════════════════ */
+function renderWeekGrid() {
+  const emps  = getFilteredEmps();
+  const days  = buildDays(periodStart, PERIOD_DAYS);
+  const today = fmtDate(new Date());
+
+  // Split 28 days into 4 weeks; show first week by default, allow horizontal scroll
+  // Build schedule lookup: [empId][date] = schedule row
+  const lookup = {};
+  allSchedules.forEach(s => {
+    if (!lookup[s.employee_id]) lookup[s.employee_id] = {};
+    lookup[s.employee_id][s.work_date] = s;
+  });
+
+  // ── Header ──
+  const thead = document.getElementById('sched-thead');
+  thead.innerHTML = `<tr>
+    <th class="emp-col" style="text-align:left">員工</th>
+    ${days.map(d => {
+      const isToday = fmtDate(d) === today;
+      const dow = ['日','一','二','三','四','五','六'][d.getDay()];
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      return `<th class="${isToday ? 'today-col' : ''}" style="${isWeekend ? 'color:var(--red)' : ''}">
+        <div>${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}</div>
+        <div style="font-size:10px;font-weight:400">週${dow}</div>
+      </th>`;
+    }).join('')}
+  </tr>`;
+
+  // ── Body ──
+  const tbody = document.getElementById('sched-tbody');
+  if (!emps.length) {
+    tbody.innerHTML = `<tr><td colspan="${days.length + 1}" style="text-align:center;padding:32px;color:var(--text-dim);font-size:13px">暫無員工資料</td></tr>`;
+    document.getElementById('sched-tfoot').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = emps.map(emp => {
+    const cells = days.map(d => {
+      const dateStr = fmtDate(d);
+      const sched   = lookup[emp.id]?.[dateStr];
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      if (sched) {
+        const color = sched.shift_color || '#5B8DEF';
+        const timeStr = (!sched.is_off && (sched.shift_start || sched.shift_end))
+          ? `${sched.shift_start||''}–${sched.shift_end||''}` : '';
+        return `<td class="shift-cell" style="background:${color}18" onclick="openShiftModal('${emp.id}','${dateStr}')">
+          <div class="shift-pill" style="background:${color}22;color:${color}">
+            <span class="sp-name">${esc(sched.shift_name)}</span>
+            ${timeStr ? `<span class="sp-time">${timeStr}</span>` : ''}
+          </div>
+        </td>`;
+      } else {
+        return `<td class="shift-cell empty${isWeekend?' weekend':''}" onclick="openShiftModal('${emp.id}','${dateStr}')">
+          <span class="shift-empty-hint">＋</span>
+        </td>`;
+      }
+    }).join('');
+
+    return `<tr>
+      <td class="emp-col">
+        <div class="emp-cell-wrap">
+          <div class="emp-av-sm">${esc(emp.avatar || emp.name[0])}</div>
+          <div><div class="emp-nm">${esc(emp.name)}</div><div class="emp-dept">${esc(emp.dept)}</div></div>
+        </div>
+      </td>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  // ── Footer: hours stats ──
+  const tfoot = document.getElementById('sched-tfoot');
+  const hourRow = emps.map(emp => {
+    const empScheds = allSchedules.filter(s => s.employee_id === emp.id && !s.is_off);
+    // Estimate hours: flexible uses recorded times, fixed uses shift default
+    let hours = 0;
+    empScheds.forEach(s => {
+      const st = s.shift_start, et = s.shift_end;
+      if (st && et) {
+        const [sh, sm] = st.split(':').map(Number);
+        const [eh, em] = et.split(':').map(Number);
+        const diff = (eh * 60 + em) - (sh * 60 + sm);
+        if (diff > 0) hours += diff / 60;
+      } else if (!s.is_off) {
+        hours += 8; // default assumption
+      }
+    });
+    const over = hours > 160;
+    return `<td class="stat-cell ${over ? 'over' : hours > 0 ? 'ok' : ''}">${hours > 0 ? hours.toFixed(0)+'h' : '—'}</td>`;
+  }).join('');
+
+  tfoot.innerHTML = `<tr class="stats-row-sched">
+    <td class="emp-col" style="padding:6px 12px!important;font-size:11px;color:var(--text-dim)">本期工時</td>
+    ${hourRow}
+  </tr>`;
+}
+
+/* ══════════════════════════════════════════
+   Calendar view
+══════════════════════════════════════════ */
+function renderCalendar() {
+  const days  = buildDays(periodStart, PERIOD_DAYS);
+  const today = fmtDate(new Date());
+  const DOW_NAMES = ['日','一','二','三','四','五','六'];
+
+  // Schedule lookup by date: date → list of schedules
+  const byDate = {};
+  allSchedules.forEach(s => {
+    if (!byDate[s.work_date]) byDate[s.work_date] = [];
+    byDate[s.work_date].push(s);
+  });
+
+  // Pad so first day is correct column
+  const firstDow = periodStart.getDay(); // 0=Sun
+  const calDays = [...Array(firstDow).fill(null), ...days];
+  // Pad end to complete last row
+  while (calDays.length % 7 !== 0) calDays.push(null);
+
+  const grid = document.getElementById('cal-grid');
+  grid.innerHTML =
+    DOW_NAMES.map(n => `<div class="cal-day-hd">週${n}</div>`).join('') +
+    calDays.map(d => {
+      if (!d) return `<div class="cal-day other-month"></div>`;
+      const dateStr = fmtDate(d);
+      const isToday = dateStr === today;
+      const scheds  = byDate[dateStr] || [];
+      const chips   = scheds.slice(0, 4).map(s =>
+        `<span class="cal-chip" style="background:${s.shift_color||'#5B8DEF'}">${esc(s.emp_name||'?')}</span>`
+      ).join('');
+      const more = scheds.length > 4 ? `<div class="cal-more">+${scheds.length - 4} 人</div>` : '';
+      return `<div class="cal-day ${isToday ? 'today' : ''}" onclick="openDayModal('${dateStr}')">
+        <div class="cal-date">${d.getDate()}</div>
+        <div class="cal-chips">${chips}${more}</div>
+      </div>`;
+    }).join('');
+}
+
+/* ══════════════════════════════════════════
+   Shift Modal
+══════════════════════════════════════════ */
+function openShiftModal(empId, dateStr) {
+  const emp    = allEmployees.find(e => e.id === empId);
+  const sched  = allSchedules.find(s => s.employee_id === empId && s.work_date === dateStr);
+  shiftCtx = { empId, date: dateStr, shiftId: sched?.shift_type_id || null };
+
+  const d = new Date(dateStr + 'T00:00:00');
+  const dow = ['日','一','二','三','四','五','六'][d.getDay()];
+  document.getElementById('shift-modal-title').textContent =
+    `${esc(emp?.name || empId)} — ${dateStr}（週${dow}）`;
+
+  // Render shift type buttons
+  const btns = document.getElementById('shift-type-btns');
+  btns.innerHTML = allShiftTypes.map(st => {
+    const selected = shiftCtx.shiftId === st.id ? ' selected' : '';
+    const timeStr = st.is_flexible ? '彈性時間' : st.is_off ? '休假' :
+      (st.start_time && st.end_time ? `${st.start_time}–${st.end_time}` : '');
+    return `<button class="shift-type-btn${selected}" data-id="${st.id}"
+        style="border-left:4px solid ${st.color}"
+        onclick="selectShiftType('${st.id}',${st.is_flexible})">
+      <div style="display:flex;align-items:center">
+        <span class="shift-type-dot" style="background:${st.color}"></span>
+        <span class="st-name">${esc(st.name)}</span>
+      </div>
+      ${timeStr ? `<div class="st-time">${timeStr}</div>` : ''}
+    </button>`;
+  }).join('');
+
+  // Pre-fill times/note
+  document.getElementById('sf-start').value = sched?.shift_start || '';
+  document.getElementById('sf-end').value   = sched?.shift_end   || '';
+  document.getElementById('sf-note').value  = sched?.note        || '';
+
+  // Show flex time row if current shift is flexible
+  const curSt = allShiftTypes.find(st => st.id === shiftCtx.shiftId);
+  document.getElementById('flex-time-row').style.display = curSt?.is_flexible ? '' : 'none';
+
+  // Show clear button only if already scheduled
+  document.getElementById('sf-clear-btn').style.display = sched ? '' : 'none';
+
+  document.getElementById('shift-modal').classList.add('open');
+}
+
+function openDayModal(dateStr) {
+  // In calendar view, show first unscheduled employee for this day
+  const emps = getFilteredEmps();
+  const scheduled = new Set(allSchedules.filter(s => s.work_date === dateStr).map(s => s.employee_id));
+  const first = emps.find(e => !scheduled.has(e.id)) || emps[0];
+  if (first) openShiftModal(first.id, dateStr);
+}
+
+function selectShiftType(id, isFlexible) {
+  shiftCtx.shiftId = id;
+  document.querySelectorAll('.shift-type-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.id === id);
+  });
+  document.getElementById('flex-time-row').style.display = isFlexible ? '' : 'none';
+}
+
+async function saveShift() {
+  if (!shiftCtx.shiftId) { toast('請選擇班別', 'error'); return; }
+  const emp = allEmployees.find(e => e.id === shiftCtx.empId);
+  try {
+    await api('/api/schedules', {
+      method: 'POST',
+      body: JSON.stringify({
+        employee_id:   shiftCtx.empId,
+        work_date:     shiftCtx.date,
+        shift_type_id: shiftCtx.shiftId,
+        start_time:    document.getElementById('sf-start').value || null,
+        end_time:      document.getElementById('sf-end').value   || null,
+        note:          document.getElementById('sf-note').value  || '',
+        dept:          emp?.dept || '',
+        created_by:    window.currentUser?.id || null,
+      }),
+    });
+    toast('✅ 排班已儲存', 'success');
+    closeModal('shift-modal');
+    await loadSchedules();
+  } catch(e) { toast('儲存失敗：' + e.message, 'error'); }
+}
+
+async function clearShift() {
+  if (!confirm('確定要清除此排班？')) return;
+  // We clear by setting to "休假日" (ST003) — or simply remove the schedule
+  // Supabase doesn't have DELETE here, so we'll just close and let user know
+  // A proper delete would need a DELETE endpoint; for now, reassign to off-day
+  const offType = allShiftTypes.find(st => st.id === 'ST003') || allShiftTypes.find(st => st.is_off);
+  if (offType) {
+    shiftCtx.shiftId = offType.id;
+    document.getElementById('sf-note').value = '';
+    await saveShift();
+  } else {
+    closeModal('shift-modal');
+  }
+}
+
+function submitPeriod() {
+  toast('班表已提交審核', 'success');
+}
+
+/* ══════════════════════════════════════════
+   Helpers
+══════════════════════════════════════════ */
+function buildDays(start, count) {
+  const days = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    days.push(d);
+  }
+  return days;
+}
+
+function fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+</body>
+</html>

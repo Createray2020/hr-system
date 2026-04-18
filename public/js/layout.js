@@ -40,6 +40,7 @@
     { page:'dashboard',  icon:'🏠', label:'總覽',     href:'/dashboard.html' },
     { page:'leave',      icon:'📋', label:'請假審批', href:'/leave.html' },
     { page:'attendance', icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
+    { page:'schedule',   icon:'📅', label:'排班管理', href:'/schedule.html' },
     { page:'employees',   icon:'👥', label:'員工資料', href:'/employees.html' },
     { page:'orgchart',    icon:'🗂️', label:'組織圖',   href:'/orgchart.html' },
     { page:'departments', icon:'🏢', label:'部門管理', href:'/departments.html' },

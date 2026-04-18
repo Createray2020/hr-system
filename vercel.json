@@ -10,6 +10,9 @@
     { "source": "/salary",               "destination": "/public/salary.html" },
     { "source": "/api/departments",        "destination": "/api/departments" },
     { "source": "/api/salary-grade",      "destination": "/api/salary-grade" },
+    { "source": "/api/schedules",         "destination": "/api/schedules/index" },
+    { "source": "/api/shift-types",       "destination": "/api/schedules/index?_resource=shift_types" },
+    { "source": "/api/attendance/manual", "destination": "/api/attendance/index" },
     { "source": "/((?!api/).*)",         "destination": "/public/$1" }
   ],
   "headers": [
