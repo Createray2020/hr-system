@@ -10,31 +10,35 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method === 'GET') {
-    // 步驟一：查詢所有部門
-    const { data: depts, error } = await supabase
-      .from('departments').select('*').order('name');
-    if (error) return res.status(500).json({ error: error.message });
+    try {
+      // 步驟一：查詢所有部門
+      const { data: depts, error } = await supabase
+        .from('departments').select('*').order('name');
+      if (error) return res.status(500).json({ error: error.message, hint: '若出現欄位不存在錯誤，請執行：ALTER TABLE departments ADD COLUMN IF NOT EXISTS description TEXT DEFAULT \'\'; ALTER TABLE departments ADD COLUMN IF NOT EXISTS color TEXT DEFAULT \'#5B8DEF\';' });
 
-    // 步驟二：統計各部門在職人數（以 dept 名稱欄位對應）
-    const { data: emps } = await supabase
-      .from('employees').select('dept').eq('status', 'active');
-    const countMap = {};
-    (emps || []).forEach(e => { countMap[e.dept] = (countMap[e.dept] || 0) + 1; });
+      // 步驟二：統計各部門在職人數（以 dept 名稱欄位對應）
+      const { data: emps } = await supabase
+        .from('employees').select('dept').eq('status', 'active');
+      const countMap = {};
+      (emps || []).forEach(e => { countMap[e.dept] = (countMap[e.dept] || 0) + 1; });
 
-    // 步驟三：查詢主管名稱
-    const managerIds = depts.map(d => d.manager_id).filter(Boolean);
-    let managerMap = {};
-    if (managerIds.length) {
-      const { data: mgrs } = await supabase
-        .from('employees').select('id, name').in('id', managerIds);
-      (mgrs || []).forEach(m => { managerMap[m.id] = m.name; });
+      // 步驟三：查詢主管名稱
+      const managerIds = depts.map(d => d.manager_id).filter(Boolean);
+      let managerMap = {};
+      if (managerIds.length) {
+        const { data: mgrs } = await supabase
+          .from('employees').select('id, name').in('id', managerIds);
+        (mgrs || []).forEach(m => { managerMap[m.id] = m.name; });
+      }
+
+      return res.status(200).json(depts.map(d => ({
+        ...d,
+        emp_count:    countMap[d.name] || 0,
+        manager_name: managerMap[d.manager_id] || null,
+      })));
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
-
-    return res.status(200).json(depts.map(d => ({
-      ...d,
-      emp_count:    countMap[d.name] || 0,
-      manager_name: managerMap[d.manager_id] || null,
-    })));
   }
 
   if (req.method === 'POST') {
