@@ -1,5 +1,6 @@
 // api/attendance/punch.js — POST 打卡
 import { supabase } from '../../lib/supabase.js';
+import { requireAuth, getEmployee } from '../../lib/auth.js';
 
 const WORK_START_HOUR = 9;   // 09:00 以後算遲到
 
@@ -12,13 +13,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: '缺少必要參數' });
   }
 
+  // 驗證身份：只能替自己打卡
+  const user = await requireAuth(req, res);
+  if (!user) return;
+  const emp = await getEmployee(user);
+  if (!emp) return res.status(403).json({ error: '找不到員工資料' });
+  if (emp.id !== employee_id) return res.status(403).json({ error: '無法替他人打卡' });
+
   const now     = new Date();
   const today   = now.toISOString().split('T')[0];
   const timeStr = now.toISOString();
   const id      = `A${Date.now()}`;
 
   if (type === 'in') {
-    const isLate = now.getHours() >= WORK_START_HOUR && now.getMinutes() > 5;
+    const isLate = now.getHours() > WORK_START_HOUR ||
+                   (now.getHours() === WORK_START_HOUR && now.getMinutes() > 5);
 
     // 先查是否已有今日紀錄
     const { data: existing } = await supabase

@@ -2,7 +2,7 @@
 import { supabase } from '../../lib/supabase.js';
 
 // 簡易勞健保費率（台灣 2024 參考值）
-const LABOR_INS_RATE  = 0.0 ;  // 由雇主扣，員工自付 0.1% 左右，這裡簡化
+const LABOR_INS_RATE  = 0.001; // 員工自付勞保費 0.1%
 const HEALTH_INS_RATE = 0.0236; // 健保費率 2.36%（員工自付 30%）
 const TAX_RATE        = 0.05;   // 薪資所得稅 5%（簡化）
 const LABOR_INS_CAP   = 45800;  // 投保薪資上限
@@ -21,7 +21,8 @@ export default async function handler(req, res) {
 
   // 查詢本月出勤以計算加班費（每小時加班費 = 底薪/240 * 1.33）
   const ymStart = `${year}-${String(month).padStart(2,'0')}-01`;
-  const ymEnd   = new Date(year, month, 0).toISOString().split('T')[0];
+  const ymEndDate = new Date(year, month, 0);
+  const ymEnd     = `${ymEndDate.getFullYear()}-${String(ymEndDate.getMonth()+1).padStart(2,'0')}-${String(ymEndDate.getDate()).padStart(2,'0')}`;
 
   const { data: attData } = await supabase
     .from('attendance')
@@ -46,7 +47,7 @@ export default async function handler(req, res) {
     const absentDays   = absentMap[emp.id] || 0;
     const deductAbsent = Math.round((base / 30) * absentDays);
     const insBase      = Math.min(base, LABOR_INS_CAP);
-    const laborIns     = Math.round(insBase * 0.001);  // 員工自付 0.1%
+    const laborIns     = Math.round(insBase * LABOR_INS_RATE);
     const healthIns    = Math.round(insBase * HEALTH_INS_RATE * 0.3);
     const grossEst     = base + otPay;
     const tax          = grossEst > 88501 ? Math.round((grossEst - 88501) * TAX_RATE) : 0;
@@ -75,5 +76,5 @@ export default async function handler(req, res) {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  return res.status(200).json({ created: records.length, message: '批次產生完成' });
+  return res.status(200).json({ total: records.length, message: '批次產生完成（已存在者略過）' });
 }

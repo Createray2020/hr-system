@@ -111,8 +111,8 @@
 const LEAVE_TYPES  = {annual:'特休假',sick:'病假',personal:'事假',maternity:'產假',funeral:'喪假',marriage:'婚假'};
 
 window.onload = async () => {
-  setWelcome();
   await new Promise(r => setTimeout(r, 650));
+  setWelcome();
   try {
     await Promise.all([loadDashboard()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }

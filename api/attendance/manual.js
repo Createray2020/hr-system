@@ -16,18 +16,25 @@ export default async function handler(req, res) {
     workHours = Math.round((new Date(clockOut) - new Date(clockIn)) / 36000) / 100;
   }
 
-  const id = `AM${Date.now()}`;
-
-  // Upsert（若同一天同員工已有紀錄則更新）
-  const { error } = await supabase.from('attendance').upsert([{
-    id, employee_id, work_date,
+  const payload = {
     clock_in:       clockIn,
     clock_out:      clockOut,
     work_hours:     workHours,
     overtime_hours: parseFloat(overtime_hours)||0,
     status:         status || 'normal',
     note:           note || '',
-  }], { onConflict: 'employee_id,work_date', ignoreDuplicates: false });
+  };
+
+  // 先查是否已有同一天同員工的紀錄，若有則 update，避免替換 Primary Key
+  const { data: existing } = await supabase
+    .from('attendance').select('id').eq('employee_id', employee_id).eq('work_date', work_date).single();
+
+  let error;
+  if (existing) {
+    ({ error } = await supabase.from('attendance').update(payload).eq('id', existing.id));
+  } else {
+    ({ error } = await supabase.from('attendance').insert([{ id: `AM${Date.now()}`, employee_id, work_date, ...payload }]));
+  }
 
   if (error) return res.status(500).json({ error: error.message });
   return res.status(201).json({ message: '補登成功' });

@@ -1,5 +1,6 @@
 // api/salary/[id].js — PUT update / confirm / pay
 import { supabase } from '../../lib/supabase.js';
+import { requireRole } from '../../lib/auth.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -8,6 +9,8 @@ export default async function handler(req, res) {
 
   // PUT /api/salary/[id]/confirm
   if (action === 'confirm' && req.method === 'PUT') {
+    const caller = await requireRole(req, res, ['hr', 'admin']);
+    if (!caller) return;
     const { error } = await supabase.from('salary_records')
       .update({ status: 'confirmed', updated_at: new Date().toISOString() }).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
@@ -16,6 +19,8 @@ export default async function handler(req, res) {
 
   // PUT /api/salary/[id]/pay
   if (action === 'pay' && req.method === 'PUT') {
+    const caller = await requireRole(req, res, ['hr', 'admin']);
+    if (!caller) return;
     const { error } = await supabase.from('salary_records')
       .update({ status: 'paid', pay_date: new Date().toISOString().split('T')[0], updated_at: new Date().toISOString() })
       .eq('id', id);
@@ -25,6 +30,8 @@ export default async function handler(req, res) {
 
   // PUT /api/salary/[id] — 更新薪資項目
   if (req.method === 'PUT') {
+    const caller = await requireRole(req, res, ['hr', 'admin']);
+    if (!caller) return;
     const allowed = ['overtime_pay','bonus','allowance','deduct_absence',
                      'deduct_labor_ins','deduct_health_ins','deduct_tax','note'];
     const update  = {};

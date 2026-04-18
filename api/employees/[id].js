@@ -1,5 +1,6 @@
 // api/employees/[id].js — GET one / PUT update + /me route
 import { supabase } from '../../lib/supabase.js';
+import { requireRole } from '../../lib/auth.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -29,6 +30,8 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PUT') {
+    const caller = await requireRole(req, res, ['hr', 'admin']);
+    if (!caller) return;
     const { error } = await supabase.from('employees')
       .update({ ...req.body, updated_at: new Date().toISOString() }).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
@@ -36,6 +39,8 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
+    const caller = await requireRole(req, res, ['hr', 'admin']);
+    if (!caller) return;
     const { error } = await supabase.from('employees').update({ status: 'resigned' }).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已設為離職' });
