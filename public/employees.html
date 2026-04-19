@@ -770,7 +770,7 @@ async function resetEmpPassword() {
   if (!adminEmpNo) { toast('無法取得管理員資訊', 'error'); return; }
 
   try {
-    const result = await api('/api/auth/reset-password', {
+    const result = await api('/api/auth?action=reset-password', {
       method: 'POST',
       body: JSON.stringify({ emp_no: emp.emp_no, new_password: '123456', admin_emp_no: adminEmpNo })
     });

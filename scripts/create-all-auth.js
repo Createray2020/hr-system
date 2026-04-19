@@ -11,8 +11,7 @@
 //   - 成功後將 auth.id 寫回 employees.auth_user_id
 
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
+// Env loaded via --env-file flag: node --env-file=.env.local scripts/create-all-auth.js
 
 const SUPABASE_URL     = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE = process.env.SUPABASE_SERVICE_KEY;
