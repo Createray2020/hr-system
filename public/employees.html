@@ -43,6 +43,10 @@
   .radio-row{display:flex;align-items:center;gap:16px;padding-top:6px}
   .radio-row label{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
   .radio-row input[type=radio]{cursor:pointer}
+  th.sortable{cursor:pointer;user-select:none}
+  th.sortable:hover{color:var(--text)}
+  .si{margin-left:2px;font-size:9px;color:var(--text-dim)}
+  th.sorted-asc .si,th.sorted-desc .si{color:var(--accent2)}
 </style>
 </head>
 <body data-page="employees">
@@ -97,8 +101,16 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>員工</th><th>編號</th><th>部門</th><th>職稱</th><th>職等/職級</th>
-            <th>電子郵件</th><th>到職日</th><th>月薪合計</th><th>狀態</th><th>操作</th>
+            <th>員工</th>
+            <th class="sortable" onclick="sortEmployees('emp_no')">編號<span class="si" id="si-emp_no">↕</span></th>
+            <th class="sortable" onclick="sortEmployees('dept')">部門<span class="si" id="si-dept">↕</span></th>
+            <th class="sortable" onclick="sortEmployees('position')">職稱<span class="si" id="si-position">↕</span></th>
+            <th class="sortable" onclick="sortEmployees('grade')">職等/職級<span class="si" id="si-grade">↕</span></th>
+            <th>電子郵件</th>
+            <th class="sortable" onclick="sortEmployees('hire_date')">到職日<span class="si" id="si-hire_date">↕</span></th>
+            <th class="sortable" onclick="sortEmployees('total')">月薪合計<span class="si" id="si-total">↕</span></th>
+            <th class="sortable" onclick="sortEmployees('status')">狀態<span class="si" id="si-status">↕</span></th>
+            <th>操作</th>
           </tr></thead>
           <tbody id="emp-tbody"></tbody>
         </table>
@@ -253,6 +265,56 @@ let allEmployees  = [];
 let allSalaryGrades = [];
 let editingId     = null;
 let currentView   = 'card';
+let sortField = '', sortDir = '';
+
+const GRADE_ORDER  = { '一等':1, '二等':2, '三等':3 };
+const STATUS_ORDER = { 'active':0, 'inactive':1, 'resigned':2 };
+
+function sortEmployees(field) {
+  if (sortField === field) {
+    sortDir = sortDir === 'asc' ? 'desc' : sortDir === 'desc' ? '' : 'asc';
+    if (!sortDir) sortField = '';
+  } else {
+    sortField = field; sortDir = 'asc';
+  }
+  renderList();
+}
+
+function getSorted(rows) {
+  if (!sortField || !sortDir) return rows;
+  return [...rows].sort((a, b) => {
+    let cmp = 0;
+    if (sortField === 'total') {
+      cmp = calcTotal(a) - calcTotal(b);
+    } else if (sortField === 'grade') {
+      const ga = GRADE_ORDER[a.grade] ?? 0, gb = GRADE_ORDER[b.grade] ?? 0;
+      cmp = ga !== gb ? ga - gb : (a.grade_level ?? 0) - (b.grade_level ?? 0);
+    } else if (sortField === 'status') {
+      cmp = (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3);
+    } else {
+      const av = a[sortField] ?? '', bv = b[sortField] ?? '';
+      cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv), 'zh-TW');
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function updateEmpSortIndicators() {
+  ['emp_no','dept','position','grade','hire_date','total','status'].forEach(f => {
+    const el = document.getElementById('si-'+f);
+    if (!el) return;
+    const th = el.closest('th');
+    th.classList.remove('sorted-asc','sorted-desc');
+    if (sortField === f) {
+      el.textContent = sortDir === 'asc' ? '↑' : sortDir === 'desc' ? '↓' : '↕';
+      if (sortDir) th.classList.add(sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    } else {
+      el.textContent = '↕';
+    }
+  });
+}
 
 /* ── Grade level map ── */
 const GRADE_LEVELS = { '一等': [1,2,3], '二等': [1,2,3], '三等': [1,2,3,4,5] };
@@ -352,7 +414,8 @@ function renderCards() {
 }
 
 function renderTable() {
-  const rows = getFiltered();
+  updateEmpSortIndicators();
+  const rows = getSorted(getFiltered());
   const tbody = document.getElementById('emp-tbody');
   tbody.innerHTML = rows.map(e => {
     const total = calcTotal(e);

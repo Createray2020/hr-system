@@ -126,6 +126,8 @@
 .cb-resigned { background:rgba(180,180,180,.15);color:#9E9E9E }
 .cb-full { color:#7EB3FF }
 .cb-part { color:#FFA050 }
+.col-sort { margin-left:2px; font-size:9px; color:var(--text-dim) }
+th.sorted-asc .col-sort, th.sorted-desc .col-sort { color:var(--accent2) }
 
 /* Sheet footer */
 .sheet-footer {
@@ -262,6 +264,65 @@ let allEmployees = [];
 let allDepts     = [];
 let filtered     = [];
 let editing      = null; // { td, col, emp, oldRaw }
+let sortField    = '', sortDir = '';
+
+const GRADE_ORDER_ST  = { '一等':1, '二等':2, '三等':3 };
+const STATUS_ORDER_ST = { 'active':0, 'inactive':1, 'resigned':2 };
+
+/* ── Sort helpers ── */
+function sortByCol(key) {
+  if (sortField === key) {
+    sortDir = sortDir === 'asc' ? 'desc' : sortDir === 'desc' ? '' : 'asc';
+    if (!sortDir) sortField = '';
+  } else {
+    sortField = key; sortDir = 'asc';
+  }
+  updateSTSortIndicators();
+  renderBody();
+}
+
+function getSortedFiltered() {
+  if (!sortField || !sortDir) return filtered;
+  return [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sortField === '_seniority') {
+      const av = a.hire_date || '', bv = b.hire_date || '';
+      cmp = String(av).localeCompare(String(bv), 'zh-TW');
+    } else if (sortField === '_total') {
+      const av = (a.base_salary||0)+(a.grade_allowance||0)+(a.attendance_bonus||0)+(a.manager_allowance||0)+(a.extra_allowance||0);
+      const bv = (b.base_salary||0)+(b.grade_allowance||0)+(b.attendance_bonus||0)+(b.manager_allowance||0)+(b.extra_allowance||0);
+      cmp = av - bv;
+    } else if (sortField === 'grade') {
+      const ga = GRADE_ORDER_ST[a.grade] ?? 0, gb = GRADE_ORDER_ST[b.grade] ?? 0;
+      cmp = ga !== gb ? ga - gb : (a.grade_level ?? 0) - (b.grade_level ?? 0);
+    } else if (sortField === 'status') {
+      cmp = (STATUS_ORDER_ST[a.status] ?? 3) - (STATUS_ORDER_ST[b.status] ?? 3);
+    } else {
+      const av = a[sortField] ?? '', bv = b[sortField] ?? '';
+      cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv), 'zh-TW');
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function updateSTSortIndicators() {
+  const ths = document.querySelectorAll('#head-row th');
+  COLS.forEach((col, i) => {
+    const th = ths[i];
+    if (!th) return;
+    const sp = th.querySelector('.col-sort');
+    if (!sp) return;
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (sortField === col.key) {
+      sp.textContent = sortDir === 'asc' ? '↑' : sortDir === 'desc' ? '↓' : '↕';
+      if (sortDir) th.classList.add(sortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    } else {
+      sp.textContent = '↕';
+    }
+  });
+}
 
 /* ── Helpers ── */
 function seniority(hire) {
@@ -323,7 +384,20 @@ function buildHead() {
   const tr = document.getElementById('head-row');
   COLS.forEach((col, i) => {
     const th = document.createElement('th');
-    th.textContent = col.label;
+    th.style.cursor = 'pointer';
+    th.title = `點擊排序：${col.label}`;
+
+    th.appendChild(document.createTextNode(col.label));
+
+    const sp = document.createElement('span');
+    sp.className = 'col-sort';
+    sp.textContent = '↕';
+    th.appendChild(sp);
+
+    th.addEventListener('click', e => {
+      if (e.target.classList.contains('rh')) return;
+      sortByCol(col.key);
+    });
 
     // Resize handle
     const rh = document.createElement('div');
@@ -379,7 +453,8 @@ function renderBody() {
   const tbody = document.getElementById('sheet-body');
   tbody.innerHTML = '';
 
-  filtered.forEach(emp => {
+  const rows = getSortedFiltered();
+  rows.forEach(emp => {
     const tr = document.createElement('tr');
     tr.dataset.id = emp.id;
     if (emp.status === 'resigned') tr.classList.add('row-resigned');
