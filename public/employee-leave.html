@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>請假</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
+.mobile-app{max-width:430px;margin:0 auto;min-height:100vh;background:#0F1117;display:flex;flex-direction:column}
+.mobile-header{padding:52px 20px 12px}
+.page-title-lg{font-size:22px;font-weight:700;margin-bottom:4px}
+.scroll-content{flex:1;overflow-y:auto;padding-bottom:100px}
+
+/* ── Tabs ── */
+.m-tabs{display:flex;gap:0;background:rgba(255,255,255,.04);border-radius:12px;margin:0 16px 16px;padding:4px}
+.m-tab{flex:1;padding:8px 0;text-align:center;border-radius:8px;border:none;background:transparent;color:rgba(255,255,255,.4);font-size:13px;font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .2s;font-weight:500}
+.m-tab.active{background:rgba(255,255,255,.08);color:#E8EAF0}
+
+/* ── 申請表單 ── */
+.mobile-card{margin:0 16px 12px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:16px;padding:16px}
+.card-label{font-size:11px;color:rgba(255,255,255,.35);font-family:'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px}
+.m-form-row{margin-bottom:14px}
+.m-label{font-size:12px;color:rgba(255,255,255,.45);margin-bottom:6px;display:block}
+.m-input,.m-select,.m-textarea{width:100%;background:rgba(255,255,255,.06);border:0.5px solid rgba(255,255,255,.1);border-radius:10px;padding:12px 14px;font-size:14px;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;outline:none;-webkit-appearance:none;transition:border-color .2s}
+.m-input:focus,.m-select:focus,.m-textarea:focus{border-color:rgba(91,141,239,.5)}
+.m-textarea{resize:none;min-height:72px}
+.m-select option{background:#1E2333}
+.date-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.days-display{text-align:center;background:rgba(91,141,239,.1);border:0.5px solid rgba(91,141,239,.2);border-radius:10px;padding:10px;margin-bottom:14px}
+.days-num{font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:#7FBBFF;line-height:1}
+.days-label{font-size:11px;color:rgba(255,255,255,.4);margin-top:2px}
+.submit-btn{width:100%;padding:15px;background:#5B8DEF;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .15s;margin-top:4px}
+.submit-btn:active{transform:scale(.98)}
+.submit-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+/* ── 假單列表 ── */
+.leave-card{margin:0 16px 10px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:14px;padding:14px}
+.leave-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.leave-type-chip{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.chip-annual{background:rgba(74,222,128,.15);color:#4ADE80}
+.chip-sick{background:rgba(251,146,60,.15);color:#FB923C}
+.chip-personal{background:rgba(122,133,160,.12);color:#7A85A0}
+.chip-maternity{background:rgba(192,132,252,.15);color:#C084FC}
+.chip-funeral,.chip-marriage{background:rgba(34,211,238,.12);color:#22D3EE}
+.leave-dates{font-size:13px;color:rgba(255,255,255,.7);margin-bottom:8px}
+.leave-days-badge{font-size:11px;font-family:'DM Mono',monospace;color:rgba(255,255,255,.4)}
+
+/* ── 審批流程條 ── */
+.flow-row{display:flex;align-items:center;gap:4px;margin-top:10px;padding-top:10px;border-top:0.5px solid rgba(255,255,255,.06);overflow-x:auto;scrollbar-width:none}
+.flow-row::-webkit-scrollbar{display:none}
+.flow-step{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0}
+.flow-dot{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;border:1.5px solid}
+.flow-dot-done{background:rgba(74,222,128,.2);border-color:#4ADE80;color:#4ADE80}
+.flow-dot-current{background:rgba(251,146,60,.2);border-color:#FB923C;color:#FB923C}
+.flow-dot-wait{background:rgba(122,133,160,.08);border-color:rgba(122,133,160,.3);color:rgba(255,255,255,.25)}
+.flow-dot-reject{background:rgba(248,113,113,.2);border-color:#F87171;color:#F87171}
+.flow-name{font-size:9px;color:rgba(255,255,255,.35);text-align:center;max-width:36px;line-height:1.2}
+.flow-arrow{font-size:10px;color:rgba(255,255,255,.2);flex-shrink:0;padding-bottom:12px}
+
+.status-badge{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600}
+.s-pending{background:rgba(251,146,60,.12);color:#FB923C}
+.s-approved{background:rgba(74,222,128,.12);color:#4ADE80}
+.s-rejected{background:rgba(248,113,113,.12);color:#F87171}
+
+.empty-state{text-align:center;padding:48px 20px;color:rgba(255,255,255,.3)}
+.empty-icon{font-size:40px;margin-bottom:10px}
+
+/* ── Toast ── */
+.m-toast-wrap{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.m-toast{background:#1E2333;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:10px 20px;font-size:13px;animation:mtin .3s ease;white-space:nowrap}
+@keyframes mtin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.m-toast-success{border-left:3px solid #4ADE80}.m-toast-error{border-left:3px solid #F87171}.m-toast-warn{border-left:3px solid #FB923C}
+
+/* ── 底部導航 ── */
+.mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
+.mobile-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-decoration:none}
+.mobile-nav-item .nav-icon{font-size:22px;opacity:.35}
+.mobile-nav-item .nav-label{font-size:10px;color:rgba(255,255,255,.35)}
+.mobile-nav-item.active .nav-icon{opacity:1}
+.mobile-nav-item.active .nav-label{color:#5B8DEF}
+</style>
+</head>
+<body>
+<div class="mobile-app">
+  <div class="mobile-header">
+    <div class="page-title-lg">請假</div>
+  </div>
+
+  <div class="m-tabs">
+    <button class="m-tab active" onclick="switchTab('apply', this)">申請假單</button>
+    <button class="m-tab" onclick="switchTab('list', this)">我的假單</button>
+  </div>
+
+  <!-- 申請表單 -->
+  <div class="scroll-content" id="tab-apply">
+    <div class="mobile-card">
+      <div class="card-label">申請請假</div>
+
+      <div class="m-form-row">
+        <label class="m-label">假別</label>
+        <select class="m-select" id="f-type">
+          <option value="annual">特休假</option>
+          <option value="sick">病假</option>
+          <option value="personal">事假</option>
+          <option value="marriage">婚假</option>
+          <option value="funeral">喪假</option>
+          <option value="maternity">產假</option>
+        </select>
+      </div>
+
+      <div class="date-row m-form-row">
+        <div>
+          <label class="m-label">開始日期</label>
+          <input type="date" class="m-input" id="f-start" oninput="calcDays()">
+        </div>
+        <div>
+          <label class="m-label">結束日期</label>
+          <input type="date" class="m-input" id="f-end" oninput="calcDays()">
+        </div>
+      </div>
+
+      <div class="days-display">
+        <div class="days-num" id="days-num">0</div>
+        <div class="days-label">天</div>
+      </div>
+
+      <div class="m-form-row">
+        <label class="m-label">原因（選填）</label>
+        <textarea class="m-textarea" id="f-reason" placeholder="請填寫請假原因…"></textarea>
+      </div>
+
+      <button class="submit-btn" id="submit-btn" onclick="submitLeave()">送出申請</button>
+    </div>
+  </div>
+
+  <!-- 假單列表 -->
+  <div class="scroll-content" id="tab-list" style="display:none">
+    <div class="m-tabs" style="margin:0 16px 14px">
+      <button class="m-tab active" onclick="filterList('',this)" id="filter-all">全部</button>
+      <button class="m-tab" onclick="filterList('pending',this)">申請中</button>
+      <button class="m-tab" onclick="filterList('approved',this)">已核准</button>
+      <button class="m-tab" onclick="filterList('rejected',this)">已退回</button>
+    </div>
+    <div id="leave-list"></div>
+  </div>
+
+  <!-- 底部導航 -->
+  <nav class="mobile-bottom-nav">
+    <a href="/employee-app.html" class="mobile-nav-item">
+      <span class="nav-icon">🏠</span><span class="nav-label">首頁</span>
+    </a>
+    <a href="/employee-schedule.html" class="mobile-nav-item">
+      <span class="nav-icon">🗓️</span><span class="nav-label">班表</span>
+    </a>
+    <a href="/employee-leave.html" class="mobile-nav-item active">
+      <span class="nav-icon">📋</span><span class="nav-label">請假</span>
+    </a>
+    <a href="/employee-salary.html" class="mobile-nav-item">
+      <span class="nav-icon">💰</span><span class="nav-label">薪資</span>
+    </a>
+    <a href="/employee-profile.html" class="mobile-nav-item">
+      <span class="nav-icon">👤</span><span class="nav-label">我的</span>
+    </a>
+  </nav>
+</div>
+
+<div class="m-toast-wrap" id="toast-wrap"></div>
+
+<script>
+const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null, API = '';
+let allLeaves = [], currentFilter = '';
+
+const LEAVE_LABELS = { annual:'特休假', sick:'病假', personal:'事假', marriage:'婚假', funeral:'喪假', maternity:'產假' };
+const CHIP_CLS = { annual:'chip-annual', sick:'chip-sick', personal:'chip-personal', marriage:'chip-marriage', funeral:'chip-funeral', maternity:'chip-maternity' };
+
+function toast(msg, type='success') {
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div'); el.className=`m-toast m-toast-${type}`; el.textContent=msg;
+  wrap.appendChild(el); setTimeout(()=>el.remove(),3000);
+}
+
+async function apiFetch(path, opts={}) {
+  const { data: { session } } = await _sb.auth.getSession();
+  const res = await fetch(API + path, {
+    headers:{'Content-Type':'application/json',...(session?{'Authorization':`Bearer ${session.access_token}`}:{})},
+    ...opts
+  });
+  if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
+  return res.json();
+}
+
+function switchTab(tab, el) {
+  document.querySelectorAll('.m-tabs:first-of-type .m-tab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-apply').style.display = tab==='apply' ? '' : 'none';
+  document.getElementById('tab-list').style.display  = tab==='list'  ? '' : 'none';
+  if (tab==='list') renderLeaves();
+}
+
+function calcDays() {
+  const s = document.getElementById('f-start').value;
+  const e = document.getElementById('f-end').value;
+  if (!s || !e) { document.getElementById('days-num').textContent = '0'; return; }
+  const ms = new Date(e) - new Date(s);
+  const d = Math.max(0, Math.round(ms / 86400000) + 1);
+  document.getElementById('days-num').textContent = d;
+}
+
+async function submitLeave() {
+  if (!currentUser) return;
+  const type  = document.getElementById('f-type').value;
+  const start = document.getElementById('f-start').value;
+  const end   = document.getElementById('f-end').value;
+  const days  = parseInt(document.getElementById('days-num').textContent) || 0;
+  const reason= document.getElementById('f-reason').value.trim();
+  if (!start || !end) { toast('請選擇請假日期', 'warn'); return; }
+  if (days <= 0)      { toast('結束日期須不早於開始日期', 'warn'); return; }
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = '送出中…';
+  try {
+    await apiFetch('/api/leaves', { method:'POST', body: JSON.stringify({
+      employee_id: currentUser.id, leave_type: type, start_date: start, end_date: end, days, reason
+    })});
+    toast('✅ 假單已送出', 'success');
+    document.getElementById('f-start').value = '';
+    document.getElementById('f-end').value   = '';
+    document.getElementById('f-reason').value = '';
+    document.getElementById('days-num').textContent = '0';
+  } catch(e) { toast('送出失敗：' + e.message, 'error'); }
+  btn.disabled = false; btn.textContent = '送出申請';
+}
+
+function filterList(status, el) {
+  currentFilter = status;
+  document.querySelectorAll('#tab-list .m-tabs .m-tab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  renderLeaves();
+}
+
+function getFlowHtml(status) {
+  const steps = [
+    { label:'員工',  done: true },
+    { label:'主管',  done: status==='approved'||status==='rejected', current: status==='pending', reject: status==='rejected' },
+    { label:'執行長', done: status==='approved', current: false },
+    { label:'人資',  done: status==='approved', current: false },
+  ];
+  return steps.map((s, i) => {
+    let dotCls = 'flow-dot-wait';
+    let symbol = String(i+1);
+    if (s.reject)   { dotCls = 'flow-dot-reject'; symbol = '✗'; }
+    else if (s.done){ dotCls = 'flow-dot-done';   symbol = '✓'; }
+    else if (s.current){ dotCls = 'flow-dot-current'; symbol = '…'; }
+    const arrow = i < steps.length-1 ? '<span class="flow-arrow">›</span>' : '';
+    return `<div class="flow-step"><div class="flow-dot ${dotCls}">${symbol}</div><div class="flow-name">${s.label}</div></div>${arrow}`;
+  }).join('');
+}
+
+function renderLeaves() {
+  const filtered = currentFilter ? allLeaves.filter(l=>l.status===currentFilter) : allLeaves;
+  const wrap = document.getElementById('leave-list');
+  if (!filtered.length) {
+    wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><div>沒有假單紀錄</div></div>`;
+    return;
+  }
+  wrap.innerHTML = filtered.map(l => {
+    const statusBadge = l.status==='pending'
+      ? `<span class="status-badge s-pending">審批中</span>`
+      : l.status==='approved'
+      ? `<span class="status-badge s-approved">已核准</span>`
+      : `<span class="status-badge s-rejected">已退回</span>`;
+    return `<div class="leave-card">
+      <div class="leave-card-top">
+        <span class="leave-type-chip ${CHIP_CLS[l.leave_type]||'chip-personal'}">${LEAVE_LABELS[l.leave_type]||l.leave_type}</span>
+        ${statusBadge}
+      </div>
+      <div class="leave-dates">${l.start_date} ～ ${l.end_date}</div>
+      <div class="leave-days-badge">共 ${l.days} 天</div>
+      <div class="flow-row">${getFlowHtml(l.status)}</div>
+    </div>`;
+  }).join('');
+}
+
+async function loadLeaves() {
+  if (!currentUser) return;
+  try {
+    const all = await apiFetch(`/api/leaves`);
+    // Filter to current employee only
+    allLeaves = all.filter(l => l.employee_id === currentUser.id);
+    renderLeaves();
+  } catch(e) { allLeaves = []; }
+}
+
+(async () => {
+  API = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'http://localhost:3000' : '';
+  const { data: { session } } = await _sb.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+  try { currentUser = await apiFetch('/api/employees/me'); }
+  catch(e) { window.location.href = '/login.html'; return; }
+
+  // Set default dates
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('f-start').value = today;
+  document.getElementById('f-end').value   = today;
+  calcDays();
+
+  await loadLeaves();
+})();
+</script>
+</body>
+</html>

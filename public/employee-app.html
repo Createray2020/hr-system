@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>員工 App</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
+.mobile-app{max-width:430px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;background:#0F1117;position:relative}
+.mobile-header{padding:52px 20px 8px;display:flex;align-items:center;justify-content:space-between}
+.header-left .greeting{font-size:13px;color:rgba(255,255,255,.45);margin-bottom:2px}
+.header-left .name{font-size:20px;font-weight:700}
+.header-right{display:flex;align-items:center;gap:12px}
+.notif-btn{width:38px;height:38px;background:rgba(255,255,255,.06);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;border:none}
+.logo-badge{font-size:10px;font-family:'DM Mono',monospace;color:#5B8DEF;letter-spacing:2px}
+.scroll-content{flex:1;overflow-y:auto;padding-bottom:90px}
+.mobile-card{margin:0 16px 12px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:16px;padding:16px}
+.card-label{font-size:11px;color:rgba(255,255,255,.35);font-family:'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px}
+
+/* ── 打卡卡片 ── */
+.punch-card{margin:12px 16px;background:linear-gradient(135deg,rgba(91,141,239,.12),rgba(192,132,252,.06));border:0.5px solid rgba(91,141,239,.2);border-radius:20px;padding:20px}
+.punch-status-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.punch-time-item{text-align:center}
+.punch-time-label{font-size:10px;color:rgba(255,255,255,.4);margin-bottom:4px}
+.punch-time-val{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:#7FBBFF;min-width:64px}
+.punch-time-val.done{color:#4ADE80}
+.punch-time-val.empty{color:rgba(255,255,255,.2);font-size:16px}
+.punch-divider{width:1px;height:40px;background:rgba(255,255,255,.1)}
+.punch-btn-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.punch-btn{padding:14px 0;border-radius:12px;border:none;font-size:15px;font-weight:700;font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:8px}
+.punch-btn:active{transform:scale(.97)}
+.punch-btn-in{background:#4ADE80;color:#0a2410}
+.punch-btn-in:disabled{background:rgba(74,222,128,.2);color:rgba(74,222,128,.5);cursor:not-allowed;transform:none}
+.punch-btn-out{background:#F87171;color:#2a0000}
+.punch-btn-out:disabled{background:rgba(248,113,113,.2);color:rgba(248,113,113,.5);cursor:not-allowed;transform:none}
+.punch-single{grid-column:span 2}
+
+/* ── 班別 & 工時 ── */
+.shift-info{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.shift-chip{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.shift-morning{background:rgba(91,141,239,.2);color:#7FBBFF}
+.shift-evening{background:rgba(192,132,252,.2);color:#C084FC}
+.shift-off{background:rgba(74,222,128,.15);color:#4ADE80}
+.shift-holiday{background:rgba(122,133,160,.12);color:#7A85A0}
+.hours-row{display:flex;gap:10px}
+.hours-item{flex:1;background:rgba(255,255,255,.03);border:0.5px solid rgba(255,255,255,.07);border-radius:10px;padding:10px 12px}
+.hours-item .h-label{font-size:10px;color:rgba(255,255,255,.35);margin-bottom:3px}
+.hours-item .h-val{font-size:18px;font-weight:700;font-family:'DM Mono',monospace}
+.h-green{color:#4ADE80}.h-orange{color:#FB923C}.h-red{color:#F87171}
+
+/* ── 本週班表 ── */
+.week-scroll{display:flex;gap:8px;overflow-x:auto;padding:0 16px 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.week-scroll::-webkit-scrollbar{display:none}
+.day-slot{flex-shrink:0;width:72px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.07);border-radius:12px;padding:10px 6px;text-align:center;cursor:pointer;transition:all .15s}
+.day-slot.today{background:rgba(91,141,239,.15);border-color:rgba(91,141,239,.4)}
+.day-slot .day-name{font-size:10px;color:rgba(255,255,255,.35);margin-bottom:4px}
+.day-slot .day-num{font-size:16px;font-weight:700;margin-bottom:6px}
+.day-slot .day-shift{font-size:9px;padding:2px 6px;border-radius:8px;font-weight:600}
+.day-slot.today .day-name{color:#5B8DEF}
+.day-slot.today .day-num{color:#7FBBFF}
+
+/* ── 快速功能 ── */
+.quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;margin-bottom:12px}
+.quick-btn{background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:14px;padding:16px;text-align:left;cursor:pointer;transition:all .15s;text-decoration:none;display:block}
+.quick-btn:active{transform:scale(.97)}
+.quick-icon{font-size:24px;margin-bottom:8px}
+.quick-label{font-size:13px;font-weight:600;color:#E8EAF0}
+.quick-sub{font-size:11px;color:rgba(255,255,255,.35);margin-top:2px}
+
+/* ── 底部導航 ── */
+.mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
+.mobile-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-decoration:none}
+.mobile-nav-item .nav-icon{font-size:22px;opacity:.35;transition:opacity .15s}
+.mobile-nav-item .nav-label{font-size:10px;color:rgba(255,255,255,.35);transition:color .15s}
+.mobile-nav-item.active .nav-icon{opacity:1}
+.mobile-nav-item.active .nav-label{color:#5B8DEF}
+
+/* ── Toast ── */
+.m-toast-wrap{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
+.m-toast{background:#1E2333;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:10px 20px;font-size:13px;animation:mtin .3s ease;white-space:nowrap}
+@keyframes mtin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.m-toast-success{border-left:3px solid #4ADE80}.m-toast-error{border-left:3px solid #F87171}.m-toast-warn{border-left:3px solid #FB923C}
+
+.section-title{font-size:13px;font-weight:600;color:rgba(255,255,255,.55);padding:0 16px;margin:14px 0 8px}
+</style>
+</head>
+<body>
+<div class="mobile-app">
+  <div class="mobile-header">
+    <div class="header-left">
+      <div class="greeting">早安，歡迎回來 👋</div>
+      <div class="name" id="user-name">—</div>
+    </div>
+    <div class="header-right">
+      <div class="logo-badge">CHUWA</div>
+      <button class="notif-btn" onclick="void(0)">🔔</button>
+    </div>
+  </div>
+
+  <div class="scroll-content">
+    <!-- 打卡卡片 -->
+    <div class="punch-card">
+      <div class="card-label" style="margin-bottom:12px">今日打卡</div>
+      <div class="punch-status-row">
+        <div class="punch-time-item">
+          <div class="punch-time-label">上班</div>
+          <div class="punch-time-val" id="punch-in-display">—</div>
+        </div>
+        <div class="punch-divider"></div>
+        <div class="punch-time-item">
+          <div class="punch-time-label">下班</div>
+          <div class="punch-time-val" id="punch-out-display">—</div>
+        </div>
+      </div>
+      <div class="punch-btn-row" id="punch-btn-row">
+        <button class="punch-btn punch-btn-in" id="btn-in" onclick="doPunch('in')">⏺ 上班打卡</button>
+        <button class="punch-btn punch-btn-out" id="btn-out" onclick="doPunch('out')">⏹ 下班打卡</button>
+      </div>
+    </div>
+
+    <!-- 今日班別 -->
+    <div class="mobile-card" id="today-shift-card">
+      <div class="card-label">今日班別</div>
+      <div class="shift-info">
+        <span class="shift-chip" id="shift-chip">載入中…</span>
+        <span id="shift-time" style="font-size:13px;color:rgba(255,255,255,.5)"></span>
+      </div>
+      <div class="hours-row">
+        <div class="hours-item">
+          <div class="h-label">本月工時</div>
+          <div class="h-val" id="month-hours">—<span style="font-size:12px;font-weight:400;color:rgba(255,255,255,.4)"> h</span></div>
+        </div>
+        <div class="hours-item">
+          <div class="h-label">本週工時</div>
+          <div class="h-val" id="week-hours">—<span style="font-size:12px;font-weight:400;color:rgba(255,255,255,.4)"> h</span></div>
+        </div>
+        <div class="hours-item">
+          <div class="h-label">剩餘假期</div>
+          <div class="h-val h-green" id="leave-days">—<span style="font-size:12px;font-weight:400;color:rgba(255,255,255,.4)"> 天</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 本週班表 -->
+    <div class="section-title">本週班表</div>
+    <div class="week-scroll" id="week-scroll"></div>
+
+    <!-- 快速功能 -->
+    <div class="section-title">快速功能</div>
+    <div class="quick-grid">
+      <a href="/employee-leave.html" class="quick-btn">
+        <div class="quick-icon">📋</div>
+        <div class="quick-label">申請請假</div>
+        <div class="quick-sub">提交假單</div>
+      </a>
+      <a href="/attendance.html" class="quick-btn">
+        <div class="quick-icon">⏱️</div>
+        <div class="quick-label">出勤紀錄</div>
+        <div class="quick-sub">查看打卡</div>
+      </a>
+      <a href="/employee-salary.html" class="quick-btn">
+        <div class="quick-icon">💰</div>
+        <div class="quick-label">薪資查詢</div>
+        <div class="quick-sub">本月薪資</div>
+      </a>
+      <a href="/employee-schedule.html" class="quick-btn">
+        <div class="quick-icon">🗓️</div>
+        <div class="quick-label">班表查詢</div>
+        <div class="quick-sub">月班表</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 底部導航 -->
+  <nav class="mobile-bottom-nav">
+    <a href="/employee-app.html" class="mobile-nav-item active">
+      <span class="nav-icon">🏠</span><span class="nav-label">首頁</span>
+    </a>
+    <a href="/employee-schedule.html" class="mobile-nav-item">
+      <span class="nav-icon">🗓️</span><span class="nav-label">班表</span>
+    </a>
+    <a href="/employee-leave.html" class="mobile-nav-item">
+      <span class="nav-icon">📋</span><span class="nav-label">請假</span>
+    </a>
+    <a href="/employee-salary.html" class="mobile-nav-item">
+      <span class="nav-icon">💰</span><span class="nav-label">薪資</span>
+    </a>
+    <a href="/employee-profile.html" class="mobile-nav-item">
+      <span class="nav-icon">👤</span><span class="nav-label">我的</span>
+    </a>
+  </nav>
+</div>
+
+<div class="m-toast-wrap" id="toast-wrap"></div>
+
+<script>
+const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null;
+let API = '';
+
+function toast(msg, type='success') {
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = `m-toast m-toast-${type}`;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+async function apiFetch(path, opts={}) {
+  const { data: { session } } = await _sb.auth.getSession();
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type':'application/json', ...(session ? {'Authorization':`Bearer ${session.access_token}`} : {}) },
+    ...opts
+  });
+  if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
+  return res.json();
+}
+
+function fmtHours(h) {
+  if (h === null || h === undefined || isNaN(h)) return '—';
+  return Math.round(h * 10) / 10;
+}
+
+function getWeekRange() {
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun
+  const mon = new Date(now); mon.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return { start: fmt(mon), end: fmt(sun) };
+}
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+const DAY_NAMES = ['日','一','二','三','四','五','六'];
+
+function renderWeekSchedule(schedules) {
+  const { start, end } = getWeekRange();
+  const today = todayStr();
+  const wrap = document.getElementById('week-scroll');
+  const days = [];
+  let cur = new Date(start + 'T00:00:00');
+  const endD = new Date(end + 'T00:00:00');
+  while (cur <= endD) {
+    days.push(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`);
+    cur.setDate(cur.getDate() + 1);
+  }
+  const schedMap = {};
+  (schedules || []).forEach(s => { schedMap[s.work_date] = s; });
+
+  wrap.innerHTML = days.map(d => {
+    const s = schedMap[d];
+    const dt = new Date(d + 'T00:00:00');
+    const isToday = d === today;
+    let chipHtml = '';
+    if (!s || s.is_off) {
+      chipHtml = `<span class="day-shift shift-off" style="background:rgba(74,222,128,.12);color:#4ADE80">休</span>`;
+    } else {
+      const label = s.shift_start ? s.shift_start.slice(0,5) : '班';
+      const h = s.shift_start ? parseInt(s.shift_start) : 9;
+      const cls = h < 12 ? 'shift-morning' : 'shift-evening';
+      chipHtml = `<span class="day-shift ${cls}">${h < 12 ? '早' : '晚'}</span>`;
+    }
+    return `<div class="day-slot${isToday?' today':''}">
+      <div class="day-name">${DAY_NAMES[dt.getDay()]}</div>
+      <div class="day-num">${dt.getDate()}</div>
+      ${chipHtml}
+    </div>`;
+  }).join('');
+
+  // Show today's shift
+  const todaySched = schedMap[today];
+  const chipEl = document.getElementById('shift-chip');
+  const timeEl = document.getElementById('shift-time');
+  if (!todaySched || todaySched.is_off) {
+    chipEl.className = 'shift-chip shift-off';
+    chipEl.textContent = '休假';
+    timeEl.textContent = '';
+  } else {
+    const h = todaySched.shift_start ? parseInt(todaySched.shift_start) : 9;
+    chipEl.className = `shift-chip ${h < 12 ? 'shift-morning' : 'shift-evening'}`;
+    chipEl.textContent = h < 12 ? '早班' : '晚班';
+    timeEl.textContent = `${todaySched.shift_start?.slice(0,5)||''} – ${todaySched.shift_end?.slice(0,5)||''}`;
+  }
+}
+
+function updatePunchUI(data) {
+  const inEl  = document.getElementById('punch-in-display');
+  const outEl = document.getElementById('punch-out-display');
+  const btnIn  = document.getElementById('btn-in');
+  const btnOut = document.getElementById('btn-out');
+
+  if (data.punch_in) {
+    inEl.textContent = data.punch_in;
+    inEl.className = 'punch-time-val done';
+    btnIn.disabled = true;
+    btnIn.textContent = '✓ 已打卡';
+  } else {
+    inEl.textContent = '—';
+    inEl.className = 'punch-time-val empty';
+    btnIn.disabled = false;
+    btnIn.innerHTML = '⏺ 上班打卡';
+  }
+
+  if (data.punch_out) {
+    outEl.textContent = data.punch_out;
+    outEl.className = 'punch-time-val done';
+    btnOut.disabled = true;
+    btnOut.textContent = '✓ 已打卡';
+  } else {
+    outEl.textContent = '—';
+    outEl.className = 'punch-time-val empty';
+    if (data.punch_in) {
+      btnOut.disabled = false;
+      btnOut.innerHTML = '⏹ 下班打卡';
+    } else {
+      btnOut.disabled = true;
+    }
+  }
+}
+
+async function doPunch(type) {
+  if (!currentUser) return;
+  const btn = document.getElementById(type === 'in' ? 'btn-in' : 'btn-out');
+  btn.disabled = true;
+  btn.textContent = '打卡中…';
+  try {
+    await apiFetch('/api/attendance/punch', {
+      method: 'POST',
+      body: JSON.stringify({ employee_id: currentUser.id, type, timestamp: new Date().toISOString() })
+    });
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    toast(type === 'in' ? `✅ 上班打卡成功 ${timeStr}` : `✅ 下班打卡成功 ${timeStr}`, 'success');
+    const data = await apiFetch(`/api/attendance/today?employee_id=${currentUser.id}`);
+    updatePunchUI(data);
+  } catch(e) {
+    toast('打卡失敗：' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = type === 'in' ? '⏺ 上班打卡' : '⏹ 下班打卡';
+  }
+}
+
+async function loadHours() {
+  if (!currentUser) return;
+  try {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthData = await apiFetch(`/api/attendance?employee_id=${currentUser.id}&month=${ym}`);
+    const monthH = monthData.reduce((s, r) => s + (r.work_hours || 0), 0);
+    const mEl = document.getElementById('month-hours');
+    const mVal = fmtHours(monthH);
+    const mCls = monthH > 160 ? 'h-red' : monthH > 140 ? 'h-orange' : 'h-green';
+    mEl.innerHTML = `<span class="${mCls}">${mVal}</span><span style="font-size:12px;font-weight:400;color:rgba(255,255,255,.4)"> h</span>`;
+
+    const { start, end } = getWeekRange();
+    const weekData = monthData.filter(r => r.work_date >= start && r.work_date <= end);
+    const weekH = weekData.reduce((s, r) => s + (r.work_hours || 0), 0);
+    const wEl = document.getElementById('week-hours');
+    const wVal = fmtHours(weekH);
+    const wCls = weekH > 48 ? 'h-red' : weekH > 40 ? 'h-orange' : 'h-green';
+    wEl.innerHTML = `<span class="${wCls}">${wVal}</span><span style="font-size:12px;font-weight:400;color:rgba(255,255,255,.4)"> h</span>`;
+  } catch(e) {}
+}
+
+(async () => {
+  API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : '';
+  const { data: { session } } = await _sb.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+
+  try {
+    currentUser = await apiFetch('/api/employees/me');
+  } catch(e) { window.location.href = '/login.html'; return; }
+
+  window.currentUser = currentUser;
+  const hour = new Date().getHours();
+  const gr = hour < 12 ? '早安' : hour < 18 ? '午安' : '晚安';
+  document.querySelector('.greeting').textContent = `${gr}，歡迎回來 👋`;
+  document.getElementById('user-name').textContent = currentUser.name || '—';
+  document.getElementById('leave-days').innerHTML = `—<span style="font-size:12px;font-weight:400;color:rgba(255,255,255,.4)"> 天</span>`;
+
+  // Load today punch
+  try {
+    const punch = await apiFetch(`/api/attendance/today?employee_id=${currentUser.id}`);
+    updatePunchUI(punch);
+  } catch(e) { updatePunchUI({ punch_in: null, punch_out: null }); }
+
+  // Load week schedule
+  try {
+    const { start, end } = getWeekRange();
+    const schedules = await apiFetch(`/api/schedules?employee_id=${currentUser.id}&start=${start}&end=${end}`);
+    renderWeekSchedule(schedules);
+  } catch(e) { renderWeekSchedule([]); }
+
+  // Load hours
+  loadHours();
+})();
+</script>
+</body>
+</html>

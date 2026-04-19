@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>我的班表</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
+.mobile-app{max-width:430px;margin:0 auto;min-height:100vh;background:#0F1117;display:flex;flex-direction:column}
+.mobile-header{padding:52px 20px 16px;display:flex;align-items:center;justify-content:space-between}
+.page-title-lg{font-size:22px;font-weight:700}
+.scroll-content{flex:1;overflow-y:auto;padding-bottom:100px}
+
+/* ── 月份導航 ── */
+.month-nav{display:flex;align-items:center;justify-content:space-between;padding:0 16px;margin-bottom:16px}
+.month-nav-btn{width:36px;height:36px;background:rgba(255,255,255,.06);border-radius:50%;border:none;color:#E8EAF0;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.month-nav-btn:active{background:rgba(255,255,255,.12)}
+.month-label-lg{font-size:17px;font-weight:700;font-family:'DM Mono',monospace}
+
+/* ── 月曆 ── */
+.cal-wrap{margin:0 16px 16px;background:rgba(255,255,255,.03);border:0.5px solid rgba(255,255,255,.08);border-radius:16px;overflow:hidden}
+.cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);padding:10px 0 6px}
+.cal-wd{text-align:center;font-size:10px;color:rgba(255,255,255,.3);font-family:'DM Mono',monospace}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:0}
+.cal-day{min-height:56px;padding:6px 4px;border-top:0.5px solid rgba(255,255,255,.05);text-align:center;cursor:pointer;transition:background .15s;position:relative}
+.cal-day:hover{background:rgba(255,255,255,.04)}
+.cal-day.today{background:rgba(91,141,239,.1)}
+.cal-day.selected{background:rgba(91,141,239,.2)!important}
+.cal-day.other-month .day-n{opacity:.2}
+.cal-day.other-month .day-s{opacity:.15}
+.day-n{font-size:13px;font-weight:500;margin-bottom:4px;line-height:1}
+.cal-day.today .day-n{color:#7FBBFF;font-weight:700}
+.day-s{font-size:9px;padding:2px 4px;border-radius:4px;display:inline-block;font-weight:600}
+.ds-morning{background:rgba(91,141,239,.2);color:#7FBBFF}
+.ds-evening{background:rgba(192,132,252,.2);color:#C084FC}
+.ds-off{background:rgba(74,222,128,.12);color:#4ADE80}
+.ds-holiday{background:rgba(122,133,160,.08);color:rgba(255,255,255,.3)}
+.ds-empty{}
+
+/* ── 統計卡 ── */
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 16px 14px}
+.stat-mini{background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:12px;padding:12px;text-align:center}
+.stat-mini-val{font-size:20px;font-weight:700;font-family:'DM Mono',monospace;line-height:1;margin-bottom:3px}
+.stat-mini-label{font-size:10px;color:rgba(255,255,255,.35)}
+.v-green{color:#4ADE80}.v-orange{color:#FB923C}.v-blue{color:#7FBBFF}
+
+/* ── 底部滑出詳情 ── */
+.day-detail{position:fixed;bottom:0;left:50%;transform:translateX(-50%) translateY(100%);width:100%;max-width:430px;background:#181C27;border-top:0.5px solid rgba(255,255,255,.1);border-radius:20px 20px 0 0;padding:20px 20px 100px;transition:transform .3s cubic-bezier(.4,0,.2,1);z-index:60}
+.day-detail.open{transform:translateX(-50%) translateY(0)}
+.detail-handle{width:36px;height:4px;background:rgba(255,255,255,.15);border-radius:2px;margin:0 auto 16px}
+.detail-date{font-size:16px;font-weight:700;margin-bottom:14px}
+.detail-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:0.5px solid rgba(255,255,255,.06)}
+.detail-row:last-child{border-bottom:none}
+.detail-key{font-size:12px;color:rgba(255,255,255,.4)}
+.detail-val{font-size:13px;font-weight:500}
+.detail-overlay{position:fixed;inset:0;z-index:59;display:none}
+.detail-overlay.open{display:block}
+
+/* ── 底部導航 ── */
+.mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
+.mobile-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-decoration:none}
+.mobile-nav-item .nav-icon{font-size:22px;opacity:.35}
+.mobile-nav-item .nav-label{font-size:10px;color:rgba(255,255,255,.35)}
+.mobile-nav-item.active .nav-icon{opacity:1}
+.mobile-nav-item.active .nav-label{color:#5B8DEF}
+</style>
+</head>
+<body>
+<div class="mobile-app">
+  <div class="mobile-header">
+    <div class="page-title-lg">班表</div>
+    <span style="font-size:12px;color:rgba(255,255,255,.35)" id="emp-name-badge"></span>
+  </div>
+
+  <div class="scroll-content">
+    <div class="month-nav">
+      <button class="month-nav-btn" onclick="changeMonth(-1)">‹</button>
+      <span class="month-label-lg" id="month-label">—</span>
+      <button class="month-nav-btn" onclick="changeMonth(1)">›</button>
+    </div>
+
+    <!-- 月曆 -->
+    <div class="cal-wrap">
+      <div class="cal-weekdays">
+        <div class="cal-wd">日</div><div class="cal-wd">一</div><div class="cal-wd">二</div>
+        <div class="cal-wd">三</div><div class="cal-wd">四</div><div class="cal-wd">五</div><div class="cal-wd">六</div>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+    <!-- 本月統計 -->
+    <div class="stats-row">
+      <div class="stat-mini">
+        <div class="stat-mini-val v-blue" id="st-scheduled">—</div>
+        <div class="stat-mini-label">已排班</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-val v-orange" id="st-hours">—</div>
+        <div class="stat-mini-label">預排工時</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-val v-green" id="st-off">—</div>
+        <div class="stat-mini-label">休假天數</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 當天詳情 -->
+  <div class="detail-overlay" id="detail-overlay" onclick="closeDetail()"></div>
+  <div class="day-detail" id="day-detail">
+    <div class="detail-handle"></div>
+    <div class="detail-date" id="detail-date">—</div>
+    <div id="detail-body"></div>
+  </div>
+
+  <!-- 底部導航 -->
+  <nav class="mobile-bottom-nav">
+    <a href="/employee-app.html" class="mobile-nav-item">
+      <span class="nav-icon">🏠</span><span class="nav-label">首頁</span>
+    </a>
+    <a href="/employee-schedule.html" class="mobile-nav-item active">
+      <span class="nav-icon">🗓️</span><span class="nav-label">班表</span>
+    </a>
+    <a href="/employee-leave.html" class="mobile-nav-item">
+      <span class="nav-icon">📋</span><span class="nav-label">請假</span>
+    </a>
+    <a href="/employee-salary.html" class="mobile-nav-item">
+      <span class="nav-icon">💰</span><span class="nav-label">薪資</span>
+    </a>
+    <a href="/employee-profile.html" class="mobile-nav-item">
+      <span class="nav-icon">👤</span><span class="nav-label">我的</span>
+    </a>
+  </nav>
+</div>
+
+<script>
+const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null, API = '';
+let viewYear = new Date().getFullYear(), viewMonth = new Date().getMonth() + 1;
+let allSchedules = [];
+
+async function apiFetch(path, opts={}) {
+  const { data: { session } } = await _sb.auth.getSession();
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type':'application/json', ...(session ? {'Authorization':`Bearer ${session.access_token}`} : {}) },
+    ...opts
+  });
+  if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
+  return res.json();
+}
+
+function fmt2(n) { return String(n).padStart(2,'0'); }
+function todayStr() { const d=new Date(); return `${d.getFullYear()}-${fmt2(d.getMonth()+1)}-${fmt2(d.getDate())}`; }
+
+function calcHours(start, end) {
+  if (!start || !end) return 8;
+  const toMins = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+  let s = toMins(start), e = toMins(end);
+  if (e <= s) e += 24*60;
+  return Math.max(0, (e - s) / 60 - 1);
+}
+
+function renderCalendar() {
+  const today = todayStr();
+  document.getElementById('month-label').textContent = `${viewYear} / ${fmt2(viewMonth)}`;
+  const firstDay = new Date(viewYear, viewMonth - 1, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
+  const daysInPrevMonth = new Date(viewYear, viewMonth - 1, 0).getDate();
+
+  const schedMap = {};
+  allSchedules.forEach(s => { schedMap[s.work_date] = s; });
+
+  const cells = [];
+  // prev month fill
+  for (let i = firstDay - 1; i >= 0; i--) {
+    cells.push({ date: `${viewYear}-${fmt2(viewMonth-1||12)}-${fmt2(daysInPrevMonth - i)}`, other: true });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ date: `${viewYear}-${fmt2(viewMonth)}-${fmt2(d)}`, other: false });
+  }
+  while (cells.length % 7 !== 0) {
+    const n = cells.length - firstDay - daysInMonth + 1;
+    cells.push({ date: `${viewYear + (viewMonth===12?1:0)}-${fmt2(viewMonth===12?1:viewMonth+1)}-${fmt2(n)}`, other: true });
+  }
+
+  let scheduled = 0, totalH = 0, offDays = 0;
+  const grid = document.getElementById('cal-grid');
+  grid.innerHTML = cells.map(c => {
+    const s = schedMap[c.date];
+    const isToday = c.date === today;
+    const dt = new Date(c.date + 'T00:00:00');
+    const dayNum = dt.getDate();
+    let chipHtml = '', chip = '';
+    if (!c.other) {
+      if (!s || s.is_off) {
+        offDays++;
+        chip = `<span class="day-s ds-off">休</span>`;
+      } else {
+        scheduled++;
+        const h = calcHours(s.shift_start, s.shift_end);
+        totalH += h;
+        const hr = s.shift_start ? parseInt(s.shift_start) : 9;
+        chip = `<span class="day-s ${hr < 12 ? 'ds-morning' : 'ds-evening'}">${hr < 12 ? '早' : '晚'}</span>`;
+      }
+    }
+    return `<div class="cal-day${c.other?' other-month':''}${isToday?' today':''}" onclick="${c.other?'void(0)':`showDetail('${c.date}')`}">
+      <div class="day-n">${dayNum}</div>
+      ${chip}
+    </div>`;
+  }).join('');
+
+  document.getElementById('st-scheduled').textContent = scheduled;
+  document.getElementById('st-hours').textContent = Math.round(totalH);
+  document.getElementById('st-off').textContent = offDays;
+}
+
+function showDetail(dateStr) {
+  const s = allSchedules.find(x => x.work_date === dateStr);
+  const dt = new Date(dateStr + 'T00:00:00');
+  document.getElementById('detail-date').textContent =
+    `${viewYear}年${fmt2(viewMonth)}月${fmt2(dt.getDate())}日（${'日一二三四五六'[dt.getDay()]}）`;
+
+  let rows = '';
+  if (!s || s.is_off) {
+    rows = `<div class="detail-row"><span class="detail-key">班別</span><span class="detail-val" style="color:#4ADE80">休假</span></div>`;
+  } else {
+    const h = calcHours(s.shift_start, s.shift_end);
+    const hr = s.shift_start ? parseInt(s.shift_start) : 9;
+    rows = `
+      <div class="detail-row"><span class="detail-key">班別</span><span class="detail-val">${hr < 12 ? '早班' : '晚班'}</span></div>
+      <div class="detail-row"><span class="detail-key">上班</span><span class="detail-val">${s.shift_start?.slice(0,5)||'—'}</span></div>
+      <div class="detail-row"><span class="detail-key">下班</span><span class="detail-val">${s.shift_end?.slice(0,5)||'—'}</span></div>
+      <div class="detail-row"><span class="detail-key">工時</span><span class="detail-val" style="color:#7FBBFF">${Math.round(h*10)/10} 小時</span></div>
+    `;
+  }
+  document.getElementById('detail-body').innerHTML = rows;
+  document.getElementById('day-detail').classList.add('open');
+  document.getElementById('detail-overlay').classList.add('open');
+
+  // highlight selected
+  document.querySelectorAll('.cal-day.selected').forEach(el => el.classList.remove('selected'));
+  const cells = document.querySelectorAll('.cal-day');
+  cells.forEach(el => {
+    if (el.getAttribute('onclick')?.includes(dateStr)) el.classList.add('selected');
+  });
+}
+
+function closeDetail() {
+  document.getElementById('day-detail').classList.remove('open');
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.querySelectorAll('.cal-day.selected').forEach(el => el.classList.remove('selected'));
+}
+
+async function loadMonth() {
+  if (!currentUser) return;
+  const start = `${viewYear}-${fmt2(viewMonth)}-01`;
+  const lastDay = new Date(viewYear, viewMonth, 0).getDate();
+  const end = `${viewYear}-${fmt2(viewMonth)}-${fmt2(lastDay)}`;
+  try {
+    allSchedules = await apiFetch(`/api/schedules?employee_id=${currentUser.id}&start=${start}&end=${end}`);
+  } catch(e) { allSchedules = []; }
+  renderCalendar();
+}
+
+function changeMonth(delta) {
+  viewMonth += delta;
+  if (viewMonth > 12) { viewMonth = 1; viewYear++; }
+  if (viewMonth < 1)  { viewMonth = 12; viewYear--; }
+  loadMonth();
+}
+
+(async () => {
+  API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : '';
+  const { data: { session } } = await _sb.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+  try { currentUser = await apiFetch('/api/employees/me'); }
+  catch(e) { window.location.href = '/login.html'; return; }
+  document.getElementById('emp-name-badge').textContent = currentUser.name || '';
+  await loadMonth();
+})();
+</script>
+</body>
+</html>

@@ -87,10 +87,76 @@
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
   const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  // 已登入則直接跳轉
-  _sb.auth.getSession().then(({ data: { session } }) => {
-    if (session) window.location.href = '/dashboard.html';
+  const MANAGER_ROLES = ['chairman', 'ceo', 'manager', 'hr', 'admin'];
+
+  // 已登入則根據角色跳轉
+  _sb.auth.getSession().then(async ({ data: { session } }) => {
+    if (!session) return;
+    try {
+      const res = await fetch('/api/employees/me', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      });
+      const user = res.ok ? await res.json() : null;
+      redirectByRole(user?.role || 'employee');
+    } catch {
+      window.location.href = '/dashboard.html';
+    }
   });
+
+  function redirectByRole(role) {
+    if (role === 'employee') {
+      window.location.href = '/employee-app.html';
+    } else if (MANAGER_ROLES.includes(role)) {
+      const preferred = localStorage.getItem('preferred_version');
+      if (preferred) {
+        window.location.href = preferred === 'desktop' ? '/dashboard.html' : '/employee-app.html';
+      } else {
+        showVersionModal();
+      }
+    } else {
+      window.location.href = '/dashboard.html';
+    }
+  }
+
+  function showVersionModal() {
+    const modal = document.createElement('div');
+    modal.innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px">
+        <div style="background:#0F1117;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:28px;max-width:340px;width:100%">
+          <div style="text-align:center;margin-bottom:24px">
+            <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:8px">選擇介面</div>
+            <div style="font-size:14px;color:rgba(255,255,255,.5)">你可以隨時在設定中切換</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <button onclick="gotoVersion('desktop')" style="background:#5B8DEF;border:none;border-radius:12px;padding:16px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:12px;width:100%">
+              <span style="font-size:24px">🖥️</span>
+              <div style="text-align:left">
+                <div>電腦版（管理後台）</div>
+                <div style="font-size:12px;opacity:.7;font-weight:400">完整管理功能</div>
+              </div>
+            </button>
+            <button onclick="gotoVersion('mobile')" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:12px;width:100%">
+              <span style="font-size:24px">📱</span>
+              <div style="text-align:left">
+                <div>手機版（員工介面）</div>
+                <div style="font-size:12px;opacity:.7;font-weight:400">打卡、班表、請假</div>
+              </div>
+            </button>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:16px;cursor:pointer;font-size:13px;color:rgba(255,255,255,.4)">
+            <input type="checkbox" id="remember-version" style="width:16px;height:16px">
+            記住我的選擇
+          </label>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+
+  function gotoVersion(v) {
+    const remember = document.getElementById('remember-version')?.checked;
+    if (remember) localStorage.setItem('preferred_version', v);
+    window.location.href = v === 'desktop' ? '/dashboard.html' : '/employee-app.html';
+  }
 
   function fillDemo(email, pw) {
     document.getElementById('email').value    = email;
@@ -113,7 +179,7 @@
     btn.innerHTML = '<div class="spinner"></div>';
     btn.disabled  = true;
 
-    const { error } = await _sb.auth.signInWithPassword({ email, password });
+    const { data: authData, error } = await _sb.auth.signInWithPassword({ email, password });
 
     if (error) {
       errEl.textContent = '登入失敗：帳號或密碼不正確';
@@ -123,7 +189,15 @@
       return;
     }
 
-    window.location.href = '/dashboard.html';
+    try {
+      const r = await fetch('/api/employees/me', {
+        headers: { 'Authorization': `Bearer ${authData.session.access_token}` }
+      });
+      const user = r.ok ? await r.json() : null;
+      redirectByRole(user?.role || 'employee');
+    } catch {
+      window.location.href = '/dashboard.html';
+    }
   }
 
   document.getElementById('password').addEventListener('keydown', e => {

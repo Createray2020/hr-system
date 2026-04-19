@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>我的資料</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
+.mobile-app{max-width:430px;margin:0 auto;min-height:100vh;background:#0F1117;display:flex;flex-direction:column}
+.mobile-header{padding:52px 20px 12px;display:flex;justify-content:space-between;align-items:flex-start}
+.page-title-lg{font-size:22px;font-weight:700}
+.scroll-content{flex:1;overflow-y:auto;padding-bottom:100px}
+
+/* ── 頭像區 ── */
+.profile-hero{padding:16px 16px 20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.profile-avatar{width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#3B5FD4,#7B6CF6);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;flex-shrink:0}
+.profile-name{font-size:22px;font-weight:700;text-align:center}
+.profile-pos{font-size:13px;color:rgba(255,255,255,.45);text-align:center;margin-top:2px}
+.profile-chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:4px}
+.p-chip{padding:3px 12px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(91,141,239,.15);color:#7FBBFF}
+.p-chip-green{background:rgba(74,222,128,.12);color:#4ADE80}
+
+/* ── 資料卡片 ── */
+.mobile-card{margin:0 16px 12px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:16px;padding:16px}
+.card-label{font-size:11px;color:rgba(255,255,255,.35);font-family:'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase;margin-bottom:12px}
+.info-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:0.5px solid rgba(255,255,255,.05)}
+.info-row:last-child{border-bottom:none}
+.info-key{font-size:12px;color:rgba(255,255,255,.4)}
+.info-val{font-size:13px;font-weight:500;text-align:right;max-width:60%}
+
+/* ── 按鈕 ── */
+.switch-version-btn{display:none;width:calc(100% - 32px);margin:0 16px 12px;padding:14px;background:rgba(91,141,239,.1);border:1px solid rgba(91,141,239,.2);border-radius:12px;color:#5B8DEF;font-size:14px;font-weight:600;cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:all .15s}
+.switch-version-btn:active{background:rgba(91,141,239,.18)}
+.logout-btn{width:calc(100% - 32px);margin:0 16px 12px;padding:14px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2);border-radius:12px;color:#F87171;font-size:14px;font-weight:600;cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:all .15s}
+.logout-btn:active{background:rgba(248,113,113,.15)}
+
+/* ── 版本資訊 ── */
+.version-badge{text-align:center;padding:16px;font-size:11px;color:rgba(255,255,255,.2);font-family:'DM Mono',monospace}
+
+/* ── 底部導航 ── */
+.mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
+.mobile-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-decoration:none}
+.mobile-nav-item .nav-icon{font-size:22px;opacity:.35}
+.mobile-nav-item .nav-label{font-size:10px;color:rgba(255,255,255,.35)}
+.mobile-nav-item.active .nav-icon{opacity:1}
+.mobile-nav-item.active .nav-label{color:#5B8DEF}
+</style>
+</head>
+<body>
+<div class="mobile-app">
+  <div class="mobile-header">
+    <div class="page-title-lg">我的</div>
+  </div>
+
+  <div class="scroll-content">
+    <!-- 頭像與姓名 -->
+    <div class="profile-hero">
+      <div class="profile-avatar" id="profile-avatar">—</div>
+      <div>
+        <div class="profile-name" id="profile-name">—</div>
+        <div class="profile-pos" id="profile-pos">—</div>
+        <div class="profile-chips">
+          <span class="p-chip" id="profile-dept">—</span>
+          <span class="p-chip p-chip-green" id="profile-status">在職</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 職務資料 -->
+    <div class="mobile-card">
+      <div class="card-label">職務資料</div>
+      <div class="info-row">
+        <span class="info-key">員工編號</span>
+        <span class="info-val" id="i-empno" style="font-family:'DM Mono',monospace">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">部門</span>
+        <span class="info-val" id="i-dept">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">職稱</span>
+        <span class="info-val" id="i-position">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">職等 / 職級</span>
+        <span class="info-val" id="i-grade">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">雇用類型</span>
+        <span class="info-val" id="i-emptype">—</span>
+      </div>
+    </div>
+
+    <!-- 到職資訊 -->
+    <div class="mobile-card">
+      <div class="card-label">到職資訊</div>
+      <div class="info-row">
+        <span class="info-key">到職日期</span>
+        <span class="info-val" id="i-hire" style="font-family:'DM Mono',monospace">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">年資</span>
+        <span class="info-val" id="i-seniority">—</span>
+      </div>
+    </div>
+
+    <!-- 聯絡資料 -->
+    <div class="mobile-card">
+      <div class="card-label">聯絡資料</div>
+      <div class="info-row">
+        <span class="info-key">電話</span>
+        <span class="info-val" id="i-phone">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-key">Email</span>
+        <span class="info-val" id="i-email" style="font-size:12px">—</span>
+      </div>
+    </div>
+
+    <!-- 切換電腦版（管理者才顯示） -->
+    <button class="switch-version-btn" id="switch-version-btn" onclick="switchToDesktop()">
+      🖥️ 切換至電腦版管理後台
+    </button>
+
+    <!-- 登出 -->
+    <button class="logout-btn" onclick="doLogout()">登出</button>
+
+    <div class="version-badge">HR System v2 · 手機版</div>
+  </div>
+
+  <nav class="mobile-bottom-nav">
+    <a href="/employee-app.html" class="mobile-nav-item">
+      <span class="nav-icon">🏠</span><span class="nav-label">首頁</span>
+    </a>
+    <a href="/employee-schedule.html" class="mobile-nav-item">
+      <span class="nav-icon">🗓️</span><span class="nav-label">班表</span>
+    </a>
+    <a href="/employee-leave.html" class="mobile-nav-item">
+      <span class="nav-icon">📋</span><span class="nav-label">請假</span>
+    </a>
+    <a href="/employee-salary.html" class="mobile-nav-item">
+      <span class="nav-icon">💰</span><span class="nav-label">薪資</span>
+    </a>
+    <a href="/employee-profile.html" class="mobile-nav-item active">
+      <span class="nav-icon">👤</span><span class="nav-label">我的</span>
+    </a>
+  </nav>
+</div>
+
+<script>
+const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const MANAGER_ROLES = ['chairman', 'ceo', 'manager', 'hr', 'admin'];
+let API = '';
+
+async function apiFetch(path, opts={}) {
+  const { data: { session } } = await _sb.auth.getSession();
+  const res = await fetch(API + path, {
+    headers:{'Content-Type':'application/json',...(session?{'Authorization':`Bearer ${session.access_token}`}:{})},
+    ...opts
+  });
+  if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
+  return res.json();
+}
+
+function calcSeniority(hireDate) {
+  if (!hireDate) return '—';
+  const h = new Date(hireDate), n = new Date();
+  let y = n.getFullYear()-h.getFullYear(), m = n.getMonth()-h.getMonth();
+  if (m < 0) { y--; m += 12; }
+  return y > 0 ? `${y} 年 ${m} 個月` : `${m} 個月`;
+}
+
+function switchToDesktop() {
+  if (confirm('確定切換至電腦版管理後台？')) {
+    localStorage.setItem('preferred_version', 'desktop');
+    window.location.href = '/dashboard.html';
+  }
+}
+
+async function doLogout() {
+  await _sb.auth.signOut();
+  localStorage.removeItem('preferred_version');
+  window.location.href = '/login.html';
+}
+
+(async () => {
+  API = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'http://localhost:3000' : '';
+  const { data: { session } } = await _sb.auth.getSession();
+  if (!session) { window.location.href = '/login.html'; return; }
+
+  let u;
+  try { u = await apiFetch('/api/employees/me'); }
+  catch(e) { window.location.href = '/login.html'; return; }
+
+  // Avatar
+  document.getElementById('profile-avatar').textContent = (u.avatar || u.name?.[0] || '?');
+  document.getElementById('profile-name').textContent   = u.name    || '—';
+  document.getElementById('profile-pos').textContent    = u.position || '—';
+  document.getElementById('profile-dept').textContent   = u.dept    || '—';
+
+  const statusMap = { active:'在職', resigned:'離職', inactive:'停職' };
+  const statusEl = document.getElementById('profile-status');
+  statusEl.textContent = statusMap[u.status] || u.status || '在職';
+  if (u.status === 'resigned') statusEl.style.color = '#F87171';
+
+  // 職務資料
+  document.getElementById('i-empno').textContent    = u.emp_no || '—';
+  document.getElementById('i-dept').textContent     = u.dept   || '—';
+  document.getElementById('i-position').textContent = u.position || '—';
+  const grade = [u.grade, u.grade_level ? `第 ${u.grade_level} 級` : null].filter(Boolean).join(' / ');
+  document.getElementById('i-grade').textContent    = grade || '—';
+  const etMap = { full_time:'正職', part_time:'兼職' };
+  document.getElementById('i-emptype').textContent  = etMap[u.employment_type] || u.employment_type || '—';
+
+  // 到職
+  document.getElementById('i-hire').textContent      = u.hire_date  || '—';
+  document.getElementById('i-seniority').textContent = calcSeniority(u.hire_date);
+
+  // 聯絡
+  document.getElementById('i-phone').textContent = u.phone || '—';
+  document.getElementById('i-email').textContent = u.email || '—';
+
+  // 管理者才顯示切換按鈕
+  if (MANAGER_ROLES.includes(u.role)) {
+    document.getElementById('switch-version-btn').style.display = '';
+  }
+})();
+</script>
+</body>
+</html>
