@@ -24,9 +24,10 @@
   .detail-item .d-label{font-size:11px;color:var(--text-dim);margin-bottom:2px}
   .detail-item .d-value{font-size:14px}
   .salary-display{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:var(--accent2)}
-  .view-toggle{display:flex;gap:6px;margin-bottom:20px}
-  .view-btn{padding:7px 14px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-size:13px;cursor:pointer;transition:all .2s;font-family:'Noto Sans TC',sans-serif}
-  .view-btn.active{background:var(--surface2);color:var(--text);border-color:var(--accent)}
+  .view-toggle{display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .view-btn{padding:7px 12px;background:transparent;border:none;cursor:pointer;font-size:15px;color:var(--text-dim);transition:all .15s}
+  .view-btn:hover{background:var(--surface2)}
+  .view-btn.active{background:var(--accent);color:#fff}
   .readonly-field{background:var(--surface)!important;color:var(--text-dim)!important;cursor:default}
   .salary-summary{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
   .sal-item .sal-label{font-size:10px;color:var(--text-dim);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px}
@@ -47,6 +48,35 @@
   th.sortable:hover{color:var(--text)}
   .si{margin-left:2px;font-size:9px;color:var(--text-dim)}
   th.sorted-asc .si,th.sorted-desc .si{color:var(--accent2)}
+  /* ── Spreadsheet view ── */
+  .sheet-wrap{overflow:auto;max-height:calc(100vh - 260px);border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+  .sheet-table{border-collapse:collapse;table-layout:fixed;width:max-content;min-width:100%}
+  .sheet-table th,.sheet-table td{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:0;height:34px;white-space:nowrap;overflow:hidden;position:relative}
+  .sheet-table tr:first-child th{border-top:none}
+  .sheet-table td:first-child,.sheet-table th:first-child{border-left:none}
+  .sheet-table thead th{background:var(--surface2);font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.4px;color:var(--text-dim);text-transform:uppercase;position:sticky;top:0;z-index:2;padding:0 8px;user-select:none}
+  .sheet-table th:first-child,.sheet-table td:first-child{position:sticky;left:0;z-index:1;background:var(--surface2)}
+  .sheet-table thead th:first-child{z-index:3}
+  .sheet-table tbody tr:nth-child(even) td{background:rgba(255,255,255,.018)}
+  .sheet-table tbody tr:nth-child(even) td:first-child{background:rgba(255,255,255,.035)}
+  .sheet-table tbody tr.row-resigned td{opacity:.45}
+  .ci{padding:0 8px;height:34px;display:flex;align-items:center;font-size:12px;cursor:text;gap:4px}
+  .ci.ro{cursor:default}.ci.acc{color:var(--accent2);font-family:'DM Mono',monospace;font-weight:600}.ci.mn{font-family:'DM Mono',monospace}
+  .cell-edit-wrap{height:34px;display:flex;align-items:stretch}
+  .cell-input{width:100%;background:var(--bg);border:2px solid var(--accent);color:var(--text);font-size:12px;font-family:'Noto Sans TC',sans-serif;padding:0 6px;outline:none;box-sizing:border-box}
+  .cell-input.mn{font-family:'DM Mono',monospace}
+  @keyframes fok{0%,100%{background:transparent}40%{background:rgba(76,175,80,.28)}}
+  @keyframes ferr{0%,100%{background:transparent}40%{background:rgba(244,67,54,.28)}}
+  .f-ok{animation:fok .65s ease}.f-err{animation:ferr .65s ease}
+  .rh{position:absolute;top:0;right:0;width:5px;height:100%;cursor:col-resize;z-index:4}
+  .rh:hover{background:var(--accent);opacity:.5}
+  .cbadge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600}
+  .cb-active{background:rgba(76,175,80,.2);color:#81C784}.cb-inactive{background:rgba(255,152,0,.2);color:#FFB74D}.cb-resigned{background:rgba(180,180,180,.15);color:#9E9E9E}
+  .cb-full{color:#7EB3FF}.cb-part{color:#FFA050}
+  .col-sort{margin-left:2px;font-size:9px;color:var(--text-dim)}
+  th.sorted-asc .col-sort,th.sorted-desc .col-sort{color:var(--accent2)}
+  .sheet-footer{padding:10px 0 0;display:flex;align-items:center;gap:12px}
+  .save-hint{font-size:11px;color:var(--text-dim)}
 </style>
 </head>
 <body data-page="employees">
@@ -59,6 +89,11 @@
         <div class="page-sub">管理所有員工個人與職務資訊</div>
       </div>
       <div class="header-actions">
+        <div class="view-toggle">
+          <button class="view-btn active" id="view-card" onclick="setView('card')" title="卡片檢視">🃏</button>
+          <button class="view-btn" id="view-list" onclick="setView('list')" title="列表檢視">📋</button>
+          <button class="view-btn" id="view-table" onclick="setView('table')" title="試算表">📊</button>
+        </div>
         <button class="btn btn-primary" onclick="openAddModal()">＋ 新增員工</button>
       </div>
     </div>
@@ -82,22 +117,16 @@
         <option value="">全部</option>
         <option value="resigned">已離職</option>
       </select>
-      <div style="margin-left:auto">
-        <div class="view-toggle">
-          <button class="view-btn active" id="vb-card" onclick="setView('card',this)">⊞ 卡片</button>
-          <button class="view-btn" id="vb-table" onclick="setView('table',this)">≡ 列表</button>
-        </div>
-      </div>
     </div>
 
     <!-- Card view -->
-    <div id="card-view">
+    <div id="view-card-content">
       <div class="emp-grid" id="emp-grid"></div>
       <div id="card-empty" class="empty-state" style="display:none"><div class="icon">👤</div><div>找不到符合的員工</div></div>
     </div>
 
-    <!-- Table view -->
-    <div id="table-view" style="display:none">
+    <!-- List view -->
+    <div id="view-list-content" style="display:none">
       <div class="table-wrap">
         <table>
           <thead><tr>
@@ -114,6 +143,20 @@
           </tr></thead>
           <tbody id="emp-tbody"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Spreadsheet view -->
+    <div id="view-table-content" style="display:none">
+      <div class="sheet-wrap" id="sht-sheet-wrap">
+        <table class="sheet-table" id="sht-sheet-table">
+          <colgroup id="sht-colgroup"></colgroup>
+          <thead><tr id="sht-head-row"></tr></thead>
+          <tbody id="sht-sheet-body"></tbody>
+        </table>
+      </div>
+      <div class="sheet-footer">
+        <span id="sht-save-status" class="save-hint"></span>
       </div>
     </div>
   </main>
@@ -263,8 +306,9 @@ function toast(msg, type='success') {
 
 let allEmployees  = [];
 let allSalaryGrades = [];
+let allDepts      = [];
 let editingId     = null;
-let currentView   = 'card';
+let currentMode   = 'card';
 let sortField = '', sortDir = '';
 
 const GRADE_ORDER  = { '一等':1, '二等':2, '三等':3 };
@@ -333,6 +377,7 @@ async function loadSalaryGrades() {
 async function loadDepts() {
   try {
     const depts = await api('/api/departments');
+    allDepts = depts;
     const opts = depts.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
     document.getElementById('f-dept').innerHTML    = opts;
     document.getElementById('dept-filter').innerHTML =
@@ -384,7 +429,9 @@ function getFiltered() {
 }
 
 function renderList() {
-  if (currentView === 'card') renderCards(); else renderTable();
+  if (currentMode === 'card') renderCards();
+  else if (currentMode === 'list') renderTable();
+  else renderStaffTable();
 }
 
 function renderCards() {
@@ -462,13 +509,15 @@ function onExtraAllowChange() {
   document.getElementById('disp-total').textContent = '$' + total.toLocaleString();
 }
 
-function setView(v, el) {
-  currentView = v;
-  document.querySelectorAll('.view-btn').forEach(b=>b.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('card-view').style.display  = v==='card'  ? '' : 'none';
-  document.getElementById('table-view').style.display = v==='table' ? '' : 'none';
-  renderList();
+function setView(mode) {
+  currentMode = mode;
+  ['card','list','table'].forEach(m => {
+    document.getElementById('view-'+m+'-content').style.display = m === mode ? '' : 'none';
+    document.getElementById('view-'+m).classList.toggle('active', m === mode);
+  });
+  if (mode === 'table') renderStaffTable();
+  else if (mode === 'list') renderTable();
+  else renderCards();
 }
 
 /* ── Employment type + emp_no auto-generation ── */
@@ -717,6 +766,317 @@ async function resignEmployee() {
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/* ══════════════════════════════════════════
+   Spreadsheet view
+══════════════════════════════════════════ */
+let shtSortField = '', shtSortDir = '';
+let shtEditing   = null;
+let shtReady     = false;
+let _shtSaveTimer;
+
+const SHEET_COLS = [
+  { key:'emp_no',           label:'員工編號', w:102, ro:true, cls:'mn' },
+  { key:'name',             label:'姓名',     w:88 },
+  { key:'employment_type',  label:'雇用類型', w:84,
+    type:'select', opts:['full_time','part_time'],
+    disp: v => v==='part_time' ? '<span class="cb-part">兼職</span>' : '<span class="cb-full">正職</span>',
+    editVal: v => v },
+  { key:'dept',             label:'部門',     w:88,  type:'select-dept' },
+  { key:'position',         label:'職稱',     w:108 },
+  { key:'grade',            label:'職等',     w:56,
+    type:'select', opts:['','一等','二等','三等'] },
+  { key:'grade_level',      label:'職級',     w:48,  type:'number', cls:'mn' },
+  { key:'hire_date',        label:'入職日期', w:100, type:'date',   cls:'mn' },
+  { key:'_seniority',       label:'年資',     w:72,  ro:true,
+    compute: e => calcSeniority(e.hire_date) },
+  { key:'base_salary',      label:'本薪',     w:86,  type:'number', cls:'mn',
+    disp: v => v ? '$'+Number(v).toLocaleString() : '—' },
+  { key:'grade_allowance',  label:'職等加給', w:86,  type:'number', cls:'mn',
+    disp: v => v ? '+$'+Number(v).toLocaleString() : '—' },
+  { key:'attendance_bonus', label:'全勤',     w:72,  type:'number', cls:'mn',
+    disp: v => v ? '+$'+Number(v).toLocaleString() : '—' },
+  { key:'manager_allowance',label:'主管加給', w:86,  type:'number', cls:'mn',
+    disp: v => v ? '+$'+Number(v).toLocaleString() : '—' },
+  { key:'extra_allowance',  label:'額外加給', w:86,  type:'number', cls:'mn',
+    disp: v => v ? '+$'+Number(v).toLocaleString() : '—' },
+  { key:'_total',           label:'月薪合計', w:100, ro:true, cls:'acc mn',
+    compute: e => {
+      const t = (e.base_salary||0)+(e.grade_allowance||0)+
+                (e.attendance_bonus||0)+(e.manager_allowance||0)+(e.extra_allowance||0);
+      return t ? '$'+t.toLocaleString() : '—';
+    }
+  },
+  { key:'status',           label:'狀態',     w:72,
+    type:'select', opts:['active','inactive','resigned'],
+    disp: v => {
+      const m={active:'在職',inactive:'暫停',resigned:'已離職'};
+      const c={active:'cb-active',inactive:'cb-inactive',resigned:'cb-resigned'};
+      return `<span class="cbadge ${c[v]||''}">${m[v]||v||'—'}</span>`;
+    },
+    editVal: v => v },
+];
+
+function shtGetRaw(col, emp) {
+  if (col.compute) return col.compute(emp);
+  return emp[col.key] ?? '';
+}
+
+function shtRenderVal(col, emp) {
+  const raw = shtGetRaw(col, emp);
+  if (col.disp) return col.disp(raw);
+  if (raw === '' || raw === null || raw === undefined) return '';
+  return String(raw);
+}
+
+function renderStaffTable() {
+  if (!shtReady) {
+    shtBuildColgroup();
+    shtBuildHead();
+    shtReady = true;
+  }
+  if (shtEditing) shtCommitEdit(false);
+  shtRenderBody();
+}
+
+function shtBuildColgroup() {
+  document.getElementById('sht-colgroup').innerHTML =
+    SHEET_COLS.map(c => `<col style="width:${c.w}px;min-width:${c.w}px">`).join('');
+}
+
+function shtBuildHead() {
+  const tr = document.getElementById('sht-head-row');
+  tr.innerHTML = '';
+  SHEET_COLS.forEach((col, i) => {
+    const th = document.createElement('th');
+    th.style.cursor = 'pointer';
+    th.title = `點擊排序：${col.label}`;
+    th.appendChild(document.createTextNode(col.label));
+    const sp = document.createElement('span');
+    sp.className = 'col-sort';
+    sp.textContent = '↕';
+    th.appendChild(sp);
+    th.addEventListener('click', e => {
+      if (e.target.classList.contains('rh')) return;
+      shtSortByCol(col.key);
+    });
+    const rh = document.createElement('div');
+    rh.className = 'rh';
+    th.appendChild(rh);
+    shtInitResize(rh, i);
+    tr.appendChild(th);
+  });
+}
+
+function shtInitResize(handle, idx) {
+  let sx, sw;
+  handle.addEventListener('mousedown', e => {
+    e.preventDefault(); e.stopPropagation();
+    sx = e.clientX;
+    const col = document.querySelectorAll('#sht-colgroup col')[idx];
+    sw = parseInt(col.style.width) || SHEET_COLS[idx].w;
+    const mv = ev => {
+      const w = Math.max(44, sw + ev.clientX - sx);
+      document.querySelectorAll('#sht-colgroup col')[idx].style.width =
+      document.querySelectorAll('#sht-colgroup col')[idx].style.minWidth = w + 'px';
+    };
+    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+}
+
+function shtRenderBody() {
+  const tbody = document.getElementById('sht-sheet-body');
+  tbody.innerHTML = '';
+  const rows = shtGetSorted(getFiltered());
+  rows.forEach(emp => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = emp.id;
+    if (emp.status === 'resigned') tr.classList.add('row-resigned');
+    SHEET_COLS.forEach(col => {
+      const td = document.createElement('td');
+      td.dataset.id  = emp.id;
+      td.dataset.key = col.key;
+      shtRenderCell(td, col, emp);
+      if (!col.ro && !col.compute) {
+        td.addEventListener('click', () => shtStartEdit(td, col, emp));
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+function shtRenderCell(td, col, emp) {
+  const div = document.createElement('div');
+  div.className = 'ci' + (col.ro || col.compute ? ' ro' : '') + (col.cls ? ' '+col.cls : '');
+  div.innerHTML = shtRenderVal(col, emp);
+  td.innerHTML = '';
+  td.appendChild(div);
+}
+
+function shtRefreshComputedCells(tr, emp) {
+  if (!tr) return;
+  SHEET_COLS.forEach(c => {
+    if (!c.compute) return;
+    const ct = tr.querySelector(`td[data-key="${c.key}"]`);
+    if (ct) shtRenderCell(ct, c, emp);
+  });
+}
+
+function shtStartEdit(td, col, emp) {
+  if (shtEditing && shtEditing.td !== td) shtCommitEdit(true);
+  if (shtEditing?.td === td) return;
+  const raw = emp[col.key] ?? '';
+  let input;
+  if (col.type === 'select' || col.type === 'select-dept') {
+    input = document.createElement('select');
+    input.className = 'cell-input';
+    const source = col.type === 'select-dept' ? allDepts.map(d => d.name) : col.opts;
+    source.forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt;
+      o.textContent = col.type === 'select-dept' ? opt
+        : (col.editVal ? col.editVal(opt) : opt) || (opt === '' ? '（無）' : opt);
+      if (opt === raw) o.selected = true;
+      input.appendChild(o);
+    });
+    input.addEventListener('change', () => shtCommitEdit(true));
+  } else if (col.type === 'date') {
+    input = document.createElement('input');
+    input.type = 'date'; input.value = raw || '';
+    input.className = 'cell-input mn';
+  } else if (col.type === 'number') {
+    input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.value = raw === '' ? '' : Number(raw);
+    input.className = 'cell-input mn';
+  } else {
+    input = document.createElement('input');
+    input.type = 'text'; input.value = String(raw);
+    input.className = 'cell-input';
+  }
+  td.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'cell-edit-wrap';
+  wrap.appendChild(input);
+  td.appendChild(wrap);
+  shtEditing = { td, col, emp, oldRaw: raw };
+  input.focus();
+  if (input.type === 'text' || input.type === 'number') input.select();
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); shtCommitEdit(true); }
+    if (e.key === 'Escape') { e.preventDefault(); shtCancelEdit(); }
+  });
+  input.addEventListener('blur', () => {
+    setTimeout(() => { if (shtEditing?.td === td) shtCommitEdit(true); }, 120);
+  });
+}
+
+async function shtCommitEdit(doSave) {
+  if (!shtEditing) return;
+  const ctx = shtEditing;
+  shtEditing = null;
+  const { td, col, emp } = ctx;
+  const input = td.querySelector('input, select');
+  const newRaw = input ? input.value : ctx.oldRaw;
+  const newVal = col.type === 'number'
+    ? (newRaw === '' ? null : parseFloat(newRaw) || 0)
+    : (newRaw === '' || newRaw === null ? null : newRaw);
+  const updEmp = { ...emp, [col.key]: newVal };
+  const ai = allEmployees.findIndex(e => e.id === emp.id);
+  if (ai >= 0) allEmployees[ai] = updEmp;
+  shtRenderCell(td, col, updEmp);
+  shtRefreshComputedCells(td.closest('tr'), updEmp);
+  if (col.key === 'status') {
+    td.closest('tr').classList.toggle('row-resigned', updEmp.status === 'resigned');
+  }
+  const unchanged = String(newRaw ?? '') === String(ctx.oldRaw ?? '');
+  if (!doSave || unchanged) return;
+  shtSetSaveStatus('儲存中…');
+  try {
+    await api(`/api/employees/${emp.id}`, { method:'PUT', body: JSON.stringify({ [col.key]: newVal }) });
+    shtFlash(td, 'ok');
+    shtSetSaveStatus('已儲存', 2500);
+  } catch(e) {
+    shtFlash(td, 'err');
+    toast('儲存失敗：' + e.message, 'error');
+    shtSetSaveStatus('儲存失敗', 2500);
+    if (ai >= 0) allEmployees[ai] = emp;
+    shtRenderCell(td, col, emp);
+    shtRefreshComputedCells(td.closest('tr'), emp);
+  }
+}
+
+function shtCancelEdit() {
+  if (!shtEditing) return;
+  const { td, col, emp } = shtEditing;
+  shtEditing = null;
+  shtRenderCell(td, col, emp);
+}
+
+function shtFlash(td, type) {
+  td.classList.remove('f-ok','f-err');
+  void td.offsetWidth;
+  td.classList.add(type === 'ok' ? 'f-ok' : 'f-err');
+}
+
+function shtSetSaveStatus(msg, clearAfter) {
+  const el = document.getElementById('sht-save-status');
+  if (el) el.textContent = msg;
+  clearTimeout(_shtSaveTimer);
+  if (clearAfter) _shtSaveTimer = setTimeout(() => { if (el) el.textContent = ''; }, clearAfter);
+}
+
+function shtSortByCol(key) {
+  if (shtSortField === key) {
+    shtSortDir = shtSortDir === 'asc' ? 'desc' : shtSortDir === 'desc' ? '' : 'asc';
+    if (!shtSortDir) shtSortField = '';
+  } else {
+    shtSortField = key; shtSortDir = 'asc';
+  }
+  shtUpdateSortIndicators();
+  shtRenderBody();
+}
+
+function shtGetSorted(rows) {
+  if (!shtSortField || !shtSortDir) return rows;
+  return [...rows].sort((a, b) => {
+    let cmp = 0;
+    if (shtSortField === '_seniority') {
+      cmp = String(a.hire_date||'').localeCompare(String(b.hire_date||''), 'zh-TW');
+    } else if (shtSortField === '_total') {
+      const ta = (a.base_salary||0)+(a.grade_allowance||0)+(a.attendance_bonus||0)+(a.manager_allowance||0)+(a.extra_allowance||0);
+      const tb = (b.base_salary||0)+(b.grade_allowance||0)+(b.attendance_bonus||0)+(b.manager_allowance||0)+(b.extra_allowance||0);
+      cmp = ta - tb;
+    } else if (shtSortField === 'grade') {
+      const ga = GRADE_ORDER[a.grade]??0, gb = GRADE_ORDER[b.grade]??0;
+      cmp = ga !== gb ? ga - gb : (a.grade_level??0) - (b.grade_level??0);
+    } else if (shtSortField === 'status') {
+      cmp = (STATUS_ORDER[a.status]??3) - (STATUS_ORDER[b.status]??3);
+    } else {
+      const av = a[shtSortField]??'', bv = b[shtSortField]??'';
+      cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv : String(av).localeCompare(String(bv), 'zh-TW');
+    }
+    return shtSortDir === 'asc' ? cmp : -cmp;
+  });
+}
+
+function shtUpdateSortIndicators() {
+  const ths = document.querySelectorAll('#sht-head-row th');
+  SHEET_COLS.forEach((col, i) => {
+    const th = ths[i]; if (!th) return;
+    const sp = th.querySelector('.col-sort'); if (!sp) return;
+    th.classList.remove('sorted-asc','sorted-desc');
+    if (shtSortField === col.key) {
+      sp.textContent = shtSortDir === 'asc' ? '↑' : shtSortDir === 'desc' ? '↓' : '↕';
+      if (shtSortDir) th.classList.add(shtSortDir === 'asc' ? 'sorted-asc' : 'sorted-desc');
+    } else {
+      sp.textContent = '↕';
+    }
+  });
+}
 </script>
 <script src="/js/layout.js"></script>
 </body>

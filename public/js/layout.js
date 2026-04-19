@@ -47,9 +47,8 @@
     {
       title: '人員管理',
       items: [
-        { page:'employees',   icon:'👥', label:'員工資料',   href:'/employees.html' },
-        { page:'staff-table', icon:'📊', label:'員工試算表', href:'/staff-table.html' },
-        { page:'orgchart',    icon:'🗂️', label:'組織圖',     href:'/orgchart.html' },
+        { page:'employees',   icon:'👥', label:'員工資料', href:'/employees.html' },
+        { page:'orgchart',    icon:'🗂️', label:'組織圖',   href:'/orgchart.html' },
         { page:'departments', icon:'🏢', label:'部門管理',   href:'/departments.html' },
       ]
     },
