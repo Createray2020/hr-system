@@ -38,9 +38,10 @@
   const page = document.body.dataset.page || '';
   const navItems = [
     { page:'dashboard',  icon:'🏠', label:'總覽',     href:'/dashboard.html' },
+    { page:'calendar',   icon:'📅', label:'行事曆',   href:'/calendar.html' },
     { page:'leave',      icon:'📋', label:'請假審批', href:'/leave.html' },
     { page:'attendance', icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
-    { page:'schedule',   icon:'📅', label:'排班管理', href:'/schedule.html' },
+    { page:'schedule',   icon:'🗓️', label:'排班管理', href:'/schedule.html' },
     { page:'employees',   icon:'👥', label:'員工資料',   href:'/employees.html' },
     { page:'staff-table', icon:'📊', label:'員工試算表', href:'/staff-table.html' },
     { page:'orgchart',    icon:'🗂️', label:'組織圖',     href:'/orgchart.html' },

@@ -31,6 +31,21 @@
   .today-time{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-dim)}
   .birthday-item{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px;border-bottom:1px solid rgba(42,48,72,.4)}
   .birthday-item:last-child{border-bottom:none}
+  /* Mini Calendar */
+  .mini-cal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .mini-cal-title{font-size:14px;font-weight:600}
+  .mini-cal-link{font-size:12px;color:var(--accent);text-decoration:none}
+  .mini-cal-link:hover{text-decoration:underline}
+  .mini-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+  .mini-wday{text-align:center;font-size:10px;font-family:'DM Mono',monospace;color:var(--text-dim);padding:2px 0;margin-bottom:4px}
+  .mini-wday.sun{color:#ef4444}.mini-wday.sat{color:#3b82f6}
+  .mini-day{text-align:center;font-size:11px;padding:3px 2px;border-radius:4px;cursor:pointer;position:relative;line-height:1.3}
+  .mini-day:hover{background:rgba(255,255,255,.06)}
+  .mini-day.today{background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;margin:0 auto}
+  .mini-day.has-events::after{content:'';display:block;width:4px;height:4px;border-radius:50%;background:var(--accent2);margin:1px auto 0}
+  .mini-day.today::after{display:none}
+  .mini-day.other-month{color:var(--text-dim);opacity:.35}
+  .mini-day.holiday{color:#f87171}
 </style>
 </head>
 <body data-page="dashboard">
@@ -103,6 +118,15 @@
       </div>
     </div>
 
+    <!-- 迷你行事曆 -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="mini-cal-hdr">
+        <div class="section-title" style="margin-bottom:0">本月行事曆</div>
+        <a class="mini-cal-link" href="/calendar.html">查看完整行事曆 →</a>
+      </div>
+      <div id="mini-calendar"><div style="color:var(--text-dim);font-size:13px">載入中…</div></div>
+    </div>
+
   </main>
 </div>
 
@@ -118,7 +142,7 @@ window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
   setWelcome();
   try {
-    await Promise.all([loadDashboard()]);
+    await Promise.all([loadDashboard(), loadMiniCalendar()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
 
@@ -244,6 +268,69 @@ async function loadDashboard() {
         <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--purple)">${e.birth_date?.slice(5)||'—'}</div>
       </div>`).join('');
   }
+}
+
+async function loadMiniCalendar() {
+  const now   = new Date();
+  const year  = now.getFullYear();
+  const month = now.getMonth();
+  const today = now.toISOString().slice(0, 10);
+
+  // Fetch holidays for current year (light request, cached by browser)
+  let holidays = new Set();
+  try {
+    const hols = await window.api(`/api/calendar?_resource=holidays&year=${year}`);
+    (hols || []).forEach(h => holidays.add(h.date));
+  } catch { /* optional */ }
+
+  // Fetch approved leaves this month
+  let leaveDates = new Set();
+  try {
+    const ym    = `${year}-${String(month+1).padStart(2,'0')}`;
+    const leaves = await window.api(`/api/leaves?status=approved`).catch(()=>[]);
+    const monthStart = `${ym}-01`;
+    const monthEnd   = new Date(year, month+1, 0).toISOString().slice(0,10);
+    (leaves || []).forEach(r => {
+      if (r.end_date >= monthStart && r.start_date <= monthEnd) {
+        let d = new Date(r.start_date + 'T00:00:00');
+        const end = new Date(r.end_date + 'T00:00:00');
+        while (d <= end) {
+          leaveDates.add(d.toISOString().slice(0,10));
+          d.setDate(d.getDate()+1);
+        }
+      }
+    });
+  } catch { /* optional */ }
+
+  // Build grid
+  const firstDay = new Date(year, month, 1);
+  const lastDay  = new Date(year, month + 1, 0);
+  const startWday = firstDay.getDay();
+
+  const WDAYS = ['日','一','二','三','四','五','六'];
+  let html = '<div class="mini-cal-grid">';
+  html += WDAYS.map((w,i) => `<div class="mini-wday ${i===0?'sun':i===6?'sat':''}">${w}</div>`).join('');
+
+  // Padding
+  for (let i = 0; i < startWday; i++) {
+    const d = new Date(year, month, -startWday + i + 1);
+    html += `<div class="mini-day other-month">${d.getDate()}</div>`;
+  }
+  // Days
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const dt    = new Date(year, month, d).toISOString().slice(0, 10);
+    const isT   = dt === today;
+    const isH   = holidays.has(dt);
+    const hasEv = leaveDates.has(dt);
+    const cls   = [isT?'today':'',isH?'holiday':'',hasEv?'has-events':''].filter(Boolean).join(' ');
+    html += `<a class="mini-day ${cls}" href="/calendar.html" title="${dt}">${d}</a>`;
+  }
+  // Trailing padding
+  const trail = (7 - ((startWday + lastDay.getDate()) % 7)) % 7;
+  for (let i = 1; i <= trail; i++) html += `<div class="mini-day other-month">${i}</div>`;
+
+  html += '</div>';
+  document.getElementById('mini-calendar').innerHTML = html;
 }
 
 async function quickLeave(id, status) {

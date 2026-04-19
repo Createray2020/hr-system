@@ -1,5 +1,9 @@
-// api/attendance/index.js — GET list / POST manual entry (merged from manual.js)
+// api/attendance/index.js — GET list / POST manual entry / POST punch (merged)
+// POST ?_action=punch → 打卡（原 punch.js）
 import { supabase } from '../../lib/supabase.js';
+import { requireAuth, getEmployee } from '../../lib/auth.js';
+
+const WORK_START_HOUR = 9;
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -22,14 +26,66 @@ export default async function handler(req, res) {
     return res.status(200).json(data);
   }
 
-  // POST — 人工補登（原 manual.js 邏輯）
   if (req.method === 'POST') {
+    // ── 打卡 (_action=punch) ─────────────────────────────────────────
+    if (req.query._action === 'punch') {
+      const { employee_id, type } = req.body;
+      if (!employee_id || !['in','out'].includes(type))
+        return res.status(400).json({ error: '缺少必要參數' });
+
+      const user = await requireAuth(req, res);
+      if (!user) return;
+      const emp = await getEmployee(user);
+      if (!emp) return res.status(403).json({ error: '找不到員工資料' });
+      if (emp.id !== employee_id) return res.status(403).json({ error: '無法替他人打卡' });
+
+      const now    = new Date();
+      const today  = now.toISOString().split('T')[0];
+      const timeStr = now.toISOString();
+      const id     = `A${Date.now()}`;
+
+      if (type === 'in') {
+        const isLate = now.getHours() > WORK_START_HOUR ||
+                       (now.getHours() === WORK_START_HOUR && now.getMinutes() > 5);
+        const { data: existing } = await supabase
+          .from('attendance').select('id').eq('employee_id', employee_id).eq('work_date', today).single();
+        if (existing) {
+          const { error } = await supabase.from('attendance')
+            .update({ clock_in: timeStr, status: isLate ? 'late' : 'normal' })
+            .eq('id', existing.id);
+          if (error) return res.status(500).json({ error: error.message });
+        } else {
+          const { error } = await supabase.from('attendance').insert([{
+            id, employee_id, work_date: today,
+            clock_in: timeStr,
+            status: isLate ? 'late' : 'normal',
+          }]);
+          if (error) return res.status(500).json({ error: error.message });
+        }
+        return res.status(200).json({ message: '上班打卡成功', time: timeStr, status: isLate ? 'late' : 'normal' });
+      }
+
+      if (type === 'out') {
+        const { data: rec } = await supabase
+          .from('attendance').select('*').eq('employee_id', employee_id).eq('work_date', today).single();
+        if (!rec) return res.status(400).json({ error: '尚未上班打卡' });
+        const clockIn   = rec.clock_in ? new Date(rec.clock_in) : null;
+        const workHours = clockIn ? Math.round((now - clockIn) / 36000) / 100 : 0;
+        const otHours   = Math.max(0, Math.round((workHours - 8) * 2) / 2);
+        const { error } = await supabase.from('attendance')
+          .update({ clock_out: timeStr, work_hours: workHours, overtime_hours: otHours })
+          .eq('id', rec.id);
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ message: '下班打卡成功', time: timeStr, work_hours: workHours, overtime_hours: otHours });
+      }
+    }
+
+    // ── 人工補登（原 manual.js 邏輯）───────────────────────────────────
     const { employee_id, work_date, clock_in_time, clock_out_time, status, overtime_hours, note } = req.body;
     if (!employee_id || !work_date) return res.status(400).json({ error: '缺少必填欄位' });
 
     const clockIn  = clock_in_time  ? `${work_date}T${clock_in_time}:00+08:00`  : null;
     const clockOut = clock_out_time ? `${work_date}T${clock_out_time}:00+08:00` : null;
-
     let workHours = 0;
     if (clockIn && clockOut) {
       workHours = Math.round((new Date(clockOut) - new Date(clockIn)) / 36000) / 100;

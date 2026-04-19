@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>行事曆 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ── Calendar Layout ───────────────────────────────────── */
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+.cal-nav{display:flex;align-items:center;gap:10px}
+.cal-nav-title{font-size:20px;font-weight:700;min-width:130px;text-align:center}
+.cal-nav-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px;transition:all .15s}
+.cal-nav-btn:hover{border-color:var(--accent);color:var(--accent)}
+.cal-view-toggle{display:flex;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px}
+.cal-view-btn{padding:5px 14px;border:none;background:transparent;color:var(--text-dim);border-radius:6px;cursor:pointer;font-size:13px;transition:all .15s}
+.cal-view-btn.active{background:var(--accent);color:#fff}
+.source-toggles{display:flex;gap:8px;flex-wrap:wrap}
+.src-toggle{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;border:1px solid var(--border);cursor:pointer;font-size:12px;user-select:none;transition:all .15s;opacity:.5}
+.src-toggle.on{opacity:1}
+.src-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-holiday{background:#ef4444}
+.dot-gcal{background:#3b82f6}
+.dot-leave{background:#22c55e}
+.dot-schedule{background:#a855f7}
+
+/* ── Layout shell ──────────────────────────────────────── */
+.cal-body{display:grid;grid-template-columns:1fr 280px;gap:20px;align-items:start}
+@media(max-width:900px){.cal-body{grid-template-columns:1fr}}
+
+/* ── Month grid ────────────────────────────────────────── */
+.month-grid{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.wday-headers{display:grid;grid-template-columns:repeat(7,1fr);background:rgba(255,255,255,.03);border-bottom:1px solid var(--border)}
+.wday-hdr{padding:10px 4px;text-align:center;font-size:11px;font-family:'DM Mono',monospace;letter-spacing:.5px;color:var(--text-dim)}
+.wday-hdr.sun{color:#ef4444}.wday-hdr.sat{color:#3b82f6}
+.days-grid{display:grid;grid-template-columns:repeat(7,1fr)}
+.day-cell{min-height:80px;padding:6px 4px;border-right:1px solid rgba(42,48,72,.5);border-bottom:1px solid rgba(42,48,72,.5);cursor:pointer;transition:background .15s;position:relative}
+.day-cell:nth-child(7n){border-right:none}
+.day-cell:hover{background:rgba(255,255,255,.04)}
+.day-cell.today .day-num{background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+.day-cell.selected{background:rgba(99,102,241,.12)}
+.day-cell.other-month .day-num{color:var(--text-dim);opacity:.4}
+.day-cell.holiday-bg{background:rgba(239,68,68,.05)}
+.day-num{font-size:13px;font-family:'DM Mono',monospace;margin-bottom:4px;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+.day-num.sun{color:#ef4444}.day-num.sat{color:#3b82f6}
+.day-events{display:flex;flex-direction:column;gap:2px}
+.ev-pill{font-size:10px;padding:1px 5px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+.ev-pill.holiday{background:rgba(239,68,68,.2);color:#fca5a5}
+.ev-pill.gcal{background:rgba(59,130,246,.2);color:#93c5fd}
+.ev-pill.leave{background:rgba(34,197,94,.2);color:#86efac}
+.ev-pill.schedule{background:rgba(168,85,247,.2);color:#d8b4fe}
+.ev-more{font-size:10px;color:var(--text-dim);padding-left:3px}
+
+/* ── Week view ─────────────────────────────────────────── */
+.week-view{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.week-cols{display:grid;grid-template-columns:repeat(7,1fr)}
+.week-day-col{border-right:1px solid rgba(42,48,72,.5)}
+.week-day-col:last-child{border-right:none}
+.week-day-hdr{padding:10px 8px;text-align:center;border-bottom:1px solid var(--border);background:rgba(255,255,255,.03)}
+.week-day-name{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace}
+.week-day-num{font-size:18px;font-weight:700;margin-top:2px}
+.week-day-num.today-num{color:var(--accent)}
+.week-day-body{padding:8px;min-height:300px;display:flex;flex-direction:column;gap:4px}
+.week-ev{font-size:11px;padding:4px 6px;border-radius:4px;line-height:1.4}
+.week-ev.holiday{background:rgba(239,68,68,.2);color:#fca5a5}
+.week-ev.gcal{background:rgba(59,130,246,.2);color:#93c5fd}
+.week-ev.leave{background:rgba(34,197,94,.2);color:#86efac}
+.week-ev.schedule{background:rgba(168,85,247,.2);color:#d8b4fe}
+.week-ev-time{font-family:'DM Mono',monospace;font-size:10px;opacity:.7}
+
+/* ── Detail panel ──────────────────────────────────────── */
+.cal-detail{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;position:sticky;top:20px}
+.detail-date{font-size:15px;font-weight:700;margin-bottom:4px}
+.detail-weekday{font-size:12px;color:var(--text-dim);margin-bottom:16px}
+.detail-section{margin-bottom:14px}
+.detail-src-label{font-size:10px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.detail-src-label::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
+.detail-src-label.lbl-holiday{color:#ef4444}
+.detail-src-label.lbl-gcal{color:#3b82f6}
+.detail-src-label.lbl-leave{color:#22c55e}
+.detail-src-label.lbl-schedule{color:#a855f7}
+.detail-ev-item{font-size:13px;padding:6px 8px;border-radius:4px;margin-bottom:4px}
+.detail-ev-item.holiday{background:rgba(239,68,68,.15);color:#fca5a5}
+.detail-ev-item.gcal{background:rgba(59,130,246,.15);color:#93c5fd}
+.detail-ev-item.leave{background:rgba(34,197,94,.15);color:#86efac}
+.detail-ev-item.schedule{background:rgba(168,85,247,.15);color:#d8b4fe}
+.detail-empty{font-size:13px;color:var(--text-dim);padding:8px 0}
+.detail-ev-sub{font-size:11px;opacity:.7;margin-top:2px}
+</style>
+</head>
+<body data-page="calendar">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+
+    <!-- Header controls -->
+    <div class="cal-header">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" id="prev-btn">‹</button>
+        <div class="cal-nav-title" id="nav-title">2026年4月</div>
+        <button class="cal-nav-btn" id="next-btn">›</button>
+        <button class="cal-nav-btn" id="today-btn" style="font-size:12px;padding:6px 10px">今天</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div class="cal-view-toggle">
+          <button class="cal-view-btn active" id="btn-month">月</button>
+          <button class="cal-view-btn" id="btn-week">週</button>
+        </div>
+        <div class="source-toggles" id="source-toggles">
+          <div class="src-toggle on" data-src="holidays"><span class="src-dot dot-holiday"></span>台灣假日</div>
+          <div class="src-toggle on" data-src="gcal"><span class="src-dot dot-gcal"></span>Google 行事曆</div>
+          <div class="src-toggle on" data-src="leave"><span class="src-dot dot-leave"></span>請假</div>
+          <div class="src-toggle on" data-src="schedule"><span class="src-dot dot-schedule"></span>班表</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cal-body">
+      <!-- Main calendar area -->
+      <div id="cal-main">
+        <!-- Month view -->
+        <div id="month-view">
+          <div class="month-grid">
+            <div class="wday-headers">
+              <div class="wday-hdr sun">日</div>
+              <div class="wday-hdr">一</div>
+              <div class="wday-hdr">二</div>
+              <div class="wday-hdr">三</div>
+              <div class="wday-hdr">四</div>
+              <div class="wday-hdr">五</div>
+              <div class="wday-hdr sat">六</div>
+            </div>
+            <div class="days-grid" id="days-grid"></div>
+          </div>
+        </div>
+
+        <!-- Week view (hidden by default) -->
+        <div id="week-view" style="display:none">
+          <div class="week-view">
+            <div class="week-cols" id="week-cols"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detail panel -->
+      <div class="cal-detail" id="cal-detail">
+        <div class="detail-date" id="detail-date">—</div>
+        <div class="detail-weekday" id="detail-weekday"></div>
+        <div id="detail-content"><div class="detail-empty">點擊日期查看詳情</div></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap=document.createElement('div');wrap.id='toast-wrap';wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px';document.body.appendChild(wrap); }
+  const el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;wrap.appendChild(el);setTimeout(()=>el.remove(),3500);
+}
+
+// ── State ──────────────────────────────────────────────────────────────
+const state = {
+  year:  new Date().getFullYear(),
+  month: new Date().getMonth(), // 0-indexed
+  view:  'month',
+  selectedDate: new Date().toISOString().slice(0, 10),
+  sources: { holidays: true, gcal: true, leave: true, schedule: true },
+  events: [],    // all fetched events
+  loading: false,
+};
+
+const WEEKDAYS = ['日','一','二','三','四','五','六'];
+const MONTHS   = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+// ── Bootstrap ─────────────────────────────────────────────────────────
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 650));
+  bindControls();
+  await loadAllEvents();
+  render();
+};
+
+function bindControls() {
+  document.getElementById('prev-btn').onclick = () => {
+    if (state.view === 'month') {
+      state.month--;
+      if (state.month < 0) { state.month = 11; state.year--; }
+    } else {
+      const d = new Date(state.selectedDate);
+      d.setDate(d.getDate() - 7);
+      state.selectedDate = d.toISOString().slice(0, 10);
+      state.year  = d.getFullYear();
+      state.month = d.getMonth();
+    }
+    loadAllEvents().then(render);
+  };
+
+  document.getElementById('next-btn').onclick = () => {
+    if (state.view === 'month') {
+      state.month++;
+      if (state.month > 11) { state.month = 0; state.year++; }
+    } else {
+      const d = new Date(state.selectedDate);
+      d.setDate(d.getDate() + 7);
+      state.selectedDate = d.toISOString().slice(0, 10);
+      state.year  = d.getFullYear();
+      state.month = d.getMonth();
+    }
+    loadAllEvents().then(render);
+  };
+
+  document.getElementById('today-btn').onclick = () => {
+    const now = new Date();
+    state.year  = now.getFullYear();
+    state.month = now.getMonth();
+    state.selectedDate = now.toISOString().slice(0, 10);
+    loadAllEvents().then(render);
+  };
+
+  document.getElementById('btn-month').onclick = () => setView('month');
+  document.getElementById('btn-week').onclick  = () => setView('week');
+
+  document.getElementById('source-toggles').onclick = e => {
+    const t = e.target.closest('.src-toggle');
+    if (!t) return;
+    const src = t.dataset.src;
+    state.sources[src] = !state.sources[src];
+    t.classList.toggle('on', state.sources[src]);
+    render();
+  };
+}
+
+function setView(v) {
+  state.view = v;
+  document.getElementById('btn-month').classList.toggle('active', v === 'month');
+  document.getElementById('btn-week').classList.toggle('active',  v === 'week');
+  document.getElementById('month-view').style.display = v === 'month' ? '' : 'none';
+  document.getElementById('week-view').style.display  = v === 'week'  ? '' : 'none';
+  render();
+}
+
+// ── Data fetching ──────────────────────────────────────────────────────
+async function loadAllEvents() {
+  const y = state.year, m = state.month;
+  // Fetch prev month + current + next for smooth nav
+  const start = `${y}-${String(m+1).padStart(2,'0')}-01`;
+  const endD  = new Date(y, m + 2, 0);
+  const end   = endD.toISOString().slice(0, 10);
+
+  try {
+    const [holidays, gcal, leaves, schedules] = await Promise.allSettled([
+      fetchHolidays(y),
+      fetchGcal(start, end),
+      fetchLeaves(start, end),
+      fetchSchedules(y, m),
+    ]);
+
+    state.events = [
+      ...(holidays.status === 'fulfilled' ? holidays.value : []),
+      ...(gcal.status     === 'fulfilled' ? gcal.value     : []),
+      ...(leaves.status   === 'fulfilled' ? leaves.value   : []),
+      ...(schedules.status=== 'fulfilled' ? schedules.value: []),
+    ];
+  } catch(e) {
+    console.warn('載入行事曆失敗', e);
+  }
+}
+
+async function fetchHolidays(year) {
+  const res = await window.api(`/api/calendar?_resource=holidays&year=${year}`);
+  return res || [];
+}
+
+async function fetchGcal(start, end) {
+  try {
+    const res = await window.api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`);
+    return res || [];
+  } catch { return []; }
+}
+
+async function fetchLeaves(start, end) {
+  try {
+    const res = await window.api(`/api/leaves?status=approved`);
+    return (res || [])
+      .filter(r => r.end_date >= start && r.start_date <= end)
+      .map(r => ({
+        date:   r.start_date,
+        endDate: r.end_date,
+        title:  `${r.emp_name || '員工'} — ${LEAVE_LABELS[r.leave_type] || r.leave_type}`,
+        color:  'leave',
+        source: 'leave',
+        days:   r.days,
+      }));
+  } catch { return []; }
+}
+
+async function fetchSchedules(year, month) {
+  try {
+    const ym  = `${year}-${String(month+1).padStart(2,'0')}`;
+    const res = await window.api(`/api/schedules?month=${ym}`);
+    // Group by date → one pill per date with count
+    const byDate = {};
+    (res || []).forEach(s => {
+      if (!byDate[s.work_date]) byDate[s.work_date] = [];
+      byDate[s.work_date].push(s);
+    });
+    return Object.entries(byDate).map(([date, recs]) => ({
+      date,
+      title:  `班表 ${recs.length} 人`,
+      color:  'schedule',
+      source: 'schedule',
+      recs,
+    }));
+  } catch { return []; }
+}
+
+const LEAVE_LABELS = { annual:'特休假', sick:'病假', personal:'事假', maternity:'產假', funeral:'喪假', marriage:'婚假' };
+
+// ── Rendering ──────────────────────────────────────────────────────────
+function render() {
+  updateNavTitle();
+  if (state.view === 'month') renderMonth();
+  else                        renderWeek();
+  renderDetail(state.selectedDate);
+}
+
+function updateNavTitle() {
+  document.getElementById('nav-title').textContent =
+    state.view === 'month'
+      ? `${state.year}年${MONTHS[state.month]}`
+      : (() => {
+          const wd  = getWeekDates(state.selectedDate);
+          const s   = wd[0], e = wd[6];
+          const sm  = new Date(s), em = new Date(e);
+          return sm.getMonth() === em.getMonth()
+            ? `${sm.getFullYear()}年${MONTHS[sm.getMonth()]} ${sm.getDate()}–${em.getDate()}日`
+            : `${sm.getFullYear()}年${MONTHS[sm.getMonth()]}${sm.getDate()}日 – ${MONTHS[em.getMonth()]}${em.getDate()}日`;
+        })();
+}
+
+function getEventsForDate(date) {
+  return state.events.filter(ev => {
+    if (!state.sources[ev.source]) return false;
+    // Multi-day events (leaves)
+    if (ev.endDate && ev.endDate > ev.date) {
+      return date >= ev.date && date <= ev.endDate;
+    }
+    return ev.date === date;
+  });
+}
+
+// Month view
+function renderMonth() {
+  const grid = document.getElementById('days-grid');
+  const today = new Date().toISOString().slice(0, 10);
+  const firstDay = new Date(state.year, state.month, 1);
+  const lastDay  = new Date(state.year, state.month + 1, 0);
+  const startWday = firstDay.getDay(); // 0=Sun
+
+  const cells = [];
+
+  // Prev month padding
+  for (let i = 0; i < startWday; i++) {
+    const d = new Date(state.year, state.month, -startWday + i + 1);
+    cells.push({ date: d.toISOString().slice(0, 10), otherMonth: true });
+  }
+  // Current month
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const dt = new Date(state.year, state.month, d);
+    cells.push({ date: dt.toISOString().slice(0, 10), otherMonth: false });
+  }
+  // Next month padding
+  const remaining = (7 - (cells.length % 7)) % 7;
+  for (let i = 1; i <= remaining; i++) {
+    const d = new Date(state.year, state.month + 1, i);
+    cells.push({ date: d.toISOString().slice(0, 10), otherMonth: true });
+  }
+
+  grid.innerHTML = cells.map(cell => {
+    const d   = new Date(cell.date + 'T00:00:00');
+    const wd  = d.getDay();
+    const evs = getEventsForDate(cell.date);
+    const isHoliday = evs.some(e => e.source === 'holidays');
+    const isToday   = cell.date === today;
+    const isSelected = cell.date === state.selectedDate;
+    const numClass  = wd === 0 ? 'sun' : wd === 6 ? 'sat' : '';
+
+    const pills = evs.slice(0, 3).map(ev =>
+      `<div class="ev-pill ${ev.color}" title="${ev.title}">${ev.title}</div>`
+    ).join('');
+    const more = evs.length > 3 ? `<div class="ev-more">+${evs.length - 3}</div>` : '';
+
+    return `<div class="day-cell ${cell.otherMonth?'other-month':''} ${isHoliday?'holiday-bg':''} ${isToday?'today':''} ${isSelected?'selected':''}"
+      data-date="${cell.date}" onclick="selectDate('${cell.date}')">
+      <div class="day-num ${numClass}">${d.getDate()}</div>
+      <div class="day-events">${pills}${more}</div>
+    </div>`;
+  }).join('');
+}
+
+// Week view
+function renderWeek() {
+  const cols  = document.getElementById('week-cols');
+  const today = new Date().toISOString().slice(0, 10);
+  const dates = getWeekDates(state.selectedDate);
+
+  cols.innerHTML = dates.map(date => {
+    const d   = new Date(date + 'T00:00:00');
+    const wd  = d.getDay();
+    const evs = getEventsForDate(date);
+    const isToday = date === today;
+    const nameClass = wd === 0 ? 'color:#ef4444' : wd === 6 ? 'color:#3b82f6' : '';
+
+    const evCards = evs.map(ev => `
+      <div class="week-ev ${ev.color}">${ev.title}</div>
+    `).join('');
+
+    return `<div class="week-day-col">
+      <div class="week-day-hdr">
+        <div class="week-day-name" style="${nameClass}">${WEEKDAYS[wd]}</div>
+        <div class="week-day-num ${isToday?'today-num':''}" style="${nameClass}">${d.getDate()}</div>
+      </div>
+      <div class="week-day-body" onclick="selectDate('${date}')">${evCards || '<div style="font-size:12px;color:var(--text-dim);padding:4px">—</div>'}</div>
+    </div>`;
+  }).join('');
+}
+
+function getWeekDates(dateStr) {
+  const d   = new Date(dateStr + 'T00:00:00');
+  const wd  = d.getDay();
+  const sun = new Date(d);
+  sun.setDate(d.getDate() - wd);
+  return Array.from({ length: 7 }, (_, i) => {
+    const x = new Date(sun); x.setDate(sun.getDate() + i);
+    return x.toISOString().slice(0, 10);
+  });
+}
+
+// Detail panel
+function selectDate(date) {
+  state.selectedDate = date;
+  // In month view re-render just the grid selection
+  document.querySelectorAll('.day-cell.selected').forEach(el => el.classList.remove('selected'));
+  document.querySelector(`.day-cell[data-date="${date}"]`)?.classList.add('selected');
+  renderDetail(date);
+}
+
+function renderDetail(date) {
+  const d    = new Date(date + 'T00:00:00');
+  const evs  = getEventsForDate(date);
+  document.getElementById('detail-date').textContent =
+    `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+  document.getElementById('detail-weekday').textContent =
+    `星期${WEEKDAYS[d.getDay()]}`;
+
+  const SOURCES = [
+    { src:'holidays', label:'台灣假日',       cls:'lbl-holiday'  },
+    { src:'gcal',     label:'Google 行事曆',  cls:'lbl-gcal'     },
+    { src:'leave',    label:'請假申請',        cls:'lbl-leave'    },
+    { src:'schedule', label:'班表',            cls:'lbl-schedule' },
+  ];
+
+  const html = SOURCES.map(s => {
+    if (!state.sources[s.src]) return '';
+    const list = evs.filter(e => e.source === s.src);
+    if (!list.length) return '';
+    return `<div class="detail-section">
+      <div class="detail-src-label ${s.cls}">${s.label}</div>
+      ${list.map(ev => `
+        <div class="detail-ev-item ${ev.color}">
+          <div>${ev.title}</div>
+          ${ev.desc ? `<div class="detail-ev-sub">${ev.desc}</div>` : ''}
+          ${ev.days ? `<div class="detail-ev-sub">${ev.days} 天</div>` : ''}
+        </div>`).join('')}
+    </div>`;
+  }).join('');
+
+  document.getElementById('detail-content').innerHTML =
+    html || '<div class="detail-empty">今日無排程事項</div>';
+}
+</script>
+<script src="/js/layout.js"></script>
+</body>
+</html>
