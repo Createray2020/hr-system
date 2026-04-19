@@ -19,6 +19,11 @@
         <div class="page-sub">管理並審核員工請假申請 <span class="db-badge" id="db-status">● 連線中…</span></div>
       </div>
       <div class="header-actions">
+        <div class="btn-group">
+          <button class="btn btn-ghost btn-sm" onclick="exportLeaveTemplate()" title="下載匯入範本">📄 範本</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportLeaveData()" title="匯出請假紀錄">📤 匯出</button>
+          <label class="btn btn-ghost btn-sm" title="匯入請假紀錄" style="cursor:pointer">📥 匯入<input type="file" accept=".xlsx,.xls" style="display:none" onchange="importLeaveExcel(this)"></label>
+        </div>
         <button class="btn btn-pdf" onclick="exportListPDF()">📄 匯出清單</button>
         <button class="btn btn-primary" onclick="openApplyModal()">＋ 代為申請</button>
       </div>
@@ -337,7 +342,75 @@ function exportListPDF() {
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/* ── Import / Export ── */
+const LEAVE_COLUMNS = [
+  { key:'emp_no',      label:'員工編號', required:true,  note:'員工的唯一編號',                  example:'E001' },
+  { key:'leave_type',  label:'假別',     required:true,  note:'annual/sick/personal/maternity/funeral/marriage', example:'annual' },
+  { key:'start_date',  label:'開始日期', required:true,  note:'格式 YYYY-MM-DD',                 example:'2024-03-01' },
+  { key:'end_date',    label:'結束日期', required:true,  note:'格式 YYYY-MM-DD',                 example:'2024-03-03' },
+  { key:'days',        label:'天數',     required:true,  note:'請假天數（數字）',                 example:'3',
+    validate: v => isNaN(Number(v)) ? '須為數字' : null },
+  { key:'reason',      label:'請假原因', required:false, note:'原因說明',                         example:'家庭因素' },
+];
+
+const LEAVE_PREVIEW_COLS = [
+  { key:'emp_no', label:'員工編號' },
+  { key:'leave_type', label:'假別' },
+  { key:'start_date', label:'開始' },
+  { key:'end_date', label:'結束' },
+  { key:'days', label:'天數' },
+];
+
+function exportLeaveTemplate() {
+  ExcelTools.exportTemplate({ sheetName:'請假資料', filename:'leaves', columns: LEAVE_COLUMNS });
+}
+
+function exportLeaveData() {
+  if (!allLeaveData.length) { toast('目前沒有請假紀錄', 'warn'); return; }
+  const exportCols = [
+    ...LEAVE_COLUMNS,
+    { key:'status', label:'狀態' },
+    { key:'emp_name', label:'姓名' },
+    { key:'dept', label:'部門' },
+  ];
+  ExcelTools.exportData({ sheetName:'請假資料', filename:'leaves', columns: exportCols }, allLeaveData);
+}
+
+async function importLeaveExcel(input) {
+  const file = input.files[0]; if (!file) return;
+  input.value = '';
+  try {
+    const result = await ExcelTools.importFile(file, { columns: LEAVE_COLUMNS });
+    ExcelTools.showImportModal(result, { columns: LEAVE_COLUMNS, previewCols: LEAVE_PREVIEW_COLS }, async () => {
+      // Look up employee IDs by emp_no
+      const emps = await api('/api/employees?status=all').catch(() => []);
+      const empMap = {};
+      emps.forEach(e => { if (e.emp_no) empMap[e.emp_no] = e.id; });
+      let ok = 0, fail = 0;
+      for (const row of result.parsed) {
+        try {
+          const empId = empMap[row.emp_no];
+          if (!empId) throw new Error('找不到員工 ' + row.emp_no);
+          await api('/api/leaves', { method:'POST', body: JSON.stringify({
+            employee_id: empId,
+            leave_type:  row.leave_type,
+            start_date:  row.start_date,
+            end_date:    row.end_date,
+            days:        Number(row.days) || 1,
+            reason:      row.reason || '',
+          })});
+          ok++;
+        } catch(e) { fail++; }
+      }
+      await Promise.all([loadLeaves(), loadStats()]);
+      toast(`匯入完成：成功 ${ok} 筆${fail ? `，失敗 ${fail} 筆` : ''}`, fail ? 'warn' : 'success');
+    });
+  } catch(e) { toast('匯入失敗：' + e.message, 'error'); }
+}
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="/js/excel-tools.js"></script>
 <script src="/js/layout.js"></script>
 </body>
 </html>

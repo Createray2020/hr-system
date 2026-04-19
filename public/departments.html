@@ -44,6 +44,11 @@
         <div class="page-sub">管理公司組織架構與部門人員配置</div>
       </div>
       <div class="header-actions">
+        <div class="btn-group">
+          <button class="btn btn-ghost btn-sm" onclick="exportDeptTemplate()" title="下載匯入範本">📄 範本</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportDeptData()" title="匯出部門資料">📤 匯出</button>
+          <label class="btn btn-ghost btn-sm" title="匯入部門資料" style="cursor:pointer">📥 匯入<input type="file" accept=".xlsx,.xls" style="display:none" onchange="importDeptExcel(this)"></label>
+        </div>
         <button class="btn btn-primary" onclick="openAddModal()">＋ 新增部門</button>
       </div>
     </div>
@@ -272,7 +277,57 @@ async function deleteDept(id, name) {
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/* ── Import / Export ── */
+const DEPT_COLUMNS = [
+  { key:'name',           label:'部門名稱',   required:true,  note:'唯一部門名稱',            example:'研發部' },
+  { key:'description',    label:'部門描述',   required:false, note:'簡短描述',                example:'負責產品研發' },
+  { key:'manager_emp_no', label:'主管員工編號',required:false, note:'主管的員工編號，如 E001', example:'E001' },
+  { key:'color',          label:'顏色代碼',   required:false, note:'Hex 顏色碼',               example:'#5B8DEF' },
+];
+
+function exportDeptTemplate() {
+  ExcelTools.exportTemplate({ sheetName:'部門資料', filename:'departments', columns: DEPT_COLUMNS });
+}
+
+function exportDeptData() {
+  if (!allDepts.length) { toast('目前沒有部門資料', 'warn'); return; }
+  ExcelTools.exportData(
+    { sheetName:'部門資料', filename:'departments', columns: DEPT_COLUMNS },
+    allDepts
+  );
+}
+
+async function importDeptExcel(input) {
+  const file = input.files[0]; if (!file) return;
+  input.value = '';
+  try {
+    const result = await ExcelTools.importFile(file, { columns: DEPT_COLUMNS });
+    ExcelTools.showImportModal(result, { columns: DEPT_COLUMNS }, async () => {
+      let ok = 0, fail = 0;
+      for (const row of result.parsed) {
+        try {
+          const mgr = row.manager_emp_no
+            ? allManagers.find(m => m.emp_no === row.manager_emp_no)
+            : null;
+          const payload = {
+            name: row.name,
+            description: row.description || '',
+            color: row.color || '#5B8DEF',
+            manager_id: mgr?.id || null,
+          };
+          await api('/api/departments', { method:'POST', body: JSON.stringify(payload) });
+          ok++;
+        } catch(e) { fail++; }
+      }
+      await loadDepts();
+      toast(`匯入完成：成功 ${ok} 筆${fail ? `，失敗 ${fail} 筆` : ''}`, fail ? 'warn' : 'success');
+    });
+  } catch(e) { toast('匯入失敗：' + e.message, 'error'); }
+}
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="/js/excel-tools.js"></script>
 <script src="/js/layout.js"></script>
 </body>
 </html>

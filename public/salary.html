@@ -42,6 +42,7 @@
           <button onclick="changeMonth(1)">›</button>
         </div>
         <button class="btn btn-ghost" onclick="openBatchModal()">⚙️ 批次產生</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportSalaryData()" title="匯出薪資試算表">📤 匯出</button>
         <button class="btn btn-pdf" onclick="exportPayrollPDF()">📄 薪資單</button>
       </div>
     </div>
@@ -394,7 +395,33 @@ function exportPayrollPDF() {
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/* ── Export ── */
+const SAL_COLUMNS = [
+  { key:'emp_no',             label:'員工編號' },
+  { key:'emp_name',           label:'姓名' },
+  { key:'dept',               label:'部門' },
+  { key:'base_salary',        label:'本薪' },
+  { key:'overtime_pay',       label:'加班費' },
+  { key:'bonus',              label:'獎金' },
+  { key:'allowance',          label:'加給' },
+  { key:'extra_allowance',    label:'其他加給' },
+  { key:'absence_deduction',  label:'缺勤扣款' },
+  { key:'labor_insurance',    label:'勞保費' },
+  { key:'health_insurance',   label:'健保費' },
+  { key:'tax',                label:'所得稅' },
+  { key:'net_salary',         label:'實發薪資' },
+  { key:'status',             label:'狀態' },
+];
+
+function exportSalaryData() {
+  if (!salaryRows.length) { toast('目前沒有薪資資料', 'warn'); return; }
+  const filename = `salary_${currentYear}${String(currentMonth).padStart(2,'0')}`;
+  ExcelTools.exportData({ sheetName:'薪資資料', filename, columns: SAL_COLUMNS }, salaryRows);
+}
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="/js/excel-tools.js"></script>
 <script src="/js/layout.js"></script>
 </body>
 </html>

@@ -94,6 +94,11 @@
           <button class="view-btn" id="view-list" onclick="setView('list')" title="列表檢視">📋</button>
           <button class="view-btn" id="view-table" onclick="setView('table')" title="試算表">📊</button>
         </div>
+        <div class="btn-group">
+          <button class="btn btn-ghost btn-sm" onclick="exportEmpTemplate()" title="下載匯入範本">📄 範本</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportEmpData()" title="匯出員工資料">📤 匯出</button>
+          <label class="btn btn-ghost btn-sm" title="匯入員工資料" style="cursor:pointer">📥 匯入<input type="file" accept=".xlsx,.xls" style="display:none" onchange="importEmpExcel(this)"></label>
+        </div>
         <button class="btn btn-primary" onclick="openAddModal()">＋ 新增員工</button>
       </div>
     </div>
@@ -1077,7 +1082,83 @@ function shtUpdateSortIndicators() {
     }
   });
 }
+
+/* ══════════════════════════════════════════
+   Import / Export
+══════════════════════════════════════════ */
+const EMP_COLUMNS = [
+  { key:'emp_no',          label:'員工編號',   required:true,  note:'格式如 E001，唯一識別碼',   example:'E001' },
+  { key:'name',            label:'姓名',       required:true,  note:'員工全名',                  example:'王小明' },
+  { key:'employment_type', label:'雇用類型',   required:true,  note:'full_time 或 part_time',    example:'full_time' },
+  { key:'dept',            label:'部門',       required:false, note:'部門名稱，須與系統一致',     example:'研發部' },
+  { key:'position',        label:'職稱',       required:false, note:'職位名稱',                  example:'工程師' },
+  { key:'grade',           label:'職等',       required:false, note:'一等、二等、三等 或留空',    example:'二等' },
+  { key:'grade_level',     label:'職級',       required:false, note:'數字，1–6',                 example:'3',
+    validate: v => isNaN(Number(v)) ? '須為數字' : null,
+    transform: v => v },
+  { key:'hire_date',       label:'入職日期',   required:false, note:'格式 YYYY-MM-DD',           example:'2022-03-01' },
+  { key:'base_salary',     label:'本薪',       required:false, note:'數字，新台幣',              example:'35000',
+    validate: v => isNaN(Number(v)) ? '須為數字' : null },
+  { key:'grade_allowance', label:'職等加給',   required:false, note:'數字，新台幣',              example:'3000',
+    validate: v => isNaN(Number(v)) ? '須為數字' : null },
+  { key:'attendance_bonus',label:'全勤獎金',   required:false, note:'數字，新台幣',              example:'2000',
+    validate: v => isNaN(Number(v)) ? '須為數字' : null },
+  { key:'manager_allowance',label:'主管加給',  required:false, note:'數字，新台幣',              example:'5000',
+    validate: v => isNaN(Number(v)) ? '須為數字' : null },
+  { key:'extra_allowance', label:'其他加給',   required:false, note:'數字，新台幣',              example:'1000',
+    validate: v => isNaN(Number(v)) ? '須為數字' : null },
+  { key:'email',           label:'Email',      required:false, note:'電子郵件',                  example:'wang@company.com' },
+  { key:'phone',           label:'電話',       required:false, note:'聯絡電話',                  example:'0912345678' },
+  { key:'status',          label:'狀態',       required:false, note:'active 在職 / resigned 離職', example:'active' },
+];
+
+const EMP_PREVIEW_COLS = [
+  { key:'emp_no', label:'員工編號' },
+  { key:'name',   label:'姓名' },
+  { key:'dept',   label:'部門' },
+  { key:'position', label:'職稱' },
+  { key:'status', label:'狀態' },
+];
+
+function exportEmpTemplate() {
+  ExcelTools.exportTemplate({ sheetName:'員工資料', filename:'employees', columns: EMP_COLUMNS });
+}
+
+function exportEmpData() {
+  const rows = allEmployees;
+  if (!rows.length) { toast('目前沒有員工資料', 'warn'); return; }
+  ExcelTools.exportData(
+    { sheetName:'員工資料', filename:'employees', columns: EMP_COLUMNS },
+    rows
+  );
+}
+
+async function importEmpExcel(input) {
+  const file = input.files[0]; if (!file) return;
+  input.value = '';
+  try {
+    const result = await ExcelTools.importFile(file, { columns: EMP_COLUMNS });
+    ExcelTools.showImportModal(result, { columns: EMP_COLUMNS, previewCols: EMP_PREVIEW_COLS }, async () => {
+      let ok = 0, fail = 0;
+      for (const row of result.parsed) {
+        try {
+          const payload = {};
+          EMP_COLUMNS.forEach(c => { if (row[c.key] !== null && row[c.key] !== '') payload[c.key] = row[c.key]; });
+          ['base_salary','grade_allowance','attendance_bonus','manager_allowance','extra_allowance','grade_level'].forEach(k => {
+            if (payload[k] !== undefined) payload[k] = Number(payload[k]) || 0;
+          });
+          await api('/api/employees', { method:'POST', body: JSON.stringify(payload) });
+          ok++;
+        } catch(e) { fail++; }
+      }
+      await loadEmployees();
+      toast(`匯入完成：成功 ${ok} 筆${fail ? `，失敗 ${fail} 筆` : ''}`, fail ? 'warn' : 'success');
+    });
+  } catch(e) { toast('匯入失敗：' + e.message, 'error'); }
+}
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="/js/excel-tools.js"></script>
 <script src="/js/layout.js"></script>
 </body>
 </html>

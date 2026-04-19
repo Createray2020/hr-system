@@ -159,6 +159,9 @@ tbody tr{transition:background .15s}tbody tr:hover{background:rgba(91,141,239,.0
 .clock-date{font-size:14px;color:var(--text-dim);text-align:center;margin-top:4px}
 .punch-status{display:flex;align-items:center;justify-content:center;gap:8px;margin:16px 0;font-size:13px}
 
+/* ── Button group ── */
+.btn-group{display:flex;gap:4px}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
