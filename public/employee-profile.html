@@ -37,6 +37,19 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 .logout-btn{width:calc(100% - 32px);margin:0 16px 12px;padding:14px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.2);border-radius:12px;color:#F87171;font-size:14px;font-weight:600;cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:all .15s}
 .logout-btn:active{background:rgba(248,113,113,.15)}
 
+/* ── 修改密碼 Modal ── */
+.pw-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center;z-index:200;padding:0}
+.pw-modal-bg.open{display:flex}
+.pw-modal{background:#181C27;border-top:0.5px solid rgba(255,255,255,.1);border-radius:20px 20px 0 0;padding:24px 20px 48px;width:100%;max-width:430px}
+.pw-modal-title{font-size:17px;font-weight:700;margin-bottom:20px}
+.pw-label{font-size:12px;color:rgba(255,255,255,.4);display:block;margin-bottom:6px}
+.pw-input{width:100%;background:rgba(255,255,255,.06);border:0.5px solid rgba(255,255,255,.1);border-radius:10px;padding:12px 14px;font-size:15px;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;outline:none;-webkit-appearance:none;margin-bottom:12px;transition:border-color .2s}
+.pw-input:focus{border-color:rgba(91,141,239,.5)}
+.pw-err{font-size:12px;color:#F87171;margin-bottom:10px;display:none;padding-left:2px}
+.pw-submit{width:100%;padding:14px;background:#5B8DEF;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;font-family:'Noto Sans TC',sans-serif;cursor:pointer;margin-top:4px}
+.pw-submit:disabled{opacity:.5;cursor:not-allowed}
+.pw-cancel{width:100%;padding:12px;background:transparent;border:none;color:rgba(255,255,255,.4);font-size:14px;font-family:'Noto Sans TC',sans-serif;cursor:pointer;margin-top:6px}
+
 /* ── 版本資訊 ── */
 .version-badge{text-align:center;padding:16px;font-size:11px;color:rgba(255,255,255,.2);font-family:'DM Mono',monospace}
 
@@ -120,6 +133,11 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
       </div>
     </div>
 
+    <!-- 修改密碼 -->
+    <button class="switch-version-btn" style="display:block;background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1);color:rgba(255,255,255,.6)" onclick="openPwModal()">
+      🔑 修改密碼
+    </button>
+
     <!-- 切換電腦版（管理者才顯示） -->
     <button class="switch-version-btn" id="switch-version-btn" onclick="switchToDesktop()">
       🖥️ 切換至電腦版管理後台
@@ -150,6 +168,22 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
   </nav>
 </div>
 
+<!-- 修改密碼 Modal -->
+<div class="pw-modal-bg" id="pw-modal-bg" onclick="if(event.target===this)closePwModal()">
+  <div class="pw-modal">
+    <div class="pw-modal-title">🔑 修改密碼</div>
+    <label class="pw-label">目前密碼</label>
+    <input class="pw-input" id="pw-old" type="password" placeholder="目前使用的密碼">
+    <label class="pw-label">新密碼</label>
+    <input class="pw-input" id="pw-new" type="password" placeholder="至少 6 個字元">
+    <label class="pw-label">確認新密碼</label>
+    <input class="pw-input" id="pw-confirm" type="password" placeholder="再輸入一次新密碼">
+    <div class="pw-err" id="pw-err"></div>
+    <button class="pw-submit" id="pw-submit-btn" onclick="submitChangePw()">確認修改</button>
+    <button class="pw-cancel" onclick="closePwModal()">取消</button>
+  </div>
+</div>
+
 <script>
 const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
@@ -176,6 +210,46 @@ function calcSeniority(hireDate) {
   return y > 0 ? `${y} 年 ${m} 個月` : `${m} 個月`;
 }
 
+function openPwModal() {
+  ['pw-old','pw-new','pw-confirm'].forEach(id => document.getElementById(id).value = '');
+  const errEl = document.getElementById('pw-err'); errEl.style.display='none'; errEl.textContent='';
+  document.getElementById('pw-modal-bg').classList.add('open');
+}
+function closePwModal() { document.getElementById('pw-modal-bg').classList.remove('open'); }
+
+async function submitChangePw() {
+  const empNo  = window._empNo;
+  const oldPw  = document.getElementById('pw-old').value;
+  const newPw  = document.getElementById('pw-new').value;
+  const confirm= document.getElementById('pw-confirm').value;
+  const errEl  = document.getElementById('pw-err');
+  const btn    = document.getElementById('pw-submit-btn');
+
+  errEl.style.display = 'none';
+  if (!oldPw || !newPw || !confirm) { errEl.textContent='請填寫所有欄位'; errEl.style.display='block'; return; }
+  if (newPw !== confirm) { errEl.textContent='新密碼與確認密碼不一致'; errEl.style.display='block'; return; }
+  if (newPw.length < 6)  { errEl.textContent='新密碼至少需要 6 個字元'; errEl.style.display='block'; return; }
+
+  btn.disabled = true; btn.textContent = '更新中…';
+  try {
+    await apiFetch('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ emp_no: empNo, old_password: oldPw, new_password: newPw })
+    });
+    closePwModal();
+    // Show success toast
+    const wrap = document.createElement('div');
+    wrap.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1E2333;border:1px solid rgba(74,222,128,.3);border-left:3px solid #4ADE80;border-radius:20px;padding:10px 20px;font-size:13px;color:#4ADE80;z-index:999;white-space:nowrap';
+    wrap.textContent='✅ 密碼已更新，下次登入生效';
+    document.body.appendChild(wrap);
+    setTimeout(()=>wrap.remove(), 3500);
+  } catch(e) {
+    errEl.textContent = e.message || '更新失敗';
+    errEl.style.display = 'block';
+  }
+  btn.disabled = false; btn.textContent = '確認修改';
+}
+
 function switchToDesktop() {
   if (confirm('確定切換至電腦版管理後台？')) {
     localStorage.setItem('preferred_version', 'desktop');
@@ -197,6 +271,8 @@ async function doLogout() {
   let u;
   try { u = await apiFetch('/api/employees/me'); }
   catch(e) { window.location.href = '/login.html'; return; }
+
+  window._empNo = u.emp_no || '';
 
   // Avatar
   document.getElementById('profile-avatar').textContent = (u.avatar || u.name?.[0] || '?');

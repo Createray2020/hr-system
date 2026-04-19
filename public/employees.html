@@ -296,6 +296,7 @@
 
     <div class="modal-actions">
       <button class="btn btn-danger" id="btn-resign" onclick="resignEmployee()" style="margin-right:auto">離職</button>
+      <button class="btn btn-warn btn-sm" id="btn-reset-pw" onclick="resetEmpPassword()" style="display:none" title="重設為預設密碼 123456">🔑 重設密碼</button>
       <button class="btn btn-ghost" onclick="closeModal('emp-modal')">取消</button>
       <button class="btn btn-primary" id="emp-save-btn" onclick="saveEmployee()">儲存</button>
     </div>
@@ -697,6 +698,11 @@ function openEditModal(id) {
   // Resign button: only for active employees
   document.getElementById('btn-resign').style.display = e.status === 'active' ? '' : 'none';
 
+  // Reset-password button: only for hr/chairman/admin
+  const adminRole = window.currentUser?.role;
+  document.getElementById('btn-reset-pw').style.display =
+    ['hr','chairman','admin'].includes(adminRole) ? '' : 'none';
+
   document.getElementById('emp-modal').classList.add('open');
 }
 
@@ -751,6 +757,25 @@ async function saveEmployee() {
     closeModal('emp-modal');
     await loadEmployees();
   } catch(e) { toast('儲存失敗：'+e.message,'error'); }
+}
+
+/* ── Reset Password ── */
+async function resetEmpPassword() {
+  if (!editingId) return;
+  const emp = allEmployees.find(e => e.id === editingId);
+  if (!emp?.emp_no) { toast('此員工尚未設定員工編號', 'warn'); return; }
+  if (!confirm(`確定要將「${emp.name}（${emp.emp_no}）」的密碼重設為 123456 嗎？`)) return;
+
+  const adminEmpNo = window.currentUser?.emp_no;
+  if (!adminEmpNo) { toast('無法取得管理員資訊', 'error'); return; }
+
+  try {
+    const result = await api('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ emp_no: emp.emp_no, new_password: '123456', admin_emp_no: adminEmpNo })
+    });
+    toast(`✅ ${result.message || '密碼已重設為 123456'}`, 'success');
+  } catch(e) { toast('重設失敗：' + e.message, 'error'); }
 }
 
 /* ── Resign ── */

@@ -1,39 +1,74 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HR System — 登入</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>CHUWA HR — 登入</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  :root{--bg:#0F1117;--surface:#181C27;--border:#2A3048;--accent:#5B8DEF;--accent2:#7FBBFF;--text:#E8EAF0;--text-dim:#7A85A0;--red:#F87171;--green:#4ADE80;--purple:#C084FC}
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
-  .bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(91,141,239,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(91,141,239,.04) 1px,transparent 1px);background-size:40px 40px;pointer-events:none}
-  .bg-glow{position:fixed;width:600px;height:600px;background:radial-gradient(circle,rgba(91,141,239,.08) 0%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
-  .login-wrap{width:420px;position:relative;z-index:1}
-  .login-header{text-align:center;margin-bottom:32px}
-  .login-mark{font-family:'DM Mono',monospace;font-size:11px;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:8px}
-  .login-title{font-size:28px;font-weight:700;margin-bottom:6px}
-  .login-sub{font-size:13px;color:var(--text-dim)}
-  .login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
-  .form-row{margin-bottom:18px}
-  .form-label{font-size:11.5px;color:var(--text-dim);margin-bottom:7px;display:block;font-family:'DM Mono',monospace;letter-spacing:.5px;text-transform:uppercase}
-  .form-input{width:100%;background:#1E2333;border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-size:14px;color:var(--text);font-family:'Noto Sans TC',sans-serif;outline:none;transition:border-color .2s}
-  .form-input:focus{border-color:var(--accent)}
-  .btn-login{width:100%;background:var(--accent);color:#fff;border:none;border-radius:8px;padding:13px;font-size:14px;font-weight:600;font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .2s;margin-top:8px}
-  .btn-login:hover{background:var(--accent2);color:#0F1117}
-  .btn-login:disabled{opacity:.5;cursor:not-allowed}
-  .error-msg{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--red);margin-bottom:16px;display:none}
-  .divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--text-dim);font-size:12px}
-  .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border)}
-  .demo-accounts{margin-top:20px}
-  .demo-title{font-size:11px;font-family:'DM Mono',monospace;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase;margin-bottom:10px}
-  .demo-btn{width:100%;background:rgba(91,141,239,.08);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text-dim);font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .2s;text-align:left;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-  .demo-btn:hover{border-color:var(--accent);color:var(--text);background:rgba(91,141,239,.12)}
-  .demo-role{font-size:11px;font-family:'DM Mono',monospace;color:var(--accent);padding:2px 8px;background:rgba(91,141,239,.12);border-radius:4px}
-  .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto}
-  @keyframes spin{to{transform:rotate(360deg)}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+
+/* ── Background ── */
+.bg-grid{position:fixed;inset:0;background-image:linear-gradient(rgba(91,141,239,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(91,141,239,.04) 1px,transparent 1px);background-size:40px 40px;pointer-events:none}
+.bg-glow{position:fixed;width:600px;height:600px;background:radial-gradient(circle,rgba(91,141,239,.07) 0%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+
+/* ══ MOBILE (≤480px) ══ */
+.login-wrap{position:relative;z-index:1;width:100%;max-width:400px;padding:0 24px}
+
+.logo-block{display:flex;flex-direction:column;align-items:center;margin-bottom:36px}
+.logo-sq{width:64px;height:64px;background:linear-gradient(135deg,#3B5FD4,#7B6CF6);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:#fff;font-family:'DM Mono',monospace;letter-spacing:-1px;margin-bottom:14px;box-shadow:0 8px 24px rgba(91,141,239,.35)}
+.logo-company{font-size:22px;font-weight:700;letter-spacing:2px;color:#E8EAF0}
+.logo-sub{font-size:13px;color:rgba(255,255,255,.4);margin-top:4px}
+
+.form-card{background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.1);border-radius:20px;padding:28px 24px}
+
+.f-label{font-size:11px;color:rgba(255,255,255,.4);font-family:'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase;margin-bottom:7px;display:block}
+.f-input-wrap{position:relative;margin-bottom:14px}
+.f-input{width:100%;background:rgba(255,255,255,.06);border:0.5px solid rgba(255,255,255,.12);border-radius:12px;padding:14px 16px;font-size:16px;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;outline:none;transition:border-color .2s;-webkit-appearance:none}
+.f-input:focus{border-color:rgba(91,141,239,.6)}
+.f-input::placeholder{color:rgba(255,255,255,.2)}
+.f-hint{font-size:11px;color:rgba(255,255,255,.25);margin-top:-10px;margin-bottom:14px;padding-left:4px;font-family:'DM Mono',monospace}
+
+.err-box{background:rgba(248,113,113,.1);border:0.5px solid rgba(248,113,113,.3);border-radius:10px;padding:10px 14px;font-size:13px;color:#F87171;margin-bottom:14px;display:none}
+
+.btn-login{width:100%;padding:15px;background:#5B8DEF;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .2s;margin-top:4px}
+.btn-login:hover{background:#7FBBFF;color:#0F1117}
+.btn-login:disabled{opacity:.5;cursor:not-allowed}
+
+.forgot-link{text-align:center;margin-top:14px;font-size:12px;color:rgba(255,255,255,.3)}
+
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ══ DESKTOP (≥481px) ══ */
+@media(min-width:481px){
+  .login-wrap{max-width:420px;padding:0}
+  .logo-sq{width:56px;height:56px;font-size:22px;border-radius:14px}
+  .logo-company{font-size:20px}
+  .form-card{padding:32px 36px}
+  .f-input{font-size:14px;padding:12px 14px}
+}
+
+/* ── Version selector modal ── */
+.v-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(4px);align-items:center;justify-content:center;z-index:9999;padding:20px}
+.v-modal.open{display:flex}
+.v-card{background:#13161F;border:0.5px solid rgba(255,255,255,.1);border-radius:20px;padding:28px;max-width:340px;width:100%}
+.v-title{font-size:19px;font-weight:700;text-align:center;margin-bottom:6px}
+.v-sub{font-size:13px;color:rgba(255,255,255,.4);text-align:center;margin-bottom:22px}
+.v-btn{width:100%;border:none;border-radius:12px;padding:15px 18px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:12px;font-family:'Noto Sans TC',sans-serif;transition:all .15s;margin-bottom:10px}
+.v-btn:active{transform:scale(.98)}
+.v-btn-desktop{background:#5B8DEF;color:#fff}
+.v-btn-desktop:hover{background:#7FBBFF;color:#0F1117}
+.v-btn-mobile{background:rgba(255,255,255,.07);border:0.5px solid rgba(255,255,255,.12)!important;color:#E8EAF0}
+.v-btn-mobile:hover{background:rgba(255,255,255,.12)}
+.v-btn-icon{font-size:24px;flex-shrink:0}
+.v-btn-text{text-align:left}
+.v-btn-text .v-btn-label{margin-bottom:2px}
+.v-btn-text .v-btn-desc{font-size:11px;opacity:.6;font-weight:400}
+.v-remember{display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;font-size:12px;color:rgba(255,255,255,.35);padding:2px 0}
+.v-remember input{width:15px;height:15px;cursor:pointer;accent-color:#5B8DEF}
 </style>
 </head>
 <body>
@@ -41,168 +76,167 @@
 <div class="bg-glow"></div>
 
 <div class="login-wrap">
-  <div class="login-header">
-    <div class="login-mark">HR · SYSTEM</div>
-    <div class="login-title">人資管理平台</div>
-    <div class="login-sub">請登入您的帳號以繼續</div>
+  <div class="logo-block">
+    <div class="logo-sq">CW</div>
+    <div class="logo-company">CHUWA</div>
+    <div class="logo-sub">人資管理系統</div>
   </div>
 
-  <div class="login-card">
-    <div class="error-msg" id="error-msg"></div>
+  <div class="form-card">
+    <div class="err-box" id="err-box"></div>
 
-    <div class="form-row">
-      <label class="form-label">電子郵件</label>
-      <input class="form-input" type="email" id="email" placeholder="your@email.com" autocomplete="email">
+    <div class="f-input-wrap">
+      <label class="f-label">員工編號</label>
+      <input class="f-input" id="emp-no" type="text" placeholder="例：01260401"
+             autocomplete="username" autocapitalize="none" spellcheck="false"
+             onkeydown="if(event.key==='Enter')document.getElementById('password').focus()">
     </div>
-    <div class="form-row">
-      <label class="form-label">密碼</label>
-      <input class="form-input" type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+    <div class="f-hint">格式：類型代碼 + YYMMDD</div>
+
+    <div class="f-input-wrap">
+      <label class="f-label">密碼</label>
+      <input class="f-input" id="password" type="password" placeholder="預設密碼：123456"
+             autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')doLogin()">
     </div>
 
     <button class="btn-login" id="login-btn" onclick="doLogin()">登入</button>
 
-    <div class="divider">或使用測試帳號</div>
+    <div class="forgot-link">忘記密碼？請聯絡人資部門</div>
+  </div>
+</div>
 
-    <div class="demo-accounts">
-      <div class="demo-title">快速登入（Demo）</div>
-      <button class="demo-btn" onclick="fillDemo('li@hr.com','hr123456')">
-        <span>李部長 — 研發部主管</span>
-        <span class="demo-role">MANAGER</span>
-      </button>
-      <button class="demo-btn" onclick="fillDemo('huang@hr.com','hr123456')">
-        <span>黃總監 — 業務部總監</span>
-        <span class="demo-role">MANAGER</span>
-      </button>
-      <button class="demo-btn" onclick="fillDemo('chen@hr.com','hr123456')">
-        <span>陳小明 — 研發部工程師</span>
-        <span class="demo-role">EMPLOYEE</span>
-      </button>
-    </div>
+<!-- 版本選擇 Modal -->
+<div class="v-modal" id="version-modal">
+  <div class="v-card">
+    <div class="v-title">選擇介面版本</div>
+    <div class="v-sub">你可以隨時在「我的」頁面切換</div>
+
+    <button class="v-btn v-btn-desktop" onclick="chooseVersion('desktop')">
+      <span class="v-btn-icon">🖥️</span>
+      <div class="v-btn-text">
+        <div class="v-btn-label">電腦版（管理後台）</div>
+        <div class="v-btn-desc">完整人事管理功能</div>
+      </div>
+    </button>
+    <button class="v-btn v-btn-mobile" onclick="chooseVersion('mobile')">
+      <span class="v-btn-icon">📱</span>
+      <div class="v-btn-text">
+        <div class="v-btn-label">手機版（員工介面）</div>
+        <div class="v-btn-desc">打卡、班表、請假、薪資</div>
+      </div>
+    </button>
+
+    <label class="v-remember">
+      <input type="checkbox" id="remember-choice">
+      記住我的選擇，下次直接進入
+    </label>
   </div>
 </div>
 
 <script>
-  // 替換成你的 Supabase URL 和 anon key
-  const SUPABASE_URL = 'https://scsgqxixmbompnoypuuw.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
-  const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  const MANAGER_ROLES = ['chairman', 'ceo', 'manager', 'hr', 'admin'];
+const MANAGER_ROLES = ['chairman', 'ceo', 'manager', 'hr', 'admin'];
 
-  // 已登入則根據角色跳轉
-  _sb.auth.getSession().then(async ({ data: { session } }) => {
-    if (!session) return;
-    try {
-      const res = await fetch('/api/employees/me', {
-        headers: { 'Authorization': `Bearer ${session.access_token}` }
-      });
-      const user = res.ok ? await res.json() : null;
-      redirectByRole(user?.role || 'employee');
-    } catch {
-      window.location.href = '/dashboard.html';
-    }
-  });
+function showError(msg) {
+  const el = document.getElementById('err-box');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function hideError() { document.getElementById('err-box').style.display = 'none'; }
 
-  function redirectByRole(role) {
-    if (role === 'employee') {
-      window.location.href = '/employee-app.html';
-    } else if (MANAGER_ROLES.includes(role)) {
-      const preferred = localStorage.getItem('preferred_version');
-      if (preferred) {
-        window.location.href = preferred === 'desktop' ? '/dashboard.html' : '/employee-app.html';
-      } else {
-        showVersionModal();
-      }
+function redirectByRole(emp) {
+  if (emp.role === 'employee') {
+    window.location.href = '/employee-app.html';
+    return;
+  }
+  if (MANAGER_ROLES.includes(emp.role)) {
+    const preferred = localStorage.getItem('preferred_version');
+    if (preferred) {
+      window.location.href = preferred === 'desktop' ? '/dashboard.html' : '/employee-app.html';
     } else {
-      window.location.href = '/dashboard.html';
+      document.getElementById('version-modal').classList.add('open');
     }
+    return;
   }
+  window.location.href = '/dashboard.html';
+}
 
-  function showVersionModal() {
-    const modal = document.createElement('div');
-    modal.innerHTML = `
-      <div style="position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px">
-        <div style="background:#0F1117;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:28px;max-width:340px;width:100%">
-          <div style="text-align:center;margin-bottom:24px">
-            <div style="font-size:22px;font-weight:700;color:#fff;margin-bottom:8px">選擇介面</div>
-            <div style="font-size:14px;color:rgba(255,255,255,.5)">你可以隨時在設定中切換</div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:12px">
-            <button onclick="gotoVersion('desktop')" style="background:#5B8DEF;border:none;border-radius:12px;padding:16px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:12px;width:100%">
-              <span style="font-size:24px">🖥️</span>
-              <div style="text-align:left">
-                <div>電腦版（管理後台）</div>
-                <div style="font-size:12px;opacity:.7;font-weight:400">完整管理功能</div>
-              </div>
-            </button>
-            <button onclick="gotoVersion('mobile')" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:16px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:12px;width:100%">
-              <span style="font-size:24px">📱</span>
-              <div style="text-align:left">
-                <div>手機版（員工介面）</div>
-                <div style="font-size:12px;opacity:.7;font-weight:400">打卡、班表、請假</div>
-              </div>
-            </button>
-          </div>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:16px;cursor:pointer;font-size:13px;color:rgba(255,255,255,.4)">
-            <input type="checkbox" id="remember-version" style="width:16px;height:16px">
-            記住我的選擇
-          </label>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
+function chooseVersion(v) {
+  if (document.getElementById('remember-choice').checked) {
+    localStorage.setItem('preferred_version', v);
   }
+  window.location.href = v === 'desktop' ? '/dashboard.html' : '/employee-app.html';
+}
 
-  function gotoVersion(v) {
-    const remember = document.getElementById('remember-version')?.checked;
-    if (remember) localStorage.setItem('preferred_version', v);
-    window.location.href = v === 'desktop' ? '/dashboard.html' : '/employee-app.html';
-  }
+// If already logged in, redirect
+_sb.auth.getSession().then(async ({ data: { session } }) => {
+  if (!session) return;
+  try {
+    const res = await fetch('/api/employees/me', {
+      headers: { 'Authorization': `Bearer ${session.access_token}` }
+    });
+    if (res.ok) {
+      const emp = await res.json();
+      redirectByRole(emp);
+    }
+  } catch {}
+});
 
-  function fillDemo(email, pw) {
-    document.getElementById('email').value    = email;
-    document.getElementById('password').value = pw;
-  }
+async function doLogin() {
+  hideError();
+  const empNo    = document.getElementById('emp-no').value.trim();
+  const password = document.getElementById('password').value;
 
-  async function doLogin() {
-    const email    = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const errEl    = document.getElementById('error-msg');
-    const btn      = document.getElementById('login-btn');
-    errEl.style.display = 'none';
+  if (!empNo || !password) { showError('請輸入員工編號和密碼'); return; }
 
-    if (!email || !password) {
-      errEl.textContent = '請填寫電子郵件和密碼';
-      errEl.style.display = 'block';
+  const btn = document.getElementById('login-btn');
+  btn.innerHTML = '<span class="spinner"></span>';
+  btn.disabled  = true;
+
+  try {
+    // 員工編號 → email
+    const email = empNo + '@chuwa.hr';
+    const { data: authData, error: authErr } = await _sb.auth.signInWithPassword({ email, password });
+
+    if (authErr) {
+      showError('員工編號或密碼錯誤');
+      btn.textContent = '登入'; btn.disabled = false;
       return;
     }
 
-    btn.innerHTML = '<div class="spinner"></div>';
-    btn.disabled  = true;
+    // 取得員工資料
+    const { data: emp, error: empErr } = await _sb
+      .from('employees')
+      .select('*')
+      .eq('emp_no', empNo)
+      .single();
 
-    const { data: authData, error } = await _sb.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      errEl.textContent = '登入失敗：帳號或密碼不正確';
-      errEl.style.display = 'block';
-      btn.textContent = '登入';
-      btn.disabled = false;
+    if (empErr || !emp) {
+      showError('找不到此員工編號，請聯絡管理員');
+      await _sb.auth.signOut();
+      btn.textContent = '登入'; btn.disabled = false;
       return;
     }
 
-    try {
-      const r = await fetch('/api/employees/me', {
-        headers: { 'Authorization': `Bearer ${authData.session.access_token}` }
-      });
-      const user = r.ok ? await r.json() : null;
-      redirectByRole(user?.role || 'employee');
-    } catch {
-      window.location.href = '/dashboard.html';
+    if (emp.status === 'resigned') {
+      showError('此帳號已停用，請聯絡管理員');
+      await _sb.auth.signOut();
+      btn.textContent = '登入'; btn.disabled = false;
+      return;
     }
-  }
 
-  document.getElementById('password').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
-  });
+    localStorage.setItem('currentUser', JSON.stringify(emp));
+    redirectByRole(emp);
+
+  } catch(e) {
+    showError('登入失敗，請稍後再試');
+    btn.textContent = '登入'; btn.disabled = false;
+  }
+}
 </script>
 </body>
 </html>
