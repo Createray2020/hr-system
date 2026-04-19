@@ -27,6 +27,43 @@
 .qt-shift-btn.clear-mode.active{border-color:var(--text)!important;color:var(--text)}
 .qt-divider{width:1px;height:24px;background:var(--border);margin:0 4px}
 
+/* ── Evening shift dropdown ── */
+.qt-evening-wrap{position:relative;display:flex;align-items:center;gap:2px}
+.qt-evening-btn{border-radius:6px 0 0 6px!important}
+.qt-gear-btn{background:rgba(255,255,255,.12);border:none;border-radius:0 6px 6px 0;
+  padding:4px 7px;cursor:pointer;font-size:13px;color:#fff;transition:background .15s;
+  line-height:1;height:100%}
+.qt-gear-btn:hover{background:rgba(255,255,255,.25)}
+.qt-evening-dropdown{position:absolute;top:calc(100% + 6px);left:0;
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  min-width:210px;box-shadow:0 8px 28px rgba(0,0,0,.45);z-index:200;
+  padding:4px 0;display:none}
+.qt-evening-dropdown.open{display:block}
+.qt-dd-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;transition:background .15s}
+.qt-dd-item:hover{background:rgba(255,255,255,.06)}
+.qt-dd-item.slot-active{color:var(--accent2)}
+.qt-dd-time{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-dim);font-weight:400}
+.qt-dd-custom{padding:6px 14px}
+.qt-dd-custom-row{display:flex;align-items:center;gap:6px;margin-top:6px}
+.qt-dd-custom-row input[type=time]{background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:4px;padding:3px 6px;font-size:11px;font-family:'DM Mono',monospace;width:90px}
+.qt-dd-sep{height:1px;background:var(--border);margin:4px 0}
+.qt-dd-footer{padding:6px 14px;font-size:11px;color:var(--text-dim);cursor:pointer;transition:background .15s}
+.qt-dd-footer:hover{background:rgba(255,255,255,.06);color:var(--accent2)}
+
+/* ── Evening slot management modal ── */
+.eslot-item{display:flex;align-items:center;gap:10px;padding:10px 0;
+  border-bottom:1px solid var(--border)}
+.eslot-item:last-child{border-bottom:none}
+.eslot-name{font-size:13px;font-weight:600;flex:1}
+.eslot-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--accent2);white-space:nowrap}
+.eslot-del{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;
+  padding:2px 6px;border-radius:4px;transition:all .15s;line-height:1}
+.eslot-del:hover{background:rgba(244,67,54,.15);color:var(--red)}
+.eslot-add-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;
+  align-items:end;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+
 /* ── Tab bar ── */
 .tab-bar{display:flex;gap:0;background:var(--surface2);border:1px solid var(--border);
   border-radius:8px;overflow:hidden;margin-bottom:16px;width:fit-content}
@@ -253,6 +290,40 @@
   </div>
 </div>
 
+<!-- Evening Slot Management Modal -->
+<div class="modal-bg" id="eslot-modal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">⚙️ 晚班時段設定</div>
+    <p style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+      設定常用的晚班時段，排班時可快速選擇
+    </p>
+    <!-- Slot list -->
+    <div id="eslot-list"></div>
+    <!-- Add form -->
+    <div class="eslot-add-row">
+      <div class="form-row" style="margin:0">
+        <label class="form-label">名稱（選填）</label>
+        <input class="form-input" id="eslot-new-name" placeholder="晚班A">
+      </div>
+      <div class="form-row" style="margin:0">
+        <label class="form-label">開始時間</label>
+        <input class="form-input" id="eslot-new-start" type="time" value="19:00">
+      </div>
+      <div class="form-row" style="margin:0">
+        <label class="form-label">結束時間</label>
+        <input class="form-input" id="eslot-new-end" type="time" value="22:00">
+      </div>
+      <div class="form-row" style="margin:0">
+        <label class="form-label">&nbsp;</label>
+        <button class="btn btn-primary" onclick="addEveningSlot()" style="width:100%">新增</button>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal('eslot-modal')">關閉</button>
+    </div>
+  </div>
+</div>
+
 <script>
 function toast(msg, type='success') {
   let wrap = document.getElementById('toast-wrap');
@@ -277,8 +348,10 @@ const PERIOD_DAYS = 28;
 let shiftCtx = { empId: null, date: null, shiftId: null };
 
 // Quick mode
-let quickMode    = false;
-let quickShiftId = null; // null = clear mode
+let quickMode      = false;
+let quickShiftId   = null;  // null = clear mode
+let quickStartTime = null;  // custom start for flexible/evening shifts
+let quickEndTime   = null;  // custom end   for flexible/evening shifts
 
 // Drag fill
 let dragCells = new Map(); // key "empId|date" → {empId, dateStr, td}
@@ -286,6 +359,15 @@ let dragStarted = false;
 
 // Import parsed data
 let importRows = []; // [{empId, dateStr, shiftTypeId, startTime, endTime, status, msg}]
+
+// Evening time slots (localStorage)
+let eveningSlots = [];
+const LS_KEY = 'custom_shift_times';
+const DEFAULT_EVENING_SLOTS = [
+  { id: 'default-a', name: '晚班A', start: '19:00', end: '22:00' },
+  { id: 'default-b', name: '晚班B', start: '18:00', end: '23:00' },
+  { id: 'default-c', name: '晚班C', start: '20:00', end: '02:00' },
+];
 
 /* ══════════════════════════════════════════
    Init
@@ -302,12 +384,20 @@ window.onload = async () => {
     await loadSchedules();
   } catch(e) { toast('載入失敗：' + e.message, 'error'); }
 
+  // Load evening time slots from localStorage
+  loadEveningSlots();
+
   // ── Event delegation for shift cells ──
   const tbl = document.getElementById('sched-table');
   tbl.addEventListener('click',     onCellClick);
   tbl.addEventListener('mousedown', onCellMousedown);
   tbl.addEventListener('mouseover', onCellMouseover);
   document.addEventListener('mouseup', onDocMouseup);
+
+  // Close evening dropdown on outside click
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.qt-evening-wrap')) closeAllDropdowns();
+  });
 
   // Upload zone drag events
   const zone = document.getElementById('upload-zone');
@@ -609,13 +699,19 @@ function exitQuickMode() {
 }
 
 function setQuickShift(id) {
-  quickShiftId = id;
+  quickShiftId   = id;
+  quickStartTime = null;
+  quickEndTime   = null;
+  closeAllDropdowns();
   applyQuickColor();
   updateQuickButtons();
 }
 
 function setQuickClear() {
-  quickShiftId = null;
+  quickShiftId   = null;
+  quickStartTime = null;
+  quickEndTime   = null;
+  closeAllDropdowns();
   applyQuickColor();
   updateQuickButtons();
 }
@@ -623,11 +719,24 @@ function setQuickClear() {
 function buildQuickToolbar() {
   const btns = document.getElementById('qt-btns');
   btns.innerHTML = allShiftTypes.map(st => {
-    const timeStr = st.is_off ? '休假' : st.is_flexible ? '彈性' :
+    if (st.is_flexible) {
+      // Evening/flexible shift → dropdown button
+      return `<div class="qt-evening-wrap" id="wrap-${esc(st.id)}">
+        <button class="qt-shift-btn qt-evening-btn" data-id="${esc(st.id)}"
+            style="background:${st.color}"
+            onclick="toggleEveningDropdown('${esc(st.id)}',event)">
+          ${esc(st.name)} ▾
+        </button>
+        <button class="qt-gear-btn" style="background:${st.color}cc"
+            onclick="openEslotModal(event)" title="管理晚班時段">⚙️</button>
+        <div class="qt-evening-dropdown" id="qt-dd-${esc(st.id)}"></div>
+      </div>`;
+    }
+    const timeStr = st.is_off ? '休假' :
       (st.start_time && st.end_time ? `${st.start_time}–${st.end_time}` : '');
-    return `<button class="qt-shift-btn" data-id="${st.id}"
+    return `<button class="qt-shift-btn" data-id="${esc(st.id)}"
         style="background:${st.color}"
-        onclick="setQuickShift('${st.id}')"
+        onclick="setQuickShift('${esc(st.id)}')"
         title="${esc(timeStr)}">
       ${esc(st.name)}
     </button>`;
@@ -636,8 +745,13 @@ function buildQuickToolbar() {
 }
 
 function updateQuickButtons() {
-  document.querySelectorAll('.qt-shift-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.id === quickShiftId);
+  // Update normal shift buttons
+  document.querySelectorAll('#qt-btns .qt-shift-btn:not(.qt-evening-btn)').forEach(b => {
+    b.classList.toggle('active', b.dataset.id === quickShiftId && !quickStartTime);
+  });
+  // Update evening buttons
+  document.querySelectorAll('#qt-btns .qt-evening-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.id === quickShiftId && !!quickStartTime);
   });
   document.getElementById('qt-clear-btn').classList.toggle('active', quickShiftId === null);
 }
@@ -654,17 +768,20 @@ function applyQuickColor() {
 /* ── Single cell click in quick mode ── */
 async function quickFillSingle(empId, dateStr) {
   const existing = allSchedules.find(s => s.employee_id === empId && s.work_date === dateStr);
-  if (existing && quickShiftId && existing.shift_type_id === quickShiftId) {
-    // Already has this shift → clear (set to off-type)
+  const isSame = existing && quickShiftId &&
+    existing.shift_type_id === quickShiftId &&
+    existing.shift_start === (quickStartTime || null);
+
+  if (isSame) {
+    // Same shift+time → clear to off-type
     const offType = allShiftTypes.find(st => st.is_off);
     if (offType) await doSaveShift(empId, dateStr, offType.id, null, null, '');
     else toast('無法清除：找不到休假班別', 'error');
   } else if (quickShiftId === null) {
-    // Clear mode
     const offType = allShiftTypes.find(st => st.is_off);
     if (offType) await doSaveShift(empId, dateStr, offType.id, null, null, '');
   } else {
-    await doSaveShift(empId, dateStr, quickShiftId, null, null, '');
+    await doSaveShift(empId, dateStr, quickShiftId, quickStartTime, quickEndTime, '');
   }
 }
 
@@ -683,6 +800,8 @@ async function batchQuickFill(cells) {
         employee_id:   empId,
         work_date:     dateStr,
         shift_type_id: shiftId,
+        start_time:    quickStartTime || null,
+        end_time:      quickEndTime   || null,
         dept:          emp?.dept || '',
         created_by:    window.currentUser?.id || null,
       }),
@@ -789,6 +908,151 @@ async function clearShift() {
   } else {
     closeModal('shift-modal');
   }
+}
+
+/* ══════════════════════════════════════════
+   Evening Slot Management
+══════════════════════════════════════════ */
+function loadEveningSlots() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    eveningSlots = raw ? JSON.parse(raw) : null;
+  } catch(e) { eveningSlots = null; }
+  if (!eveningSlots || !eveningSlots.length) {
+    eveningSlots = DEFAULT_EVENING_SLOTS.map(s => ({ ...s }));
+    saveEveningSlots();
+  }
+}
+
+function saveEveningSlots() {
+  localStorage.setItem(LS_KEY, JSON.stringify(eveningSlots));
+}
+
+/* ── Dropdown ── */
+function toggleEveningDropdown(shiftId, e) {
+  e.stopPropagation();
+  const dd = document.getElementById('qt-dd-' + shiftId);
+  if (!dd) return;
+  const wasOpen = dd.classList.contains('open');
+  closeAllDropdowns();
+  if (!wasOpen) {
+    renderEveningDropdown(shiftId);
+    dd.classList.add('open');
+  }
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('.qt-evening-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+function renderEveningDropdown(shiftId) {
+  const dd = document.getElementById('qt-dd-' + shiftId);
+  if (!dd) return;
+  const st = allShiftTypes.find(x => x.id === shiftId);
+  const color = st?.color || '#7B6CF6';
+
+  const slotItems = eveningSlots.map(slot => {
+    const isActive = quickShiftId === shiftId &&
+      quickStartTime === slot.start && quickEndTime === slot.end;
+    return `<div class="qt-dd-item ${isActive ? 'slot-active' : ''}"
+        onclick="selectEveningSlot('${esc(shiftId)}','${esc(slot.start)}','${esc(slot.end)}','${esc(slot.id)}')">
+      <span>${esc(slot.name)}</span>
+      <span class="qt-dd-time">${esc(slot.start)}–${esc(slot.end)}</span>
+    </div>`;
+  }).join('');
+
+  dd.innerHTML = `
+    ${slotItems}
+    <div class="qt-dd-sep"></div>
+    <div class="qt-dd-custom">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">＋ 自訂時間</div>
+      <div class="qt-dd-custom-row">
+        <input type="time" id="qt-custom-start-${esc(shiftId)}" value="19:00">
+        <span style="font-size:11px;color:var(--text-dim)">–</span>
+        <input type="time" id="qt-custom-end-${esc(shiftId)}"   value="22:00">
+        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;white-space:nowrap"
+            onclick="applyCustomTime('${esc(shiftId)}')">套用</button>
+      </div>
+    </div>
+    <div class="qt-dd-sep"></div>
+    <div class="qt-dd-footer" onclick="openEslotModal(event)">⚙️ 管理時段</div>`;
+}
+
+function selectEveningSlot(shiftId, start, end, slotId) {
+  quickShiftId   = shiftId;
+  quickStartTime = start;
+  quickEndTime   = end;
+  closeAllDropdowns();
+  applyQuickColor();
+  updateQuickButtons();
+  // Show selected info on button
+  const btn = document.querySelector(`#qt-btns .qt-evening-btn[data-id="${shiftId}"]`);
+  if (btn) {
+    const st = allShiftTypes.find(x => x.id === shiftId);
+    const slot = eveningSlots.find(s => s.id === slotId);
+    btn.textContent = `${st?.name || '晚班'} ${start}–${end} ▾`;
+  }
+}
+
+function applyCustomTime(shiftId) {
+  const s = document.getElementById(`qt-custom-start-${shiftId}`)?.value;
+  const e = document.getElementById(`qt-custom-end-${shiftId}`)?.value;
+  if (!s || !e) { toast('請輸入開始和結束時間', 'error'); return; }
+  quickShiftId   = shiftId;
+  quickStartTime = s;
+  quickEndTime   = e;
+  closeAllDropdowns();
+  applyQuickColor();
+  updateQuickButtons();
+  const btn = document.querySelector(`#qt-btns .qt-evening-btn[data-id="${shiftId}"]`);
+  if (btn) {
+    const st = allShiftTypes.find(x => x.id === shiftId);
+    btn.textContent = `${st?.name || '晚班'} ${s}–${e} ▾`;
+  }
+}
+
+/* ── Slot management modal ── */
+function openEslotModal(e) {
+  if (e) e.stopPropagation();
+  closeAllDropdowns();
+  renderEslotList();
+  document.getElementById('eslot-new-name').value  = '';
+  document.getElementById('eslot-new-start').value = '19:00';
+  document.getElementById('eslot-new-end').value   = '22:00';
+  document.getElementById('eslot-modal').classList.add('open');
+}
+
+function renderEslotList() {
+  const list = document.getElementById('eslot-list');
+  if (!eveningSlots.length) {
+    list.innerHTML = '<div style="font-size:13px;color:var(--text-dim);padding:8px 0">尚無時段，請新增</div>';
+    return;
+  }
+  list.innerHTML = eveningSlots.map((slot, i) => `
+    <div class="eslot-item">
+      <div class="eslot-name">${esc(slot.name)}</div>
+      <div class="eslot-time">${esc(slot.start)} – ${esc(slot.end)}</div>
+      <button class="eslot-del" onclick="deleteEveningSlot(${i})" title="刪除">×</button>
+    </div>`).join('');
+}
+
+function addEveningSlot() {
+  const start = document.getElementById('eslot-new-start').value;
+  const end   = document.getElementById('eslot-new-end').value;
+  if (!start || !end) { toast('請填寫開始和結束時間', 'error'); return; }
+  const rawName = document.getElementById('eslot-new-name').value.trim();
+  const name    = rawName || `晚班 ${start}-${end}`;
+  eveningSlots.push({ id: 'slot-' + Date.now(), name, start, end });
+  saveEveningSlots();
+  renderEslotList();
+  document.getElementById('eslot-new-name').value = '';
+  toast('✅ 時段已新增', 'success');
+}
+
+function deleteEveningSlot(idx) {
+  eveningSlots.splice(idx, 1);
+  saveEveningSlots();
+  renderEslotList();
 }
 
 function submitPeriod() { toast('班表已提交審核', 'success'); }
