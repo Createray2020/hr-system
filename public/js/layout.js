@@ -36,17 +36,37 @@
 
   // 注入 Sidebar
   const page = document.body.dataset.page || '';
-  const navItems = [
-    { page:'dashboard',  icon:'🏠', label:'總覽',     href:'/dashboard.html' },
-    { page:'calendar',   icon:'📅', label:'行事曆',   href:'/calendar.html' },
-    { page:'leave',      icon:'📋', label:'請假審批', href:'/leave.html' },
-    { page:'attendance', icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
-    { page:'schedule',   icon:'🗓️', label:'排班管理', href:'/schedule.html' },
-    { page:'employees',   icon:'👥', label:'員工資料',   href:'/employees.html' },
-    { page:'staff-table', icon:'📊', label:'員工試算表', href:'/staff-table.html' },
-    { page:'orgchart',    icon:'🗂️', label:'組織圖',     href:'/orgchart.html' },
-    { page:'departments', icon:'🏢', label:'部門管理', href:'/departments.html' },
-    { page:'salary',      icon:'💰', label:'薪資管理', href:'/salary.html' },
+  const navGroups = [
+    {
+      title: '總覽',
+      items: [
+        { page:'dashboard', icon:'🏠', label:'總覽',   href:'/dashboard.html' },
+        { page:'calendar',  icon:'📅', label:'行事曆', href:'/calendar.html' },
+      ]
+    },
+    {
+      title: '人員管理',
+      items: [
+        { page:'employees',   icon:'👥', label:'員工資料',   href:'/employees.html' },
+        { page:'staff-table', icon:'📊', label:'員工試算表', href:'/staff-table.html' },
+        { page:'orgchart',    icon:'🗂️', label:'組織圖',     href:'/orgchart.html' },
+        { page:'departments', icon:'🏢', label:'部門管理',   href:'/departments.html' },
+      ]
+    },
+    {
+      title: '勤務管理',
+      items: [
+        { page:'leave',      icon:'📋', label:'請假審批', href:'/leave.html' },
+        { page:'attendance', icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
+        { page:'schedule',   icon:'🗓️', label:'排班管理', href:'/schedule.html' },
+      ]
+    },
+    {
+      title: '薪資管理',
+      items: [
+        { page:'salary', icon:'💰', label:'薪資管理', href:'/salary.html' },
+      ]
+    },
   ];
 
   const sidebar = document.getElementById('sidebar');
@@ -59,17 +79,22 @@
                  : '員工';
   const avatarChar = currentUser?.avatar || userName[0];
 
+  const navHTML = navGroups.map(g => `
+    <div class="nav-section">
+      <div class="nav-section-title">${g.title}</div>
+      ${g.items.map(n => `
+        <a class="nav-item ${page === n.page ? 'active' : ''}" href="${n.href}">
+          <span class="nav-icon">${n.icon}</span> ${n.label}
+        </a>`).join('')}
+    </div>`).join('');
+
   sidebar.innerHTML = `
     <div class="logo">
       <div class="logo-mark">HR · SYSTEM</div>
       <div class="logo-title">人資管理平台</div>
     </div>
     <nav class="nav">
-      <div class="nav-label">主選單</div>
-      ${navItems.map(n => `
-        <a class="nav-item ${page === n.page ? 'active' : ''}" href="${n.href}">
-          <span class="nav-icon">${n.icon}</span> ${n.label}
-        </a>`).join('')}
+      ${navHTML}
     </nav>
     <div class="sidebar-user">
       <div class="avatar-sm" title="點擊登出" onclick="logout()">${avatarChar}</div>
