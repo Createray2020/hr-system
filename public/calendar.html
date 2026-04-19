@@ -87,6 +87,11 @@
 .detail-ev-item.schedule{background:rgba(168,85,247,.15);color:#d8b4fe}
 .detail-empty{font-size:13px;color:var(--text-dim);padding:8px 0}
 .detail-ev-sub{font-size:11px;opacity:.7;margin-top:2px}
+.shift-group{margin-bottom:10px}
+.shift-group-title{font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.shift-group-title .shift-time{font-family:'DM Mono',monospace;font-size:10px;opacity:.7}
+.shift-emp-list{display:flex;flex-direction:column;gap:3px;padding-left:4px}
+.shift-emp-row{font-size:13px;padding:3px 8px;border-left:2px solid rgba(168,85,247,.5);color:var(--text)}
 </style>
 </head>
 <body data-page="calendar">
@@ -282,9 +287,13 @@ async function fetchHolidays(year) {
 
 async function fetchGcal(start, end) {
   try {
-    const res = await window.api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`);
-    return res || [];
-  } catch { return []; }
+    const data = await window.api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`);
+    console.log('[fetchGcal] response:', data);
+    return data || [];
+  } catch(e) {
+    console.log('[fetchGcal] error:', e?.message || e);
+    return [];
+  }
 }
 
 async function fetchLeaves(start, end) {
@@ -307,18 +316,17 @@ async function fetchSchedules(year, month) {
   try {
     const ym  = `${year}-${String(month+1).padStart(2,'0')}`;
     const res = await window.api(`/api/schedules?month=${ym}`);
-    // Group by date → one pill per date with count
-    const byDate = {};
-    (res || []).forEach(s => {
-      if (!byDate[s.work_date]) byDate[s.work_date] = [];
-      byDate[s.work_date].push(s);
-    });
-    return Object.entries(byDate).map(([date, recs]) => ({
-      date,
-      title:  `班表 ${recs.length} 人`,
-      color:  'schedule',
-      source: 'schedule',
-      recs,
+    // 每位員工每天一筆，保留班別與姓名供格子和詳情面板使用
+    return (res || []).map(s => ({
+      date:        s.work_date,
+      title:       `${s.shift_name || '班'} ${s.emp_name || ''}`.trim(),
+      emp_name:    s.emp_name    || '',
+      shift_name:  s.shift_name  || '',
+      shift_start: s.shift_start || '',
+      shift_end:   s.shift_end   || '',
+      is_off:      s.is_off      || false,
+      color:       'schedule',
+      source:      'schedule',
     }));
   } catch { return []; }
 }
@@ -394,10 +402,20 @@ function renderMonth() {
     const isSelected = cell.date === state.selectedDate;
     const numClass  = wd === 0 ? 'sun' : wd === 6 ? 'sat' : '';
 
-    const pills = evs.slice(0, 3).map(ev =>
+    // 非班表事件（假日、請假、Google行事曆）全部顯示
+    const otherEvs  = evs.filter(e => e.source !== 'schedule');
+    const schedEvs  = evs.filter(e => e.source === 'schedule');
+    const otherPills = otherEvs.map(ev =>
       `<div class="ev-pill ${ev.color}" title="${ev.title}">${ev.title}</div>`
     ).join('');
-    const more = evs.length > 3 ? `<div class="ev-more">+${evs.length - 3}</div>` : '';
+    // 班表：每人一行，最多顯示 3 人
+    const schedPills = schedEvs.slice(0, 3).map(ev =>
+      `<div class="ev-pill schedule" title="${ev.title}">${ev.title}</div>`
+    ).join('');
+    const schedMore = schedEvs.length > 3
+      ? `<div class="ev-more">+${schedEvs.length - 3} 人</div>` : '';
+    const pills = otherPills + schedPills;
+    const more  = schedMore;
 
     return `<div class="day-cell ${cell.otherMonth?'other-month':''} ${isHoliday?'holiday-bg':''} ${isToday?'today':''} ${isSelected?'selected':''}"
       data-date="${cell.date}" onclick="selectDate('${cell.date}')">
@@ -473,6 +491,47 @@ function renderDetail(date) {
     if (!state.sources[s.src]) return '';
     const list = evs.filter(e => e.source === s.src);
     if (!list.length) return '';
+
+    // 班表：按班別分組顯示員工清單
+    if (s.src === 'schedule') {
+      // 用 Map 保持插入順序，key = shift_name
+      const groups = new Map();
+      list.forEach(ev => {
+        const key = ev.shift_name || '未分類';
+        if (!groups.has(key)) {
+          groups.set(key, {
+            shift_name:  ev.shift_name || '未分類',
+            shift_start: ev.shift_start,
+            shift_end:   ev.shift_end,
+            is_off:      ev.is_off,
+            emps: [],
+          });
+        }
+        if (ev.emp_name) groups.get(key).emps.push(ev.emp_name);
+      });
+
+      const groupHtml = [...groups.values()].map(g => {
+        const timeRange = (g.shift_start && g.shift_end)
+          ? `${g.shift_start.slice(0,5)}–${g.shift_end.slice(0,5)}`
+          : g.is_off ? '休假' : '';
+        return `<div class="shift-group">
+          <div class="shift-group-title">
+            ${g.shift_name}
+            ${timeRange ? `<span class="shift-time">(${timeRange})</span>` : ''}
+          </div>
+          <div class="shift-emp-list">
+            ${g.emps.map(n => `<div class="shift-emp-row">• ${n}</div>`).join('')}
+          </div>
+        </div>`;
+      }).join('');
+
+      return `<div class="detail-section">
+        <div class="detail-src-label ${s.cls}">${s.label}（${list.length} 人）</div>
+        ${groupHtml}
+      </div>`;
+    }
+
+    // 其他來源：原有顯示方式
     return `<div class="detail-section">
       <div class="detail-src-label ${s.cls}">${s.label}</div>
       ${list.map(ev => `

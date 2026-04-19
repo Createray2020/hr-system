@@ -34,7 +34,17 @@ export default async function handler(req, res) {
   // ── Google Calendar 事件 ─────────────────────────────────────────
   const API_KEY = process.env.GOOGLE_API_KEY;
   const CAL_ID  = process.env.GOOGLE_CALENDAR_ID;
-  if (!API_KEY || !CAL_ID) return res.status(200).json([]);
+
+  console.log('[calendar] API_KEY exists:', !!API_KEY);
+  console.log('[calendar] CALENDAR_ID:', CAL_ID || '(未設定)');
+
+  if (!API_KEY || !CAL_ID) {
+    return res.status(500).json({
+      error:         '缺少環境變數，請在 Vercel 設定 GOOGLE_API_KEY 和 GOOGLE_CALENDAR_ID',
+      hasKey:        !!API_KEY,
+      hasCalendarId: !!CAL_ID,
+    });
+  }
 
   try {
     const now = new Date();
@@ -43,6 +53,8 @@ export default async function handler(req, res) {
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CAL_ID)}/events`
       + `?key=${API_KEY}&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`
       + `&singleEvents=true&orderBy=startTime&maxResults=250`;
+
+    console.log('[calendar] Fetching URL:', url.replace(API_KEY, 'API_KEY_HIDDEN'));
 
     const r = await fetch(url);
     if (!r.ok) {
