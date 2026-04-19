@@ -258,8 +258,7 @@ async function loadAllEvents() {
   const y = state.year, m = state.month;
   // Fetch prev month + current + next for smooth nav
   const start = `${y}-${String(m+1).padStart(2,'0')}-01`;
-  const endD  = new Date(y, m + 2, 0);
-  const end   = endD.toISOString().slice(0, 10);
+  const end   = toDateStr(new Date(y, m + 2, 0));
 
   try {
     const [holidays, gcal, leaves, schedules] = await Promise.allSettled([
@@ -287,9 +286,15 @@ async function fetchHolidays(year) {
 
 async function fetchGcal(start, end) {
   try {
-    const data = await window.api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`);
-    console.log('[fetchGcal] response:', data);
-    return data || [];
+    const raw = await window.api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`);
+    // 將 API 回傳的 start/end 欄位轉換為 date/endDate，與其他事件來源一致
+    const data = (raw || []).map(e => ({
+      ...e,
+      date:    e.start,   // getEventsForDate 依賴 ev.date
+      endDate: e.end,     // 多天事件依賴 ev.endDate
+    }));
+    console.log('Google events loaded:', data.length);
+    return data;
   } catch(e) {
     console.log('[fetchGcal] error:', e?.message || e);
     return [];
@@ -358,10 +363,23 @@ function updateNavTitle() {
 function getEventsForDate(date) {
   return state.events.filter(ev => {
     if (!state.sources[ev.source]) return false;
-    // Multi-day events (leaves)
+    if (!ev.date) return false;
+
+    // Google Calendar 全天事件的 end 是 exclusive（不含），需減一天比對
+    // 例如：4/4 假日 → end = "2026-04-05"，實際只佔 4/4
+    if (ev.source === 'gcal' && ev.endDate && ev.endDate > ev.date) {
+      // 將 exclusive end 轉成 inclusive：end 減一天
+      const excl = new Date(ev.endDate + 'T00:00:00');
+      excl.setDate(excl.getDate() - 1);
+      const inclEnd = toDateStr(excl);
+      return date >= ev.date && date <= inclEnd;
+    }
+
+    // 請假等多天事件（inclusive end）
     if (ev.endDate && ev.endDate > ev.date) {
       return date >= ev.date && date <= ev.endDate;
     }
+
     return ev.date === date;
   });
 }
