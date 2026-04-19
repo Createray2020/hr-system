@@ -114,6 +114,17 @@
 .stat-cell.over{color:var(--red);font-weight:700}
 .stat-cell.ok{color:var(--green)}
 
+/* ── Hours columns ── */
+.hours-hd-col{min-width:74px;font-size:10px;text-align:center;padding:8px 6px!important;
+  color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.5px;background:var(--surface2)}
+.hours-cell{min-width:74px;padding:0 4px!important;text-align:center;vertical-align:middle;
+  font-family:'DM Mono',monospace;font-size:10px;font-weight:600;white-space:nowrap;
+  background:rgba(255,255,255,.018)}
+.hours-cell.h-green{color:var(--green)}
+.hours-cell.h-orange{color:var(--orange)}
+.hours-cell.h-red{color:var(--red)}
+.hours-cell.h-darkred{color:#cc2222;font-weight:700}
+
 /* ── Calendar view ── */
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--border);
   border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
@@ -228,6 +239,7 @@
 <div class="modal-bg shift-modal" id="shift-modal">
   <div class="modal">
     <div class="modal-title" id="shift-modal-title">排班</div>
+    <div id="shift-hours-warn" style="display:none;padding:8px 12px;border-radius:6px;background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);color:var(--orange);font-size:12px;margin-bottom:12px;line-height:1.5"></div>
     <div style="margin-bottom:14px">
       <div class="form-label" style="margin-bottom:8px">選擇班別</div>
       <div class="shift-type-grid" id="shift-type-btns"></div>
@@ -482,12 +494,65 @@ function renderView() {
 }
 
 /* ══════════════════════════════════════════
+   Hours helpers
+══════════════════════════════════════════ */
+function calcHours(start, end) {
+  if (!start || !end) return 0;
+  const toMins = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  let s = toMins(start);
+  let e = toMins(end);
+  if (e <= s) e += 24 * 60; // overnight
+  return Math.max(0, (e - s) / 60 - 1); // deduct 1h break
+}
+
+function getSchedHours(sched) {
+  if (!sched || sched.is_off) return 0;
+  if (sched.shift_start && sched.shift_end) return calcHours(sched.shift_start, sched.shift_end);
+  return 8; // default for shifts without explicit time
+}
+
+function calcEmpMonthHours(empId) {
+  return allSchedules
+    .filter(s => s.employee_id === empId)
+    .reduce((sum, s) => sum + getSchedHours(s), 0);
+}
+
+function calcEmpWeekHours(empId, wStart, wEnd) {
+  return allSchedules
+    .filter(s => s.employee_id === empId && s.work_date >= wStart && s.work_date <= wEnd)
+    .reduce((sum, s) => sum + getSchedHours(s), 0);
+}
+
+function getCurrentWeekRange() {
+  const today = new Date();
+  const dow   = today.getDay();
+  const diff  = dow === 0 ? -6 : 1 - dow;
+  const mon   = new Date(today); mon.setDate(today.getDate() + diff);
+  const sun   = new Date(mon);  sun.setDate(mon.getDate() + 6);
+  return { start: fmtDate(mon), end: fmtDate(sun) };
+}
+
+function monthHoursCls(h) {
+  if (h > 160) return 'h-darkred';
+  if (h > 150) return 'h-red';
+  if (h > 120) return 'h-orange';
+  return 'h-green';
+}
+
+function weekHoursCls(h) {
+  if (h > 48) return 'h-red';
+  if (h > 40) return 'h-orange';
+  return 'h-green';
+}
+
+/* ══════════════════════════════════════════
    Week Grid
 ══════════════════════════════════════════ */
 function renderWeekGrid() {
   const emps  = getFilteredEmps();
   const days  = buildDays(periodStart, PERIOD_DAYS);
   const today = fmtDate(new Date());
+  const { start: wStart, end: wEnd } = getCurrentWeekRange();
 
   const lookup = {};
   allSchedules.forEach(s => {
@@ -498,9 +563,11 @@ function renderWeekGrid() {
   // Header
   document.getElementById('sched-thead').innerHTML = `<tr>
     <th class="emp-col" style="text-align:left">員工</th>
+    <th class="hours-hd-col">本月工時</th>
+    <th class="hours-hd-col">本週工時</th>
     ${days.map(d => {
-      const isToday  = fmtDate(d) === today;
-      const dow      = ['日','一','二','三','四','五','六'][d.getDay()];
+      const isToday   = fmtDate(d) === today;
+      const dow       = ['日','一','二','三','四','五','六'][d.getDay()];
       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
       return `<th class="${isToday ? 'today-col' : ''}" style="${isWeekend ? 'color:var(--red)' : ''}">
         <div>${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}</div>
@@ -509,15 +576,20 @@ function renderWeekGrid() {
     }).join('')}
   </tr>`;
 
-  // Body (no inline onclick — use data-emp / data-date + event delegation)
+  // Body
   const tbody = document.getElementById('sched-tbody');
   if (!emps.length) {
-    tbody.innerHTML = `<tr><td colspan="${days.length+1}" style="text-align:center;padding:32px;color:var(--text-dim);font-size:13px">暫無員工資料</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${days.length+3}" style="text-align:center;padding:32px;color:var(--text-dim);font-size:13px">暫無員工資料</td></tr>`;
     document.getElementById('sched-tfoot').innerHTML = '';
     return;
   }
 
   tbody.innerHTML = emps.map(emp => {
+    const mH = Math.round(calcEmpMonthHours(emp.id));
+    const wH = Math.round(calcEmpWeekHours(emp.id, wStart, wEnd));
+    const mText = mH > 160 ? `${mH}h ⚠️ / 160h` : `${mH}h / 160h`;
+    const wText = wH > 48  ? `${wH}h ⚠️ / 48h`  : `${wH}h / 48h`;
+
     const cells = days.map(d => {
       const dateStr   = fmtDate(d);
       const sched     = lookup[emp.id]?.[dateStr];
@@ -546,29 +618,25 @@ function renderWeekGrid() {
           <div><div class="emp-nm">${esc(emp.name)}</div><div class="emp-dept">${esc(emp.dept)}</div></div>
         </div>
       </td>
+      <td class="hours-cell ${monthHoursCls(mH)}">${mText}</td>
+      <td class="hours-cell ${weekHoursCls(wH)}">${wText}</td>
       ${cells}
     </tr>`;
   }).join('');
 
-  // Stats footer
+  // Stats footer — per-day totals
   const tfoot = document.getElementById('sched-tfoot');
-  const hourRow = emps.map(emp => {
-    let hours = 0;
-    allSchedules.filter(s => s.employee_id === emp.id && !s.is_off).forEach(s => {
-      if (s.shift_start && s.shift_end) {
-        const [sh,sm] = s.shift_start.split(':').map(Number);
-        const [eh,em] = s.shift_end.split(':').map(Number);
-        const diff = (eh*60+em) - (sh*60+sm);
-        if (diff > 0) hours += diff / 60;
-      } else hours += 8;
-    });
-    const over = hours > 160;
-    return `<td class="stat-cell ${over?'over':hours>0?'ok':''}">${hours > 0 ? hours.toFixed(0)+'h' : '—'}</td>`;
+  const dayTotals = days.map(d => {
+    const dateStr = fmtDate(d);
+    const total   = Math.round(emps.reduce((sum, emp) => sum + getSchedHours(lookup[emp.id]?.[dateStr]), 0));
+    return `<td class="stat-cell ${total > 0 ? 'ok' : ''}">${total > 0 ? total + 'h' : '—'}</td>`;
   }).join('');
 
   tfoot.innerHTML = `<tr class="stats-row-sched">
     <td class="emp-col" style="padding:6px 12px!important;font-size:11px;color:var(--text-dim)">本期工時</td>
-    ${hourRow}
+    <td class="stat-cell"></td>
+    <td class="stat-cell"></td>
+    ${dayTotals}
   </tr>`;
 }
 
@@ -825,6 +893,27 @@ function openShiftModal(empId, dateStr) {
   const dow = ['日','一','二','三','四','五','六'][d.getDay()];
   document.getElementById('shift-modal-title').textContent =
     `${esc(emp?.name || empId)} — ${dateStr}（週${dow}）`;
+
+  // Hours warning
+  const mH     = Math.round(calcEmpMonthHours(empId));
+  const warnEl = document.getElementById('shift-hours-warn');
+  if (mH >= 140) {
+    const left = 160 - mH;
+    if (mH > 160) {
+      warnEl.style.background = 'rgba(248,113,113,.12)';
+      warnEl.style.borderColor = 'rgba(248,113,113,.35)';
+      warnEl.style.color = 'var(--red)';
+      warnEl.textContent = `⚠️ ${emp?.name} 本月已排 ${mH}h，已超過160小時上限！`;
+    } else {
+      warnEl.style.background = 'rgba(251,146,60,.1)';
+      warnEl.style.borderColor = 'rgba(251,146,60,.3)';
+      warnEl.style.color = 'var(--orange)';
+      warnEl.textContent = `⚠️ 注意：${emp?.name} 本月已排 ${mH}h，再排 ${left}h 將超過160小時上限`;
+    }
+    warnEl.style.display = '';
+  } else {
+    warnEl.style.display = 'none';
+  }
 
   const btns = document.getElementById('shift-type-btns');
   btns.innerHTML = allShiftTypes.map(st => {
