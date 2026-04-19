@@ -335,7 +335,7 @@ async function loadMiniCalendar() {
 
 async function quickLeave(id, status) {
   try {
-    await api(`/api/leave?id=${id}`, { method:'PUT', body: JSON.stringify({ status, handler_note:'' }) });
+    await api(`/api/leaves?id=${id}`, { method:'PUT', body: JSON.stringify({ status, handler_note:'' }) });
     toast(status==='approved'?'✅ 已核准':'❌ 已退回', status==='approved'?'success':'error');
     await loadDashboard();
   } catch(e) { toast('操作失敗','error'); }

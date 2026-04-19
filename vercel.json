@@ -1,7 +1,8 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/api/leaves/:id/review", "destination": "/api/leave?id=:id" },
+    { "source": "/api/leaves/:id/review", "destination": "/api/leaves?id=:id" },
+    { "source": "/api/salary/batch",      "destination": "/api/salary/index?_action=batch" },
     { "source": "/",                      "destination": "/public/login.html" },
     { "source": "/dashboard",            "destination": "/public/dashboard.html" },
     { "source": "/leave",                "destination": "/public/leave.html" },

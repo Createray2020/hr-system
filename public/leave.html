@@ -211,7 +211,7 @@ function switchTab(tab, el) {
 }
 
 async function openReview(id) {
-  const r = await api(`/api/leave?id=${id}`);
+  const r = await api(`/api/leaves?id=${id}`);
   currentReviewId = id; currentReviewData = r;
   document.getElementById('rv-employee').textContent = r.emp_name;
   document.getElementById('rv-dept').textContent     = r.dept;
@@ -232,14 +232,14 @@ async function openReview(id) {
 
 async function handleAction(status) {
   const note = document.getElementById('rv-note').value.trim();
-  await api(`/api/leave?id=${currentReviewId}`, { method:'PUT', body: JSON.stringify({ status, handler_note: note }) });
+  await api(`/api/leaves?id=${currentReviewId}`, { method:'PUT', body: JSON.stringify({ status, handler_note: note }) });
   closeModal('review-modal');
   await Promise.all([loadLeaves(), loadStats()]);
   toast(status === 'approved' ? '✅ 已核准假單' : '❌ 已退回假單', status === 'approved' ? 'success' : 'error');
 }
 
 async function quickAction(id, status) {
-  await api(`/api/leave?id=${id}`, { method:'PUT', body: JSON.stringify({ status, handler_note: '' }) });
+  await api(`/api/leaves?id=${id}`, { method:'PUT', body: JSON.stringify({ status, handler_note: '' }) });
   await Promise.all([loadLeaves(), loadStats()]);
   toast(status === 'approved' ? '✅ 已快速核准' : '❌ 已快速退回', status === 'approved' ? 'success' : 'error');
 }
