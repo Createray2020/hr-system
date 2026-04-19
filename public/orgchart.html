@@ -289,6 +289,18 @@ hr.dp { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
 .detail-row-val { font-size: 13px; }
 
 .org-loading { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 13px; }
+
+/* ── Dept header node ── */
+.node-card.dept-node {
+  width: 160px;
+  cursor: default;
+  background: var(--surface);
+  justify-content: center;
+}
+.node-card.dept-node:hover {
+  transform: none;
+  box-shadow: none;
+}
 </style>
 </head>
 <body data-page="orgchart">
@@ -412,7 +424,7 @@ function cardHTML(emp) {
 }
 
 /* ════════════════════════════════════════════
-   PLACEHOLDER CARD — shown when a tier is empty
+   PLACEHOLDER CARD — shown when chairman/ceo is empty
 ════════════════════════════════════════════ */
 function placeholderCard(label) {
   return `
@@ -428,86 +440,115 @@ function placeholderCard(label) {
 }
 
 /* ════════════════════════════════════════════
+   DEPT NODE CARD — dept header in tree
+════════════════════════════════════════════ */
+function deptNodeCard(name, color, count) {
+  return `
+    <div class="node-card dept-node" style="border-top:3px solid ${color}">
+      <div style="width:100%">
+        <div style="font-size:13px;font-weight:700;color:${color};margin-bottom:3px">${esc(name)}</div>
+        <div style="font-size:10px;color:var(--text-dim)">${count} 位成員</div>
+      </div>
+    </div>`;
+}
+
+/* ════════════════════════════════════════════
+   MANAGER PLACEHOLDER — when dept has no manager
+════════════════════════════════════════════ */
+function mgrPlaceholderCard() {
+  return `
+    <div class="node-card"
+         style="border:1.5px dashed var(--border);opacity:.55;cursor:default">
+      <div class="node-avatar"
+           style="background:rgba(255,255,255,.05);color:var(--text-dim)">？</div>
+      <div class="node-info">
+        <div class="node-name" style="color:var(--text-dim)">待指定組長</div>
+        <div class="node-pos"  style="color:var(--text-dim)">組長職缺</div>
+      </div>
+    </div>`;
+}
+
+/* ════════════════════════════════════════════
    RENDER TREE
-   Fixed 4-level hierarchy:
+   Hierarchy:
      L1  chairman   (role='chairman')
      L2  ceo        (role='ceo')
-     L3  manager/hr (role='manager' or 'hr'; admin also here)
-     L4  employee   (everything else)
-   If L1 or L2 has no one, a dashed placeholder is shown.
+     L3  dept node  (one per dept)
+     L4  manager / 待指定組長 placeholder
+     L5  employees
+   If L1 or L2 is empty → dashed placeholder.
+   If a dept has no is_manager person → mgrPlaceholderCard().
 ════════════════════════════════════════════ */
 function renderTree() {
   const el = document.getElementById('org-tree');
-
-  /* ── Split by role ── */
-  const chairmen  = allEmployees.filter(e => e.role === 'chairman');
-  const ceos      = allEmployees.filter(e => e.role === 'ceo');
-  const managers  = allEmployees.filter(e => ['manager','hr','admin'].includes(e.role))
-                                .sort((a,b) => (ROLE_PRIORITY[a.role]||5)-(ROLE_PRIORITY[b.role]||5));
-  const employees = allEmployees.filter(e =>
-    !['chairman','ceo','manager','hr','admin'].includes(e.role));
 
   if (!allEmployees.length) {
     el.innerHTML = '<div class="org-loading">暫無員工資料</div>';
     return;
   }
 
-  /* ── Assign employees to managers ──
-     Priority: manager_id match → same dept → first manager
-  ── */
-  const empsByMgr = {};
-  managers.forEach(m => { empsByMgr[m.id] = []; });
-  const unassigned = [];
+  const chairmen = allEmployees.filter(e => e.role === 'chairman');
+  const ceos     = allEmployees.filter(e => e.role === 'ceo');
+  const rest     = allEmployees.filter(e => !['chairman','ceo'].includes(e.role));
 
-  employees.forEach(emp => {
-    if (emp.manager_id && empsByMgr[emp.manager_id] !== undefined) {
-      empsByMgr[emp.manager_id].push(emp); return;
-    }
-    const deptMgr = managers.find(m => m.dept === emp.dept);
-    if (deptMgr) { empsByMgr[deptMgr.id].push(emp); return; }
-    if (managers.length > 0) { empsByMgr[managers[0].id].push(emp); return; }
-    unassigned.push(emp);
+  // Group by dept, preserving allDepts order then appending unknown depts
+  const deptMap = new Map();
+  allDepts.forEach(d => deptMap.set(d.name, []));
+  rest.forEach(emp => {
+    const key = emp.dept || '未分組';
+    if (!deptMap.has(key)) deptMap.set(key, []);
+    deptMap.get(key).push(emp);
   });
+
+  // Only render depts that have at least one member
+  const activeDepts = [...deptMap.entries()].filter(([, m]) => m.length > 0);
 
   let html = '';
 
-  /* ── Level 1: Chairman (always shown, placeholder if empty) ── */
+  /* ── L1: Chairman ── */
   html += `<div class="org-level">
     ${chairmen.length ? chairmen.map(cardHTML).join('') : placeholderCard('董事長')}
-  </div>`;
-  html += `<div class="org-connector-v"></div>`;
+  </div><div class="org-connector-v"></div>`;
 
-  /* ── Level 2: CEO (always shown, placeholder if empty) ── */
+  /* ── L2: CEO ── */
   html += `<div class="org-level">
     ${ceos.length ? ceos.map(cardHTML).join('') : placeholderCard('執行長')}
   </div>`;
 
-  /* ── Level 3+4: Managers + their employees as branches ── */
-  if (managers.length > 0) {
-    html += `<div class="org-connector-v"></div>`;
-    const branchesHTML = managers.map(mgr => {
-      const emps = empsByMgr[mgr.id] || [];
-      const hasEmps = emps.length > 0;
-      return `
-        <div class="org-branch" id="branch-${mgr.id}">
-          ${cardHTML(mgr)}
-          ${hasEmps ? `
-            <div class="org-connector-v" id="bcv-${mgr.id}"></div>
-            <div class="org-emp-row" id="bemps-${mgr.id}">
-              ${emps.map(emp => `<div class="org-emp-wrap">${cardHTML(emp)}</div>`).join('')}
-            </div>` : ''}
-          <button class="node-toggle" id="btoggle-${mgr.id}"
-                  onclick="toggleBranch('${mgr.id}')"
-                  style="position:static;margin-top:4px;${!hasEmps?'display:none':''}">▾</button>
-        </div>`;
-    }).join('');
-    html += `<div class="org-branches">${branchesHTML}</div>`;
-  }
+  /* ── L3-L5: Dept branches ── */
+  if (activeDepts.length) {
+    html += `<div class="org-connector-v"></div>
+    <div class="org-branches">
+      ${activeDepts.map(([deptName, members], idx) => {
+        const color   = deptColorMap[deptName] || '#5B8DEF';
+        const bId     = `d${idx}`;
 
-  /* ── Unassigned employees (no manager exists) ── */
-  if (unassigned.length > 0 && managers.length === 0) {
-    html += `<div class="org-connector-v"></div>`;
-    html += `<div class="org-level">${unassigned.map(cardHTML).join('')}</div>`;
+        // Manager: is_manager=true takes priority, then role-based fallback
+        const mgr  = members.find(e => e.is_manager === true)
+                  || members.find(e => e.role === 'manager' || e.role === 'hr');
+        const emps = members.filter(e => e !== mgr);
+        const hasEmps = emps.length > 0;
+
+        return `
+          <div class="org-branch">
+            ${deptNodeCard(deptName, color, members.length)}
+            <div class="org-branches">
+              <div class="org-branch">
+                ${mgr ? cardHTML(mgr) : mgrPlaceholderCard()}
+                ${hasEmps ? `
+                  <div class="org-connector-v" id="bcv-${bId}"></div>
+                  <div class="org-emp-row" id="bemps-${bId}">
+                    ${emps.map(emp => `<div class="org-emp-wrap">${cardHTML(emp)}</div>`).join('')}
+                  </div>
+                  <button class="node-toggle" id="btoggle-${bId}"
+                          onclick="toggleBranch('${bId}')"
+                          style="position:static;margin-top:4px">▾</button>
+                ` : ''}
+              </div>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
   }
 
   el.innerHTML = html;
@@ -547,6 +588,23 @@ function renderDeptCards() {
     const color   = dept.color || '#5B8DEF';
     const members = allEmployees.filter(e => e.dept === dept.name)
       .sort((a,b) => (ROLE_PRIORITY[a.role]||5)-(ROLE_PRIORITY[b.role]||5));
+
+    const hasMgr = members.some(e =>
+      e.is_manager === true || e.role === 'manager' || e.role === 'hr');
+
+    // "待指定組長" placeholder row shown first if no manager
+    const placeholderRow = hasMgr ? '' : `
+      <div class="dept-member-row" style="opacity:.5;cursor:default">
+        <div class="dept-member-av"
+             style="background:rgba(255,255,255,.05);color:var(--text-dim);
+                    border:1.5px dashed var(--border)">？</div>
+        <div>
+          <div class="dept-member-name" style="color:var(--text-dim)">待指定組長</div>
+          <div class="dept-member-pos">組長職缺</div>
+        </div>
+        <span class="dept-mgr-badge" style="opacity:.5">組長</span>
+      </div>`;
+
     return `
       <div class="dept-oc-card">
         <div class="dept-oc-header">
@@ -555,6 +613,7 @@ function renderDeptCards() {
           <div class="dept-oc-count">${members.length} 人</div>
         </div>
         <div class="dept-oc-members">
+          ${placeholderRow}
           ${members.length ? members.map(m => `
             <div class="dept-member-row" onclick="openDetail('${m.id}')">
               <div class="dept-member-av" style="background:${color}22;color:${color}">
