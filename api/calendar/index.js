@@ -63,14 +63,17 @@ export default async function handler(req, res) {
     }
     const data = await r.json();
     const events = (data.items || []).map(e => ({
-      id:     e.id,
-      title:  e.summary || '(無標題)',
-      start:  e.start?.date || e.start?.dateTime?.slice(0, 10),
-      end:    e.end?.date   || e.end?.dateTime?.slice(0, 10),
-      allDay: !!e.start?.date,
-      desc:   e.description || '',
-      color:  'gcal',
-      source: 'gcal',
+      id:        e.id,
+      title:     e.summary || '(無標題)',
+      start:     e.start?.date || e.start?.dateTime?.slice(0, 10),
+      end:       e.end?.date   || e.end?.dateTime?.slice(0, 10),
+      allDay:    !!e.start?.date,
+      // 保留本地時間字串（dateTime 格式含時區偏移，取第 11-16 位即本地 HH:MM）
+      startTime: e.start?.dateTime ? e.start.dateTime.substring(11, 16) : null,
+      endTime:   e.end?.dateTime   ? e.end.dateTime.substring(11, 16)   : null,
+      desc:      e.description || '',
+      color:     'gcal',
+      source:    'gcal',
     }));
     return res.status(200).json(events);
   } catch (e) {

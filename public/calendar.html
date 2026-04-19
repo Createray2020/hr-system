@@ -87,6 +87,7 @@
 .detail-ev-item.schedule{background:rgba(168,85,247,.15);color:#d8b4fe}
 .detail-empty{font-size:13px;color:var(--text-dim);padding:8px 0}
 .detail-ev-sub{font-size:11px;opacity:.7;margin-top:2px}
+.detail-ev-time{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-dim);min-width:80px;flex-shrink:0}
 .shift-group{margin-bottom:10px}
 .shift-group-title{font-size:11px;font-weight:600;color:var(--text-dim);margin-bottom:5px;display:flex;align-items:center;gap:5px}
 .shift-group-title .shift-time{font-family:'DM Mono',monospace;font-size:10px;opacity:.7}
@@ -329,6 +330,8 @@ async function fetchSchedules(year, month) {
       shift_name:  s.shift_name  || '',
       shift_start: s.shift_start || '',
       shift_end:   s.shift_end   || '',
+      startTime:   s.shift_start ? s.shift_start.slice(0, 5) : null,
+      endTime:     s.shift_end   ? s.shift_end.slice(0, 5)   : null,
       is_off:      s.is_off      || false,
       color:       'schedule',
       source:      'schedule',
@@ -337,6 +340,22 @@ async function fetchSchedules(year, month) {
 }
 
 const LEAVE_LABELS = { annual:'特休假', sick:'病假', personal:'事假', maternity:'產假', funeral:'喪假', marriage:'婚假' };
+
+// 月曆格子 / 週視圖用的事件標籤，帶時間前綴
+function fmtPillLabel(ev) {
+  if (ev.source === 'schedule') {
+    const t = ev.startTime || '';
+    // 「09:00 陳小明 早班」
+    return t
+      ? `${t} ${ev.emp_name} ${ev.shift_name}`.replace(/\s+/g, ' ').trim()
+      : ev.title;
+  }
+  if (ev.source === 'gcal') {
+    // 有時間：「14:00 事件名」；全天：直接事件名
+    return ev.startTime ? `${ev.startTime} ${ev.title}` : ev.title;
+  }
+  return ev.title;
+}
 
 // ── Rendering ──────────────────────────────────────────────────────────
 function render() {
@@ -361,18 +380,15 @@ function updateNavTitle() {
 }
 
 function getEventsForDate(date) {
-  return state.events.filter(ev => {
+  const filtered = state.events.filter(ev => {
     if (!state.sources[ev.source]) return false;
     if (!ev.date) return false;
 
     // Google Calendar 全天事件的 end 是 exclusive（不含），需減一天比對
-    // 例如：4/4 假日 → end = "2026-04-05"，實際只佔 4/4
     if (ev.source === 'gcal' && ev.endDate && ev.endDate > ev.date) {
-      // 將 exclusive end 轉成 inclusive：end 減一天
       const excl = new Date(ev.endDate + 'T00:00:00');
       excl.setDate(excl.getDate() - 1);
-      const inclEnd = toDateStr(excl);
-      return date >= ev.date && date <= inclEnd;
+      return date >= ev.date && date <= toDateStr(excl);
     }
 
     // 請假等多天事件（inclusive end）
@@ -382,6 +398,17 @@ function getEventsForDate(date) {
 
     return ev.date === date;
   });
+
+  // 全天事件（無 startTime）排最前面，有時間的依序排列
+  filtered.sort((a, b) => {
+    const at = a.startTime || '';
+    const bt = b.startTime || '';
+    if (!at && bt) return -1;
+    if (at && !bt) return 1;
+    return at.localeCompare(bt);
+  });
+
+  return filtered;
 }
 
 // Month view
@@ -424,11 +451,11 @@ function renderMonth() {
     const otherEvs  = evs.filter(e => e.source !== 'schedule');
     const schedEvs  = evs.filter(e => e.source === 'schedule');
     const otherPills = otherEvs.map(ev =>
-      `<div class="ev-pill ${ev.color}" title="${ev.title}">${ev.title}</div>`
+      `<div class="ev-pill ${ev.color}" title="${ev.title}">${fmtPillLabel(ev)}</div>`
     ).join('');
     // 班表：每人一行，最多顯示 3 人
     const schedPills = schedEvs.slice(0, 3).map(ev =>
-      `<div class="ev-pill schedule" title="${ev.title}">${ev.title}</div>`
+      `<div class="ev-pill schedule" title="${ev.title}">${fmtPillLabel(ev)}</div>`
     ).join('');
     const schedMore = schedEvs.length > 3
       ? `<div class="ev-more">+${schedEvs.length - 3} 人</div>` : '';
@@ -457,7 +484,7 @@ function renderWeek() {
     const nameClass = wd === 0 ? 'color:#ef4444' : wd === 6 ? 'color:#3b82f6' : '';
 
     const evCards = evs.map(ev => `
-      <div class="week-ev ${ev.color}">${ev.title}</div>
+      <div class="week-ev ${ev.color}">${fmtPillLabel(ev)}</div>
     `).join('');
 
     return `<div class="week-day-col">
@@ -549,7 +576,28 @@ function renderDetail(date) {
       </div>`;
     }
 
-    // 其他來源：原有顯示方式
+    // Google 行事曆：顯示時間欄
+    if (s.src === 'gcal') {
+      return `<div class="detail-section">
+        <div class="detail-src-label ${s.cls}">${s.label}</div>
+        ${list.map(ev => {
+          const timeStr = ev.startTime && ev.endTime
+            ? `${ev.startTime} – ${ev.endTime}`
+            : ev.startTime
+              ? ev.startTime
+              : '全天';
+          return `<div class="detail-ev-item gcal">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span class="detail-ev-time">${timeStr}</span>
+              <span>${ev.title}</span>
+            </div>
+            ${ev.desc ? `<div class="detail-ev-sub" style="padding-left:88px">${ev.desc}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+
+    // 其他來源（假日、請假）：原有顯示方式
     return `<div class="detail-section">
       <div class="detail-src-label ${s.cls}">${s.label}</div>
       ${list.map(ev => `
