@@ -162,11 +162,12 @@ function toast(msg, type='success') {
 }
 
 // ── State ──────────────────────────────────────────────────────────────
+const _initNow = new Date();
 const state = {
-  year:  new Date().getFullYear(),
-  month: new Date().getMonth(), // 0-indexed
+  year:  _initNow.getFullYear(),
+  month: _initNow.getMonth(), // 0-indexed
   view:  'month',
-  selectedDate: new Date().toISOString().slice(0, 10),
+  selectedDate: toDateStr(_initNow),
   sources: { holidays: true, gcal: true, leave: true, schedule: true },
   events: [],    // all fetched events
   loading: false,
@@ -174,6 +175,11 @@ const state = {
 
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 const MONTHS   = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+// 用本地時間格式化日期為 YYYY-MM-DD，避免 toISOString() 的 UTC 時區偏移問題
+function toDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 // ── Bootstrap ─────────────────────────────────────────────────────────
 window.onload = async () => {
@@ -189,9 +195,9 @@ function bindControls() {
       state.month--;
       if (state.month < 0) { state.month = 11; state.year--; }
     } else {
-      const d = new Date(state.selectedDate);
+      const d = new Date(state.selectedDate + 'T00:00:00');
       d.setDate(d.getDate() - 7);
-      state.selectedDate = d.toISOString().slice(0, 10);
+      state.selectedDate = toDateStr(d);
       state.year  = d.getFullYear();
       state.month = d.getMonth();
     }
@@ -203,9 +209,9 @@ function bindControls() {
       state.month++;
       if (state.month > 11) { state.month = 0; state.year++; }
     } else {
-      const d = new Date(state.selectedDate);
+      const d = new Date(state.selectedDate + 'T00:00:00');
       d.setDate(d.getDate() + 7);
-      state.selectedDate = d.toISOString().slice(0, 10);
+      state.selectedDate = toDateStr(d);
       state.year  = d.getFullYear();
       state.month = d.getMonth();
     }
@@ -216,7 +222,7 @@ function bindControls() {
     const now = new Date();
     state.year  = now.getFullYear();
     state.month = now.getMonth();
-    state.selectedDate = now.toISOString().slice(0, 10);
+    state.selectedDate = toDateStr(now);
     loadAllEvents().then(render);
   };
 
@@ -334,7 +340,7 @@ function updateNavTitle() {
       : (() => {
           const wd  = getWeekDates(state.selectedDate);
           const s   = wd[0], e = wd[6];
-          const sm  = new Date(s), em = new Date(e);
+          const sm  = new Date(s + 'T00:00:00'), em = new Date(e + 'T00:00:00');
           return sm.getMonth() === em.getMonth()
             ? `${sm.getFullYear()}年${MONTHS[sm.getMonth()]} ${sm.getDate()}–${em.getDate()}日`
             : `${sm.getFullYear()}年${MONTHS[sm.getMonth()]}${sm.getDate()}日 – ${MONTHS[em.getMonth()]}${em.getDate()}日`;
@@ -355,28 +361,28 @@ function getEventsForDate(date) {
 // Month view
 function renderMonth() {
   const grid = document.getElementById('days-grid');
-  const today = new Date().toISOString().slice(0, 10);
-  const firstDay = new Date(state.year, state.month, 1);
-  const lastDay  = new Date(state.year, state.month + 1, 0);
+  const today = toDateStr(new Date());
+  const firstDay  = new Date(state.year, state.month, 1);
+  const lastDay   = new Date(state.year, state.month + 1, 0);
   const startWday = firstDay.getDay(); // 0=Sun
 
   const cells = [];
 
-  // Prev month padding
+  // Prev month padding — 使用本地時間格式，避免 UTC 偏移
   for (let i = 0; i < startWday; i++) {
-    const d = new Date(state.year, state.month, -startWday + i + 1);
-    cells.push({ date: d.toISOString().slice(0, 10), otherMonth: true });
+    const d = new Date(state.year, state.month, i - startWday + 1);
+    cells.push({ date: toDateStr(d), otherMonth: true });
   }
   // Current month
   for (let d = 1; d <= lastDay.getDate(); d++) {
     const dt = new Date(state.year, state.month, d);
-    cells.push({ date: dt.toISOString().slice(0, 10), otherMonth: false });
+    cells.push({ date: toDateStr(dt), otherMonth: false });
   }
   // Next month padding
   const remaining = (7 - (cells.length % 7)) % 7;
   for (let i = 1; i <= remaining; i++) {
     const d = new Date(state.year, state.month + 1, i);
-    cells.push({ date: d.toISOString().slice(0, 10), otherMonth: true });
+    cells.push({ date: toDateStr(d), otherMonth: true });
   }
 
   grid.innerHTML = cells.map(cell => {
@@ -404,7 +410,7 @@ function renderMonth() {
 // Week view
 function renderWeek() {
   const cols  = document.getElementById('week-cols');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toDateStr(new Date());
   const dates = getWeekDates(state.selectedDate);
 
   cols.innerHTML = dates.map(date => {
@@ -435,7 +441,7 @@ function getWeekDates(dateStr) {
   sun.setDate(d.getDate() - wd);
   return Array.from({ length: 7 }, (_, i) => {
     const x = new Date(sun); x.setDate(sun.getDate() + i);
-    return x.toISOString().slice(0, 10);
+    return toDateStr(x);
   });
 }
 
