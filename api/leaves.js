@@ -71,12 +71,13 @@ export default async function handler(req, res) {
 
   // ── POST: 新增假單 ─────────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const { employee_id, leave_type, start_date, end_date, days, reason } = req.body;
+    const { employee_id, leave_type, start_date, end_date, days, reason, attachment_url, attachment_name } = req.body;
     if (!employee_id || !leave_type || !start_date || !end_date || !days)
       return res.status(400).json({ error: '缺少必填欄位' });
     const lid = 'L' + Date.now();
     const { error } = await supabase.from('leave_requests')
-      .insert([{ id: lid, employee_id, leave_type, start_date, end_date, days, reason, status: 'pending' }]);
+      .insert([{ id: lid, employee_id, leave_type, start_date, end_date, days, reason, status: 'pending',
+                 attachment_url: attachment_url || null, attachment_name: attachment_name || null }]);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(201).json({ id: lid, message: '假單已建立' });
   }

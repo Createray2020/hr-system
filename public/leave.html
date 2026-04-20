@@ -6,6 +6,20 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+.upload-zone{border:1.5px dashed rgba(255,255,255,.15);border-radius:10px;padding:18px;text-align:center;cursor:pointer;transition:all .2s;background:rgba(255,255,255,.02);margin-bottom:10px}
+.upload-zone:hover,.upload-zone.drag-over{border-color:rgba(91,141,239,.5);background:rgba(91,141,239,.05)}
+.upload-zone-icon{font-size:22px;margin-bottom:4px}
+.upload-zone-text{font-size:13px;color:rgba(255,255,255,.45)}
+.upload-zone-hint{font-size:11px;color:rgba(255,255,255,.25);margin-top:3px}
+.file-preview-box{display:flex;align-items:center;gap:10px;background:rgba(91,141,239,.08);border:1px solid rgba(91,141,239,.2);border-radius:8px;padding:9px 12px;margin-bottom:10px}
+.file-preview-name{flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-clear-btn{background:none;border:none;color:rgba(255,255,255,.35);cursor:pointer;font-size:15px;padding:2px 5px;border-radius:4px;line-height:1}
+.file-clear-btn:hover{color:#F87171}
+.attach-required{color:#FB923C;font-size:11px;margin-left:4px}
+.rv-attach-link{display:inline-flex;align-items:center;gap:6px;color:#7FBBFF;text-decoration:none;font-size:13px;padding:6px 12px;background:rgba(91,141,239,.1);border-radius:8px;border:1px solid rgba(91,141,239,.2);margin-top:6px}
+.rv-attach-link:hover{background:rgba(91,141,239,.2)}
+</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
@@ -86,6 +100,10 @@
       <div class="modal-section"><div class="modal-label">結束日期</div><div class="modal-value" id="rv-end">—</div></div>
     </div>
     <div class="modal-section"><div class="modal-label">請假原因</div><div class="reason-box" id="rv-reason">—</div></div>
+    <div class="modal-section" id="rv-attach-section" style="display:none">
+      <div class="modal-label">病假附件</div>
+      <div id="rv-attachment"></div>
+    </div>
     <div class="modal-section">
       <div class="modal-label">審核備注</div>
       <textarea class="note-input" id="rv-note" rows="3" placeholder="請輸入審核意見（選填）…"></textarea>
@@ -107,11 +125,32 @@
     <div class="form-grid">
       <div class="form-row"><label class="form-label">員工</label><select class="form-select" id="ap-employee"></select></div>
       <div class="form-row"><label class="form-label">假別</label>
-        <select class="form-select" id="ap-type">
+        <select class="form-select" id="ap-type" onchange="onLeaveTypeChange()">
           <option value="annual">特休假</option><option value="sick">病假</option>
           <option value="personal">事假</option><option value="maternity">產假</option>
           <option value="funeral">喪假</option><option value="marriage">婚假</option>
         </select>
+      </div>
+      <!-- 病假證明上傳區 -->
+      <div id="ap-upload-section" style="display:none">
+        <div class="form-row" style="flex-direction:column;gap:6px">
+          <label class="form-label">病假證明<span class="attach-required">（必填）</span></label>
+          <div id="ap-upload-zone" class="upload-zone"
+               onclick="document.getElementById('ap-file-input').click()"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleFileDrop(event)">
+            <div class="upload-zone-icon">📎</div>
+            <div class="upload-zone-text">點擊或拖曳上傳病假證明</div>
+            <div class="upload-zone-hint">支援 JPG、PNG、PDF，上限 5MB</div>
+          </div>
+          <div id="ap-file-preview" class="file-preview-box" style="display:none">
+            <span id="ap-file-icon">📄</span>
+            <span class="file-preview-name" id="ap-file-name">—</span>
+            <button class="file-clear-btn" onclick="clearFile()">✕</button>
+          </div>
+          <input type="file" id="ap-file-input" accept="image/*,.pdf" style="display:none" onchange="handleFileSelect(this.files[0])">
+        </div>
       </div>
       <div class="form-row"><label class="form-label">開始日期</label><input type="date" class="form-input" id="ap-start"></div>
       <div class="form-row"><label class="form-label">結束日期</label><input type="date" class="form-input" id="ap-end"></div>
@@ -125,6 +164,10 @@
 </div>
 
 <script>
+const _SUPA_URL = 'https://scsgqxixmbompnoypuuw.supabase.co';
+const _SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+const _sb = window.supabase.createClient(_SUPA_URL, _SUPA_KEY);
+
 function toast(msg, type='success') {
   let wrap = document.getElementById('toast-wrap');
   if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
@@ -136,6 +179,42 @@ let currentTab = '';
 let currentReviewId = null;
 let currentReviewData = null;
 let allLeaveData = [];
+let selectedFile = null;
+
+function onLeaveTypeChange() {
+  const isSick = document.getElementById('ap-type').value === 'sick';
+  document.getElementById('ap-upload-section').style.display = isSick ? '' : 'none';
+  if (!isSick) clearFile();
+}
+
+function handleFileSelect(file) {
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('檔案不能超過 5MB', 'error'); return; }
+  selectedFile = file;
+  showFilePreview(file);
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('ap-upload-zone').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFileSelect(file);
+}
+
+function showFilePreview(file) {
+  const isImg = file.type.startsWith('image/');
+  document.getElementById('ap-file-icon').textContent = isImg ? '🖼️' : '📄';
+  document.getElementById('ap-file-name').textContent = file.name;
+  document.getElementById('ap-upload-zone').style.display = 'none';
+  document.getElementById('ap-file-preview').style.display = 'flex';
+}
+
+function clearFile() {
+  selectedFile = null;
+  document.getElementById('ap-file-input').value = '';
+  document.getElementById('ap-upload-zone').style.display = '';
+  document.getElementById('ap-file-preview').style.display = 'none';
+}
 
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 600));
@@ -221,6 +300,27 @@ async function openReview(id) {
   document.getElementById('rv-end').textContent      = r.end_date;
   document.getElementById('rv-reason').textContent   = r.reason||'（未填寫）';
   document.getElementById('rv-note').value           = r.handler_note||'';
+
+  // Attachment
+  const attachSection = document.getElementById('rv-attach-section');
+  const attachDiv     = document.getElementById('rv-attachment');
+  if (r.attachment_url) {
+    attachSection.style.display = '';
+    attachDiv.innerHTML = '<span style="color:rgba(255,255,255,.4);font-size:12px">載入中…</span>';
+    const { data: signed } = await _sb.storage.from('leave-attachments').createSignedUrl(r.attachment_url, 3600);
+    if (signed?.signedUrl) {
+      const isImg = /\.(jpe?g|png|gif|webp)$/i.test(r.attachment_url);
+      attachDiv.innerHTML = isImg
+        ? `<div><a class="rv-attach-link" href="${signed.signedUrl}" target="_blank">🖼️ ${r.attachment_name||'查看圖片'}</a><br><img src="${signed.signedUrl}" style="max-width:100%;max-height:200px;border-radius:8px;margin-top:8px;object-fit:contain" onerror="this.style.display='none'"></div>`
+        : `<a class="rv-attach-link" href="${signed.signedUrl}" target="_blank">📄 ${r.attachment_name||'下載附件'}</a>`;
+    } else {
+      attachDiv.innerHTML = '<span style="color:#F87171;font-size:12px">附件連結已失效</span>';
+    }
+  } else {
+    attachSection.style.display = 'none';
+    attachDiv.innerHTML = '';
+  }
+
   const isPending = r.status === 'pending';
   document.getElementById('rv-note').readOnly = !isPending;
   document.getElementById('btn-approve-action').style.display = isPending ? '' : 'none';
@@ -249,21 +349,40 @@ function openApplyModal() {
   document.getElementById('ap-start').value  = today;
   document.getElementById('ap-end').value    = today;
   document.getElementById('ap-reason').value = '';
+  document.getElementById('ap-type').value   = 'annual';
+  document.getElementById('ap-upload-section').style.display = 'none';
+  clearFile();
   document.getElementById('apply-modal').classList.add('open');
 }
 
 async function submitLeave() {
-  const start  = document.getElementById('ap-start').value;
-  const end    = document.getElementById('ap-end').value;
-  const reason = document.getElementById('ap-reason').value.trim();
+  const start      = document.getElementById('ap-start').value;
+  const end        = document.getElementById('ap-end').value;
+  const reason     = document.getElementById('ap-reason').value.trim();
+  const leaveType  = document.getElementById('ap-type').value;
+  const employeeId = document.getElementById('ap-employee').value;
   if (!start||!end||!reason) { toast('請填寫所有欄位','error'); return; }
   if (end < start) { toast('結束日期不能早於開始日期','error'); return; }
+  if (leaveType === 'sick' && !selectedFile) { toast('病假須上傳證明文件','error'); return; }
+
   const days = Math.round((new Date(end)-new Date(start))/86400000)+1;
+  let attachment_url = null, attachment_name = null;
+
+  if (selectedFile) {
+    const ext  = selectedFile.name.split('.').pop();
+    const path = `${employeeId}/${Date.now()}.${ext}`;
+    const { error: upErr } = await _sb.storage.from('leave-attachments').upload(path, selectedFile, { upsert: true });
+    if (upErr) { toast('附件上傳失敗：' + upErr.message, 'error'); return; }
+    attachment_url  = path;
+    attachment_name = selectedFile.name;
+  }
+
   await api('/api/leaves', { method:'POST', body: JSON.stringify({
-    employee_id: document.getElementById('ap-employee').value,
-    leave_type:  document.getElementById('ap-type').value,
-    start_date: start, end_date: end, days, reason
+    employee_id: employeeId, leave_type: leaveType,
+    start_date: start, end_date: end, days, reason,
+    attachment_url, attachment_name
   })});
+  clearFile();
   closeModal('apply-modal');
   await Promise.all([loadLeaves(), loadStats()]);
   toast('✅ 假單已存入 Supabase','success');

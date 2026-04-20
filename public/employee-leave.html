@@ -68,6 +68,20 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 .empty-state{text-align:center;padding:48px 20px;color:rgba(255,255,255,.3)}
 .empty-icon{font-size:40px;margin-bottom:10px}
 
+/* ── Upload Zone ── */
+.m-upload-zone{border:1.5px dashed rgba(255,255,255,.15);border-radius:12px;padding:18px;text-align:center;cursor:pointer;transition:all .2s;background:rgba(255,255,255,.02)}
+.m-upload-zone.drag-over{border-color:rgba(91,141,239,.5);background:rgba(91,141,239,.05)}
+.m-upload-icon{font-size:22px;margin-bottom:4px}
+.m-upload-text{font-size:13px;color:rgba(255,255,255,.45)}
+.m-upload-hint{font-size:11px;color:rgba(255,255,255,.25);margin-top:3px}
+.m-file-preview{display:flex;align-items:center;gap:10px;background:rgba(91,141,239,.08);border:1px solid rgba(91,141,239,.2);border-radius:10px;padding:10px 12px}
+.m-file-name{flex:1;font-size:12px;color:#E8EAF0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.m-file-clear{background:none;border:none;color:rgba(255,255,255,.35);cursor:pointer;font-size:15px;padding:2px 5px;border-radius:4px;line-height:1}
+.m-file-clear:active{color:#F87171}
+.m-attach-required{font-size:11px;color:#FB923C;margin-left:4px}
+.m-attach-icon{font-size:13px;color:rgba(255,255,255,.35);margin-left:6px;text-decoration:none}
+.m-attach-icon:hover{color:#7FBBFF}
+
 /* ── Toast ── */
 .m-toast-wrap{position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:999;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none}
 .m-toast{background:#1E2333;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:10px 20px;font-size:13px;animation:mtin .3s ease;white-space:nowrap}
@@ -101,7 +115,7 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 
       <div class="m-form-row">
         <label class="m-label">假別</label>
-        <select class="m-select" id="f-type">
+        <select class="m-select" id="f-type" onchange="onTypeChange()">
           <option value="annual">特休假</option>
           <option value="sick">病假</option>
           <option value="personal">事假</option>
@@ -109,6 +123,26 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
           <option value="funeral">喪假</option>
           <option value="maternity">產假</option>
         </select>
+      </div>
+
+      <!-- 病假證明上傳 -->
+      <div id="upload-section" class="m-form-row" style="display:none">
+        <label class="m-label">病假證明<span class="m-attach-required">（必填）</span></label>
+        <div id="upload-zone" class="m-upload-zone"
+             onclick="document.getElementById('file-input').click()"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="onFileDrop(event)">
+          <div class="m-upload-icon">📎</div>
+          <div class="m-upload-text">點擊上傳病假證明</div>
+          <div class="m-upload-hint">JPG、PNG 或 PDF，最大 5MB</div>
+        </div>
+        <div id="file-preview" class="m-file-preview" style="display:none;margin-top:8px">
+          <span id="file-icon">📄</span>
+          <span class="m-file-name" id="file-name">—</span>
+          <button class="m-file-clear" onclick="clearFile()">✕</button>
+        </div>
+        <input type="file" id="file-input" accept="image/*,.pdf" style="display:none" onchange="onFileSelect(this.files[0])">
       </div>
 
       <div class="date-row m-form-row">
@@ -176,6 +210,37 @@ const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null, API = '';
 let allLeaves = [], currentFilter = '';
+let selectedFile = null;
+
+function onTypeChange() {
+  const isSick = document.getElementById('f-type').value === 'sick';
+  document.getElementById('upload-section').style.display = isSick ? '' : 'none';
+  if (!isSick) clearFile();
+}
+
+function onFileSelect(file) {
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { toast('檔案不能超過 5MB', 'error'); return; }
+  selectedFile = file;
+  document.getElementById('file-icon').textContent = file.type.startsWith('image/') ? '🖼️' : '📄';
+  document.getElementById('file-name').textContent = file.name;
+  document.getElementById('upload-zone').style.display = 'none';
+  document.getElementById('file-preview').style.display = 'flex';
+}
+
+function onFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-zone').classList.remove('drag-over');
+  onFileSelect(e.dataTransfer.files[0]);
+}
+
+function clearFile() {
+  selectedFile = null;
+  const fi = document.getElementById('file-input');
+  if (fi) fi.value = '';
+  document.getElementById('upload-zone').style.display = '';
+  document.getElementById('file-preview').style.display = 'none';
+}
 
 const LEAVE_LABELS = { annual:'特休假', sick:'病假', personal:'事假', marriage:'婚假', funeral:'喪假', maternity:'產假' };
 const CHIP_CLS = { annual:'chip-annual', sick:'chip-sick', personal:'chip-personal', marriage:'chip-marriage', funeral:'chip-funeral', maternity:'chip-maternity' };
@@ -222,18 +287,32 @@ async function submitLeave() {
   const reason= document.getElementById('f-reason').value.trim();
   if (!start || !end) { toast('請選擇請假日期', 'warn'); return; }
   if (days <= 0)      { toast('結束日期須不早於開始日期', 'warn'); return; }
+  if (type === 'sick' && !selectedFile) { toast('病假須上傳病假證明', 'warn'); return; }
 
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '送出中…';
   try {
+    let attachment_url = null, attachment_name = null;
+    if (selectedFile) {
+      const ext  = selectedFile.name.split('.').pop();
+      const path = `${currentUser.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await _sb.storage.from('leave-attachments').upload(path, selectedFile, { upsert: true });
+      if (upErr) { toast('附件上傳失敗：' + upErr.message, 'error'); btn.disabled=false; btn.textContent='送出申請'; return; }
+      attachment_url  = path;
+      attachment_name = selectedFile.name;
+    }
     await apiFetch('/api/leaves', { method:'POST', body: JSON.stringify({
-      employee_id: currentUser.id, leave_type: type, start_date: start, end_date: end, days, reason
+      employee_id: currentUser.id, leave_type: type, start_date: start, end_date: end, days, reason,
+      attachment_url, attachment_name
     })});
     toast('✅ 假單已送出', 'success');
     document.getElementById('f-start').value = '';
     document.getElementById('f-end').value   = '';
     document.getElementById('f-reason').value = '';
     document.getElementById('days-num').textContent = '0';
+    document.getElementById('f-type').value = 'annual';
+    document.getElementById('upload-section').style.display = 'none';
+    clearFile();
   } catch(e) { toast('送出失敗：' + e.message, 'error'); }
   btn.disabled = false; btn.textContent = '送出申請';
 }
@@ -282,7 +361,7 @@ function renderLeaves() {
         ${statusBadge}
       </div>
       <div class="leave-dates">${l.start_date} ～ ${l.end_date}</div>
-      <div class="leave-days-badge">共 ${l.days} 天</div>
+      <div class="leave-days-badge">共 ${l.days} 天${l.attachment_name ? ` <span title="${l.attachment_name}">📎</span>` : ''}</div>
       <div class="flow-row">${getFlowHtml(l.status)}</div>
     </div>`;
   }).join('');
