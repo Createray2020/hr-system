@@ -9,6 +9,11 @@ const HEALTH_INS_RATE = 0.0236;  // 健保費率 2.36%（員工自付 30%）
 const TAX_RATE        = 0.05;    // 薪資所得稅 5%（簡化）
 const LABOR_INS_CAP   = 45800;   // 投保薪資上限
 
+function calcAttendanceBonus(emp) {
+  const noBonus = ['manager','ceo','chairman'].includes(emp.role) || emp.is_manager === true;
+  return noBonus ? 0 : parseFloat(emp.attendance_bonus) || 0;
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -88,7 +93,7 @@ export default async function handler(req, res) {
         };
       } else {
         const base       = parseFloat(emp.base_salary)       || 30000;
-        const attBonus   = parseFloat(emp.attendance_bonus)  || 0;
+        const attBonus   = calcAttendanceBonus(emp);
         const gradeAllow = parseFloat(emp.grade_allowance)   || 0;
         const mgrAllow   = parseFloat(emp.manager_allowance) || 0;
         const extraAllow = parseFloat(emp.extra_allowance)   || 0;

@@ -270,6 +270,7 @@
         <div class="sal-item">
           <div class="sal-label">全勤獎金</div>
           <div class="sal-val" id="disp-att-bonus">—</div>
+          <div id="att-bonus-hint" style="display:none;font-size:11px;color:var(--text-dim);margin-top:2px">主管／特定職級不計全勤</div>
         </div>
         <div class="sal-item" id="disp-mgr-wrap">
           <div class="sal-label">主管加給</div>
@@ -502,11 +503,15 @@ function renderTable() {
   }).join('');
 }
 
+function noAttBonus(e) {
+  return ['manager','ceo','chairman'].includes(e.role) || e.is_manager === true;
+}
+
 function calcTotal(e) {
   if (e.employment_type === 'part_time') return null;
   const base = Number(e.base_salary       || 30000);
   const ga   = Number(e.grade_allowance   || 0);
-  const ab   = Number(e.attendance_bonus  || 0);
+  const ab   = noAttBonus(e) ? 0 : Number(e.attendance_bonus  || 0);
   const ma   = Number(e.manager_allowance || 0);
   const ea   = Number(e.extra_allowance   || 0);
   return base + ga + ab + ma + ea;
@@ -517,8 +522,10 @@ function onExtraAllowChange() {
   const row    = currentGradeRow();
   const base   = 30000;
   const ga     = row?.grade_allowance   || 0;
-  const ab     = row?.attendance_bonus  || 0;
   const isMgr  = document.getElementById('f-is-manager').checked;
+  const role   = document.getElementById('f-role').value;
+  const skipAb = ['manager','ceo','chairman'].includes(role) || isMgr;
+  const ab     = skipAb ? 0 : (row?.attendance_bonus || 0);
   const canMgr = row ? !!row.can_be_manager : false;
   const ma     = (isMgr && canMgr) ? (row?.manager_allowance || 0) : 0;
   const ea     = parseFloat(document.getElementById('f-extra-allow').value) || 0;
@@ -599,14 +606,16 @@ function onGradeLevelChange() {
   const grade = document.getElementById('f-grade').value;
   const level = parseInt(document.getElementById('f-grade-level').value) || null;
   const isManager = document.getElementById('f-is-manager').checked;
+  const role  = document.getElementById('f-role').value;
 
   const row = allSalaryGrades.find(r => r.grade === grade && r.grade_level === level);
 
-  const base = 30000;
-  const ga   = row ? (row.grade_allowance  || 0) : 0;
-  const ab   = row ? (row.attendance_bonus  || 0) : 0;
+  const base   = 30000;
+  const ga     = row ? (row.grade_allowance  || 0) : 0;
+  const skipAb = ['manager','ceo','chairman'].includes(role) || isManager;
+  const ab     = skipAb ? 0 : (row ? (row.attendance_bonus || 0) : 0);
   const canMgr = row ? !!row.can_be_manager : false;
-  const ma   = (isManager && canMgr) ? (row?.manager_allowance || 0) : 0;
+  const ma     = (isManager && canMgr) ? (row?.manager_allowance || 0) : 0;
 
   // Update manager checkbox availability
   const mgrNote = document.getElementById('mgr-note');
@@ -622,6 +631,7 @@ function onGradeLevelChange() {
   // Update display
   document.getElementById('disp-grade-allow').textContent = ga  ? '$'+ga.toLocaleString()  : '—';
   document.getElementById('disp-att-bonus').textContent   = ab  ? '$'+ab.toLocaleString()  : '—';
+  document.getElementById('att-bonus-hint').style.display = skipAb ? 'block' : 'none';
   document.getElementById('disp-mgr-allow').textContent   = ma  ? '$'+ma.toLocaleString()  : '—';
   document.getElementById('disp-mgr-wrap').style.opacity  = isManager && canMgr ? '1' : '0.4';
 
@@ -744,7 +754,12 @@ async function saveEmployee() {
     is_manager:        document.getElementById('f-is-manager').checked,
     base_salary:       30000,
     grade_allowance:   currentGradeRow()?.grade_allowance  ?? 0,
-    attendance_bonus:  currentGradeRow()?.attendance_bonus ?? 0,
+    attendance_bonus:  (() => {
+      const r2 = document.getElementById('f-role').value;
+      const m2 = document.getElementById('f-is-manager').checked;
+      if (['manager','ceo','chairman'].includes(r2) || m2) return 0;
+      return currentGradeRow()?.attendance_bonus ?? 0;
+    })(),
     manager_allowance: (() => {
       const row = currentGradeRow();
       return (document.getElementById('f-is-manager').checked && row?.can_be_manager)
@@ -946,8 +961,8 @@ const SHEET_COLS = [
     compute: e => {
       if (e.employment_type === 'part_time')
         return '<span style="color:var(--text-dim);font-size:11px">時薪制</span>';
-      const t = (e.base_salary||0)+(e.grade_allowance||0)+
-                (e.attendance_bonus||0)+(e.manager_allowance||0)+(e.extra_allowance||0);
+      const ab = noAttBonus(e) ? 0 : (e.attendance_bonus||0);
+      const t = (e.base_salary||0)+(e.grade_allowance||0)+ab+(e.manager_allowance||0)+(e.extra_allowance||0);
       return t ? '$'+t.toLocaleString() : '—';
     }
   },
@@ -1190,8 +1205,10 @@ function shtGetSorted(rows) {
     if (shtSortField === '_seniority') {
       cmp = String(a.hire_date||'').localeCompare(String(b.hire_date||''), 'zh-TW');
     } else if (shtSortField === '_total') {
-      const ta = (a.base_salary||0)+(a.grade_allowance||0)+(a.attendance_bonus||0)+(a.manager_allowance||0)+(a.extra_allowance||0);
-      const tb = (b.base_salary||0)+(b.grade_allowance||0)+(b.attendance_bonus||0)+(b.manager_allowance||0)+(b.extra_allowance||0);
+      const aab = noAttBonus(a) ? 0 : (a.attendance_bonus||0);
+      const bab = noAttBonus(b) ? 0 : (b.attendance_bonus||0);
+      const ta = (a.base_salary||0)+(a.grade_allowance||0)+aab+(a.manager_allowance||0)+(a.extra_allowance||0);
+      const tb = (b.base_salary||0)+(b.grade_allowance||0)+bab+(b.manager_allowance||0)+(b.extra_allowance||0);
       cmp = ta - tb;
     } else if (shtSortField === 'grade') {
       const ga = GRADE_ORDER[a.grade]??0, gb = GRADE_ORDER[b.grade]??0;
