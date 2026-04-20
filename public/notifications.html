@@ -70,26 +70,34 @@ function fmtTime(ts) {
 
 let notifs = [];
 
-async function loadNotifications() {
+async function loadNotifications(retries = 0) {
   const empId = window.currentUser?.id;
-  if (!empId) return;
+  if (!empId || !window._supabase) {
+    if (retries < 20) setTimeout(() => loadNotifications(retries + 1), 300);
+    return;
+  }
   const _sb = window._supabase;
-  const { data, error } = await _sb.from('notifications')
-    .select('*')
-    .eq('employee_id', empId)
-    .order('created_at', { ascending: false })
-    .limit(100);
-
-  if (error) { toast('載入失敗','error'); return; }
-  notifs = data || [];
-  renderNotifications();
-  window.PWA?.updateBadge(notifs.filter(n => !n.is_read).length);
+  try {
+    const { data, error } = await _sb.from('notifications')
+      .select('*')
+      .eq('employee_id', empId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    notifs = data || [];
+    renderNotifications();
+    window.PWA?.updateBadge(notifs.filter(n => !n.is_read).length);
+  } catch(e) {
+    console.error('通知載入失敗：', e);
+    renderNotifications([]);
+  }
 }
 
-function renderNotifications() {
+function renderNotifications(list) {
+  if (list !== undefined) notifs = list;
   const wrap = document.getElementById('notif-wrap');
   if (!notifs.length) {
-    wrap.innerHTML = '<div class="empty-state"><div class="icon">🔔</div><div>目前沒有通知</div></div>';
+    wrap.innerHTML = `<div class="empty-state"><div class="icon">🔔</div><div style="margin-bottom:6px">目前沒有通知</div><div style="font-size:13px;color:var(--text-dim)">當有審批待辦或重要通知時，會顯示在這裡</div></div>`;
     return;
   }
 
@@ -126,10 +134,7 @@ async function markAllRead() {
   toast('✅ 全部已標為已讀');
 }
 
-window.addEventListener('load', async () => {
-  await new Promise(r => setTimeout(r, 600));
-  await loadNotifications();
-});
+window.addEventListener('load', () => loadNotifications());
 </script>
 <script src="/js/pwa.js"></script>
 <script src="/js/layout.js"></script>

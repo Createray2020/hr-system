@@ -6,7 +6,7 @@
 // GET  /api/approvals                                          → 全部申請
 // POST /api/approvals { action: create|approve|reject|cancel|update_config }
 import { supabase } from '../lib/supabase.js';
-import { sendPushToEmployees, sendPushToRoles } from '../lib/push.js';
+import { sendPushToEmployees, sendPushToRoles, createNotifications, createNotificationsForRoles } from '../lib/push.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -142,12 +142,9 @@ export default async function handler(req, res) {
         }).eq('id', request_id);
 
         // 通知申請人：審批完成
-        sendPushToEmployees([request.applicant_id], {
-          title: '✅ 申請已全部通過',
-          body:  `你的「${request.title}」已完成所有審批流程`,
-          url:   '/approvals.html',
-          tag:   'approval-' + request_id,
-        }).catch(() => {});
+        const _p1 = { title: '✅ 申請已全部通過', body: `你的「${request.title}」已完成所有審批流程`, url: '/approvals.html' };
+        sendPushToEmployees([request.applicant_id], { ..._p1, tag: 'approval-' + request_id }).catch(() => {});
+        createNotifications([request.applicant_id], { ..._p1, type: 'approval' }).catch(() => {});
       } else {
         await supabase.from('approval_requests').update({
           status: 'in_progress',
@@ -159,12 +156,9 @@ export default async function handler(req, res) {
           .eq('request_id', request_id).eq('step_number', nextStep);
 
         // 通知申請人：本步驟通過，等待下一步
-        sendPushToEmployees([request.applicant_id], {
-          title: '✅ 審批步驟通過',
-          body:  `你的「${request.title}」第 ${step_number} 步已通過，進入下一審批`,
-          url:   '/approvals.html',
-          tag:   'approval-' + request_id,
-        }).catch(() => {});
+        const _p2 = { title: '✅ 審批步驟通過', body: `你的「${request.title}」第 ${step_number} 步已通過，進入下一審批`, url: '/approvals.html' };
+        sendPushToEmployees([request.applicant_id], { ..._p2, tag: 'approval-' + request_id }).catch(() => {});
+        createNotifications([request.applicant_id], { ..._p2, type: 'approval' }).catch(() => {});
 
         // 通知下一步審批人
         const { data: nextStepData } = await supabase
@@ -174,12 +168,9 @@ export default async function handler(req, res) {
           .eq('step_number', nextStep)
           .single();
         if (nextStepData?.approver_role) {
-          sendPushToRoles([nextStepData.approver_role], {
-            title: '📋 有新的審批待辦',
-            body:  `「${request.title}」等待你審批（第 ${nextStep} 步）`,
-            url:   '/approvals.html',
-            tag:   'pending-' + request_id,
-          }).catch(() => {});
+          const _p3 = { title: '📋 有新的審批待辦', body: `「${request.title}」等待你審批（第 ${nextStep} 步）`, url: '/approvals.html' };
+          sendPushToRoles([nextStepData.approver_role], { ..._p3, tag: 'pending-' + request_id }).catch(() => {});
+          createNotificationsForRoles([nextStepData.approver_role], { ..._p3, type: 'approval' }).catch(() => {});
         }
       }
 
@@ -206,12 +197,9 @@ export default async function handler(req, res) {
       const { data: rejReq } = await supabase
         .from('approval_requests').select('applicant_id, title').eq('id', request_id).single();
       if (rejReq) {
-        sendPushToEmployees([rejReq.applicant_id], {
-          title: '❌ 申請已被退回',
-          body:  `你的「${rejReq.title}」申請已被退回，請確認原因`,
-          url:   '/approvals.html',
-          tag:   'approval-' + request_id,
-        }).catch(() => {});
+        const _p4 = { title: '❌ 申請已被退回', body: `你的「${rejReq.title}」申請已被退回，請確認原因`, url: '/approvals.html' };
+        sendPushToEmployees([rejReq.applicant_id], { ..._p4, tag: 'approval-' + request_id }).catch(() => {});
+        createNotifications([rejReq.applicant_id], { ..._p4, type: 'approval' }).catch(() => {});
       }
 
       return res.status(200).json({ message: '已退回' });
