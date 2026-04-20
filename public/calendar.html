@@ -33,7 +33,7 @@
 .month-grid{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .wday-headers{display:grid;grid-template-columns:repeat(7,1fr);background:rgba(255,255,255,.03);border-bottom:1px solid var(--border)}
 .wday-hdr{padding:10px 4px;text-align:center;font-size:11px;font-family:'DM Mono',monospace;letter-spacing:.5px;color:var(--text-dim)}
-.wday-hdr.sun{color:#ef4444}.wday-hdr.sat{color:#3b82f6}
+.wday-hdr.sun{color:#f87171}.wday-hdr.sat{color:#60A5FA}
 .days-grid{display:grid;grid-template-columns:repeat(7,1fr)}
 .day-cell{min-height:80px;padding:6px 4px;border-right:1px solid rgba(42,48,72,.5);border-bottom:1px solid rgba(42,48,72,.5);cursor:pointer;transition:background .15s;position:relative}
 .day-cell:nth-child(7n){border-right:none}
@@ -43,7 +43,7 @@
 .day-cell.other-month .day-num{color:var(--text-dim);opacity:.4}
 .day-cell.holiday-bg{background:rgba(239,68,68,.05)}
 .day-num{font-size:13px;font-family:'DM Mono',monospace;margin-bottom:4px;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
-.day-num.sun{color:#ef4444}.day-num.sat{color:#3b82f6}
+.day-num.sun{color:#f87171}.day-num.sat{color:#60A5FA}
 .day-events{display:flex;flex-direction:column;gap:2px}
 .ev-pill{font-size:10px;padding:1px 5px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
 .ev-pill.holiday{background:rgba(239,68,68,.2);color:#fca5a5}
@@ -76,10 +76,10 @@
 .detail-section{margin-bottom:14px}
 .detail-src-label{font-size:10px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px;display:flex;align-items:center;gap:6px}
 .detail-src-label::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
-.detail-src-label.lbl-holiday{color:#ef4444}
-.detail-src-label.lbl-gcal{color:#3b82f6}
-.detail-src-label.lbl-leave{color:#22c55e}
-.detail-src-label.lbl-schedule{color:#a855f7}
+.detail-src-label.lbl-holiday{color:#f87171}
+.detail-src-label.lbl-gcal{color:#93C5FD}
+.detail-src-label.lbl-leave{color:#4ADE80}
+.detail-src-label.lbl-schedule{color:#C084FC}
 .detail-ev-item{font-size:13px;padding:6px 8px;border-radius:4px;margin-bottom:4px}
 .detail-ev-item.holiday{background:rgba(239,68,68,.15);color:#fca5a5}
 .detail-ev-item.gcal{background:rgba(59,130,246,.15);color:#93c5fd}
@@ -481,7 +481,7 @@ function renderWeek() {
     const wd  = d.getDay();
     const evs = getEventsForDate(date);
     const isToday = date === today;
-    const nameClass = wd === 0 ? 'color:#ef4444' : wd === 6 ? 'color:#3b82f6' : '';
+    const nameClass = wd === 0 ? 'color:#f87171' : wd === 6 ? 'color:#60A5FA' : '';
 
     const evCards = evs.map(ev => `
       <div class="week-ev ${ev.color}">${fmtPillLabel(ev)}</div>

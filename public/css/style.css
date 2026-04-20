@@ -1,12 +1,14 @@
 /* public/css/style.css */
 :root {
   --bg:#0F1117; --surface:#181C27; --surface2:#1E2333; --border:#2A3048;
-  --accent:#5B8DEF; --accent2:#7FBBFF; --text:#E8EAF0; --text-dim:#7A85A0;
+  --accent:#5B8DEF; --accent2:#7CB8FF; --text:#E8EAF0; --text-dim:#7A85A0;
   --green:#4ADE80; --orange:#FB923C; --red:#F87171; --purple:#C084FC;
   --yellow:#FCD34D; --cyan:#22D3EE;
   --radius:12px; --shadow:0 4px 24px rgba(0,0,0,.4);
 }
 *{box-sizing:border-box;margin:0;padding:0}
+/* Global link color reset — prevents browser default blue/purple on dark backgrounds */
+a{color:inherit}
 body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;font-size:14px;line-height:1.6;min-height:100vh}
 
 /* ── Shell ── */
@@ -22,12 +24,12 @@ body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-seri
 /* ── Nav ── */
 .nav{padding:16px 12px;flex:1;overflow-y:auto}
 .nav-label{font-size:10px;font-family:'DM Mono',monospace;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;padding:0 12px;margin:16px 0 8px}
-.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;color:var(--text-dim);transition:all .2s;font-size:13.5px;text-decoration:none}
-.nav-item:hover{background:var(--surface2);color:var(--text)}
-.nav-item.active{background:rgba(91,141,239,.15);color:var(--accent2)}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;color:rgba(255,255,255,.55);transition:all .2s;font-size:13.5px;text-decoration:none}
+.nav-item:hover{background:rgba(255,255,255,.06);color:rgba(255,255,255,.9)}
+.nav-item.active{background:rgba(91,141,239,.15);color:#7CB8FF}
 .nav-icon{font-size:16px;width:20px;text-align:center}
 .nav-section{margin-bottom:4px}
-.nav-section-title{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);padding:12px 24px 4px;opacity:.6}
+.nav-section-title{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.3);padding:12px 24px 4px}
 .nav-section+.nav-section{border-top:1px solid var(--border);padding-top:8px;margin-top:4px}
 
 /* ── Sidebar user ── */
@@ -145,6 +147,8 @@ tbody tr{transition:background .15s}tbody tr:hover{background:rgba(91,141,239,.0
 
 /* ── Card ── */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px}
+/* Anchor-based cards need explicit color so browser default link blue never shows */
+.quick-card,.quick-btn{color:var(--text)}
 
 /* ── Progress bar ── */
 .progress-wrap{background:var(--surface2);border-radius:4px;height:6px;overflow:hidden}
