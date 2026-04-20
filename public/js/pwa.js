@@ -1,5 +1,5 @@
 // public/js/pwa.js — PWA 初始化 & 推播通知
-const VAPID_PUBLIC_KEY = 'BHRQ35wNeeJaiHepcZNM4S_ZOYAPJGuQjmq8ughuOJcgfk5VAlOckeI4ezrskFog5myNIrJLyEiy4QT5w96qc-I';
+const VAPID_PUBLIC_KEY = 'BO_tfAfRgPpYgzJvCnZDdxJfpjELOW05Ywuwr_4VA3m34PqqkZFHdmT6-NKEJEEjmjOsPHHxorpG3Ya2-BBvLnk';
 
 const PWA = {
   registration: null,
