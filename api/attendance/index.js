@@ -9,6 +9,27 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method === 'GET') {
+    // ── GET today's punch record (_action=today) ──────────────────────────
+    if (req.query._action === 'today') {
+      const { employee_id } = req.query;
+      if (!employee_id) return res.status(400).json({ error: '缺少 employee_id' });
+      const now = new Date();
+      const localMs = now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000;
+      const local = new Date(localMs);
+      const today = `${local.getFullYear()}-${String(local.getMonth()+1).padStart(2,'0')}-${String(local.getDate()).padStart(2,'0')}`;
+      const { data, error } = await supabase.from('attendance').select('*')
+        .eq('employee_id', employee_id).eq('work_date', today).single();
+      if (error && error.code !== 'PGRST116') return res.status(500).json({ error: error.message });
+      if (!data) return res.status(200).json({ date: today, punch_in: null, punch_out: null });
+      const fmtTime = iso => {
+        if (!iso) return null;
+        const d = new Date(iso);
+        const h = d.getUTCHours() + 8;
+        return `${String(h >= 24 ? h-24 : h).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+      };
+      return res.status(200).json({ date: today, punch_in: fmtTime(data.clock_in), punch_out: fmtTime(data.clock_out), status: data.status, work_hours: data.work_hours });
+    }
+
     const { employee_id, month, date, status } = req.query;
     let q = supabase.from('attendance').select('*').order('work_date', { ascending: false });
     if (employee_id) q = q.eq('employee_id', employee_id);

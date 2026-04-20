@@ -67,6 +67,12 @@
         { page:'insurance', icon:'🏥', label:'勞健保',   href:'/insurance.html' },
       ]
     },
+    {
+      title: '行政管理',
+      items: [
+        { page:'approvals', icon:'✅', label:'審批管理', href:'/approvals.html' },
+      ]
+    },
   ];
 
   const sidebar = document.getElementById('sidebar');

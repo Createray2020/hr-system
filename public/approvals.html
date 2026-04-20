@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>審批管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ── Tabs ── */
+.tab-bar{display:flex;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:16px;width:fit-content;flex-wrap:wrap}
+.tab-btn{padding:7px 16px;border-radius:7px;border:none;background:transparent;color:var(--text-dim);font-size:13px;font-family:'Noto Sans TC',sans-serif;cursor:pointer;transition:all .15s;white-space:nowrap}
+.tab-btn:hover{color:var(--text);background:var(--surface2)}
+.tab-btn.active{background:var(--accent);color:#fff}
+.tab-badge{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;background:#F87171;color:#fff;border-radius:9px;font-size:10px;font-weight:700;padding:0 4px;margin-left:4px}
+/* ── Type cards ── */
+.category-group{margin-bottom:20px}
+.category-label{font-size:11px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px}
+.type-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+.type-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;cursor:pointer;transition:all .15s}
+.type-card:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.type-icon{font-size:26px;margin-bottom:6px}
+.type-name{font-size:13px;font-weight:600;margin-bottom:4px}
+.type-desc{font-size:11px;color:var(--text-dim);line-height:1.5}
+/* ── Status badges ── */
+.badge-pending{background:rgba(251,191,36,.12);color:#FBB724;border:1px solid rgba(251,191,36,.25)}
+.badge-in_progress{background:rgba(91,141,239,.12);color:#7EB3FF;border:1px solid rgba(91,141,239,.25)}
+.badge-completed{background:rgba(74,222,128,.12);color:#4ADE80;border:1px solid rgba(74,222,128,.25)}
+.badge-rejected{background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)}
+.badge-cancelled{background:rgba(122,133,160,.1);color:#7A85A0;border:1px solid rgba(122,133,160,.2)}
+/* ── Step dots ── */
+.step-dots{display:inline-flex;align-items:center;gap:0}
+.sdot{width:10px;height:10px;border-radius:50%;border:2px solid var(--border);background:var(--surface);flex-shrink:0}
+.sdot.done{background:#4ADE80;border-color:#4ADE80}
+.sdot.active{background:#5B8DEF;border-color:#5B8DEF}
+.sdot.rejected{background:#F87171;border-color:#F87171}
+.sline{width:14px;height:2px;background:var(--border)}
+.sline.done{background:#4ADE80}
+/* ── Timeline ── */
+.timeline{display:flex;flex-direction:column}
+.tl-step{display:flex;gap:12px;position:relative}
+.tl-left{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:30px}
+.tl-dot{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;border:2px solid var(--border);font-weight:600}
+.tl-dot.waiting{background:var(--surface2);color:var(--text-dim)}
+.tl-dot.in_progress{background:rgba(91,141,239,.15);border-color:#5B8DEF;color:#5B8DEF}
+.tl-dot.approved{background:rgba(74,222,128,.15);border-color:#4ADE80;color:#4ADE80}
+.tl-dot.rejected{background:rgba(248,113,113,.15);border-color:#F87171;color:#F87171}
+.tl-vline{width:2px;flex:1;min-height:14px;background:var(--border);margin:3px 0}
+.tl-vline.done{background:#4ADE80}
+.tl-body{flex:1;padding-top:4px;padding-bottom:14px}
+.tl-step-name{font-size:13px;font-weight:600;margin-bottom:2px}
+.tl-meta{font-size:11px;color:var(--text-dim);line-height:1.6}
+.tl-note-box{font-size:12px;background:var(--surface2);border-radius:6px;padding:7px 10px;margin-top:6px;color:var(--text-dim)}
+/* ── Detail ── */
+.form-display{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:var(--surface2);border-radius:8px;padding:12px 14px;margin-bottom:14px}
+.fd-item .fd-label{font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+.fd-item .fd-val{font-size:13px;font-weight:500}
+.fd-full{grid-column:span 2}
+.section-sep{font-size:10px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin:14px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
+.action-area{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:14px}
+/* ── Pending cards ── */
+.pending-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;display:flex;align-items:flex-start;gap:14px;cursor:pointer;transition:border-color .15s}
+.pending-card:hover{border-color:var(--accent)}
+.pc-body{flex:1;min-width:0}
+.pc-title{font-size:14px;font-weight:600;margin-bottom:3px}
+.pc-meta{font-size:12px;color:var(--text-dim);line-height:1.6}
+.pc-actions{display:flex;gap:6px;flex-shrink:0;margin-top:2px}
+/* ── Config ── */
+.cfg-row{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:0.5px solid var(--border)}
+.cfg-row:last-child{border-bottom:none}
+.cfg-steps{display:flex;align-items:center;gap:4px}
+.cfg-pill{display:flex;align-items:center;gap:4px;padding:3px 10px;background:var(--surface);border:1px solid var(--border);border-radius:20px;font-size:11px}
+.cfg-pill select{background:transparent;border:none;color:var(--text);font-size:11px;padding:0;cursor:pointer;outline:none}
+/* ── Btn-reject ── */
+.btn-reject{background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)}
+.btn-reject:hover{background:rgba(248,113,113,.22)}
+</style>
+</head>
+<body data-page="approvals">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">審批管理</div>
+        <div class="page-sub">申請送件與審批流程 <span class="db-badge" id="db-status">● 連線中…</span></div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" onclick="openNewRequestModal()">＋ 新增申請</button>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card blue"><div class="stat-label">我的申請</div><div class="stat-value" id="st-mine">—</div><div class="stat-hint">筆</div></div>
+      <div class="stat-card orange"><div class="stat-label">待我審批</div><div class="stat-value" id="st-pending">—</div><div class="stat-hint">筆</div></div>
+      <div class="stat-card green"><div class="stat-label">本月完成</div><div class="stat-value" id="st-done">—</div><div class="stat-hint">筆</div></div>
+      <div class="stat-card red"><div class="stat-label">已退回</div><div class="stat-value" id="st-rejected">—</div><div class="stat-hint">筆</div></div>
+    </div>
+
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tab-mine-btn" onclick="switchTab('mine')">我的申請</button>
+      <button class="tab-btn" id="tab-pending-btn" onclick="switchTab('pending')">待我審批<span class="tab-badge" id="pending-badge" style="display:none">0</span></button>
+      <button class="tab-btn" id="tab-all-btn" onclick="switchTab('all')" style="display:none">全部申請</button>
+      <button class="tab-btn" id="tab-config-btn" onclick="switchTab('config')" style="display:none">流程設定</button>
+    </div>
+
+    <!-- Tab: 我的申請 -->
+    <div id="tab-mine">
+      <div class="filter-bar">
+        <input type="text" id="mine-search" placeholder="搜尋標題…" oninput="renderMine()">
+        <select id="mine-type-f" onchange="renderMine()"><option value="">全部類型</option></select>
+        <select id="mine-status-f" onchange="renderMine()">
+          <option value="">全部狀態</option>
+          <option value="pending">待審核</option>
+          <option value="in_progress">審核中</option>
+          <option value="completed">已完成</option>
+          <option value="rejected">已退回</option>
+          <option value="cancelled">已取消</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>類型</th><th>標題</th><th>申請時間</th><th>進度</th><th>狀態</th><th>操作</th>
+          </tr></thead>
+          <tbody id="mine-tbody"><tr class="loading-row"><td colspan="6">載入中…</td></tr></tbody>
+        </table>
+      </div>
+      <div id="mine-empty" class="empty-state" style="display:none"><div class="icon">📋</div><div>目前沒有申請記錄<br><button class="btn btn-primary" style="margin-top:12px" onclick="openNewRequestModal()">＋ 送出第一筆申請</button></div></div>
+    </div>
+
+    <!-- Tab: 待我審批 -->
+    <div id="tab-pending" style="display:none">
+      <div id="pending-list"></div>
+      <div id="pending-empty" class="empty-state" style="display:none"><div class="icon">✅</div><div>沒有待審批的申請</div></div>
+    </div>
+
+    <!-- Tab: 全部申請 -->
+    <div id="tab-all" style="display:none">
+      <div class="filter-bar">
+        <input type="text" id="all-search" placeholder="搜尋姓名、標題…" oninput="renderAll()">
+        <select id="all-type-f" onchange="renderAll()"><option value="">全部類型</option></select>
+        <select id="all-status-f" onchange="renderAll()">
+          <option value="">全部狀態</option>
+          <option value="pending">待審核</option>
+          <option value="in_progress">審核中</option>
+          <option value="completed">已完成</option>
+          <option value="rejected">已退回</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>類型</th><th>標題</th><th>申請人</th><th>部門</th><th>申請時間</th><th>進度</th><th>狀態</th><th>操作</th>
+          </tr></thead>
+          <tbody id="all-tbody"><tr class="loading-row"><td colspan="8">載入中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: 流程設定 -->
+    <div id="tab-config" style="display:none">
+      <div class="ins-block" style="padding:0;overflow:hidden">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-dim)">設定各申請類型的審批步驟與負責角色，變更後立即生效</div>
+        <div id="config-list"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal: 選擇申請類型 -->
+<div class="modal-bg" id="new-type-modal">
+  <div class="modal modal-lg">
+    <div class="modal-title">➕ 選擇申請類型</div>
+    <div id="type-categories" style="max-height:60vh;overflow-y:auto;padding-right:4px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('new-type-modal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 填寫申請表單 -->
+<div class="modal-bg" id="new-form-modal">
+  <div class="modal">
+    <div class="modal-title" id="form-title">新增申請</div>
+    <div id="form-body" style="max-height:65vh;overflow-y:auto;padding-right:4px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('new-form-modal');openNewRequestModal()">← 返回</button>
+      <button class="btn btn-ghost" onclick="closeModal('new-form-modal')">取消</button>
+      <button class="btn btn-primary" onclick="submitRequest()">送出申請</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 申請詳情 -->
+<div class="modal-bg" id="detail-modal">
+  <div class="modal modal-lg">
+    <div class="modal-title" id="detail-title">申請詳情</div>
+    <div id="detail-body" style="max-height:70vh;overflow-y:auto;padding-right:4px"></div>
+    <div class="modal-actions" id="detail-actions">
+      <button class="btn btn-ghost" onclick="closeModal('detail-modal')">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap=document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el=document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+const fmtDate = s => s ? s.slice(0,10) : '—';
+const fmtDT = s => {
+  if (!s) return '—';
+  const d = new Date(s);
+  return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+};
+
+let allConfigs = [], myRequests = [], pendingItems = [], allRequests = [];
+let currentTab = 'mine', currentConfig = null;
+
+const ROLE_LABELS = { manager:'直屬主管', ceo:'執行長', hr:'人資', admin:'管理員', chairman:'董事長' };
+const STATUS_LABELS = { pending:'待審核', in_progress:'審核中', completed:'已完成', rejected:'已退回', cancelled:'已取消', draft:'草稿' };
+const STATUS_CLS    = { pending:'badge-pending', in_progress:'badge-in_progress', completed:'badge-completed', rejected:'badge-rejected', cancelled:'badge-cancelled', draft:'badge-cancelled' };
+const CAT_ICONS     = { 人事:'🧑‍💼', 出勤:'⏱️', 財務:'💰', 採購:'🛒', 行政:'📋' };
+
+/* ── Form schema ─────────────────────────────────────────────────────────── */
+const FORM_SCHEMA = {
+  expense_reimbursement:[
+    {id:'expense_date',label:'費用日期',type:'date',required:true},
+    {id:'expense_category',label:'費用類別',type:'select',options:['交通','餐費','材料','住宿','其他'],required:true},
+    {id:'amount',label:'金額（NT$）',type:'number',required:true},
+    {id:'description',label:'費用說明',type:'textarea',required:true},
+  ],
+  overtime:[
+    {id:'overtime_date',label:'加班日期',type:'date',required:true},
+    {id:'start_time',label:'開始時間',type:'time',required:true},
+    {id:'end_time',label:'結束時間',type:'time',required:true},
+    {id:'reason',label:'加班原因',type:'textarea',required:true},
+  ],
+  punch_correction:[
+    {id:'correction_date',label:'日期',type:'date',required:true},
+    {id:'correction_type',label:'補打卡類型',type:'select',options:['上班打卡','下班打卡'],required:true},
+    {id:'expected_time',label:'應打卡時間',type:'time',required:true},
+    {id:'reason',label:'原因說明',type:'textarea',required:true},
+  ],
+  business_trip:[
+    {id:'destination',label:'出差地點',type:'text',required:true},
+    {id:'start_date',label:'開始日期',type:'date',required:true},
+    {id:'end_date',label:'結束日期',type:'date',required:true},
+    {id:'purpose',label:'出差目的',type:'textarea',required:true},
+    {id:'estimated_cost',label:'預計費用（NT$，選填）',type:'number',required:false},
+  ],
+  resignation:[
+    {id:'resign_date',label:'預計離職日期',type:'date',required:true},
+    {id:'reason',label:'離職原因（選填）',type:'textarea',required:false},
+    {id:'handover',label:'交接事項說明（選填）',type:'textarea',required:false},
+  ],
+  salary_adjustment:[
+    {id:'adjustment_type',label:'調整方式',type:'select',options:['固定金額（NT$）','百分比（%）'],required:true},
+    {id:'amount',label:'調整金額或百分比',type:'number',required:true},
+    {id:'reason',label:'調薪原因',type:'textarea',required:true},
+  ],
+  promotion:[
+    {id:'target_grade',label:'申請晉升職等',type:'select',options:['一等','二等','三等'],required:true},
+    {id:'target_level',label:'申請晉升職級（選填）',type:'number',required:false},
+    {id:'description',label:'說明',type:'textarea',required:true},
+  ],
+  probation_confirm:[
+    {id:'confirm_date',label:'預計轉正日期',type:'date',required:true},
+    {id:'self_review',label:'自我評估說明',type:'textarea',required:true},
+  ],
+  parttime_to_fulltime:[
+    {id:'effective_date',label:'申請轉正日期',type:'date',required:true},
+    {id:'description',label:'說明（選填）',type:'textarea',required:false},
+  ],
+  pension_self_contrib:[
+    {id:'contribution_rate',label:'自提比例（1%–6%）',type:'number',required:true},
+    {id:'effective_month',label:'生效月份',type:'month',required:true},
+  ],
+  purchase_request:[
+    {id:'item_name',label:'品項名稱',type:'text',required:true},
+    {id:'quantity',label:'數量',type:'number',required:true},
+    {id:'estimated_cost',label:'預估金額（NT$）',type:'number',required:true},
+    {id:'purpose',label:'用途說明',type:'textarea',required:true},
+    {id:'vendor',label:'建議廠商（選填）',type:'text',required:false},
+  ],
+  contract_approval:[
+    {id:'vendor_name',label:'廠商名稱',type:'text',required:true},
+    {id:'contract_type',label:'合約類型',type:'text',required:true},
+    {id:'contract_amount',label:'合約金額（NT$）',type:'number',required:true},
+    {id:'contract_period',label:'合約期間',type:'text',required:true,placeholder:'例：2026/04–2027/03'},
+    {id:'key_points',label:'合約重點說明（選填）',type:'textarea',required:false},
+  ],
+  quotation_approval:[
+    {id:'vendor_name',label:'廠商名稱',type:'text',required:true},
+    {id:'items',label:'報價品項',type:'textarea',required:true},
+    {id:'amount',label:'報價金額（NT$）',type:'number',required:true},
+    {id:'valid_until',label:'報價有效期限（選填）',type:'date',required:false},
+  ],
+  payment_request:[
+    {id:'vendor_name',label:'廠商名稱',type:'text',required:true},
+    {id:'amount',label:'請款金額（NT$）',type:'number',required:true},
+    {id:'reason',label:'請款原因',type:'textarea',required:true},
+    {id:'payment_method',label:'付款方式（選填）',type:'select',options:['銀行轉帳','現金','支票','匯款'],required:false},
+  ],
+  advance_payment:[
+    {id:'purpose',label:'預付款用途',type:'textarea',required:true},
+    {id:'amount',label:'金額（NT$）',type:'number',required:true},
+    {id:'use_date',label:'預計使用日期（選填）',type:'date',required:false},
+  ],
+  overtime_pay:[
+    {id:'overtime_date',label:'加班日期',type:'date',required:true},
+    {id:'overtime_hours',label:'加班時數',type:'number',required:true},
+    {id:'calculated_amount',label:'計算金額（NT$，選填）',type:'number',required:false},
+  ],
+  official_document:[
+    {id:'subject',label:'公文主旨',type:'text',required:true},
+    {id:'summary',label:'內容摘要',type:'textarea',required:true},
+  ],
+  event_meeting:[
+    {id:'event_name',label:'活動/會議名稱',type:'text',required:true},
+    {id:'event_datetime',label:'日期時間',type:'datetime-local',required:true},
+    {id:'location',label:'地點（選填）',type:'text',required:false},
+    {id:'attendees',label:'參與人數（選填）',type:'number',required:false},
+    {id:'budget',label:'預算 NT$（選填）',type:'number',required:false},
+  ],
+  equipment_borrow:[
+    {id:'equipment_name',label:'設備名稱/編號',type:'text',required:true},
+    {id:'borrow_date',label:'借用日期',type:'date',required:true},
+    {id:'return_date',label:'預計歸還日期',type:'date',required:true},
+    {id:'purpose',label:'用途說明',type:'text',required:true},
+  ],
+};
+
+/* ── Load ────────────────────────────────────────────────────────────────── */
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 600));
+  const badge = document.getElementById('db-status');
+  try {
+    await Promise.all([loadConfigs(), loadMyRequests(), loadPendingApprovals()]);
+    const role = window.currentUser?.role;
+    if (['hr','ceo','chairman','admin'].includes(role)) {
+      document.getElementById('tab-all-btn').style.display = '';
+      loadAllRequests();
+    }
+    if (['hr','admin'].includes(role)) {
+      document.getElementById('tab-config-btn').style.display = '';
+    }
+    badge.textContent = '● Supabase 已連線';
+    badge.style.cssText = 'background:rgba(74,222,128,.1);color:#4ADE80;border-color:rgba(74,222,128,.2)';
+  } catch(e) {
+    badge.textContent = '● 連線失敗';
+    badge.style.cssText = 'background:rgba(248,113,113,.1);color:#F87171;border-color:rgba(248,113,113,.2)';
+    toast('載入失敗：'+e.message, 'error');
+  }
+};
+
+async function loadConfigs() {
+  allConfigs = await api('/api/approvals?type=configs');
+  const opts = allConfigs.map(c => `<option value="${c.request_type}">${c.icon} ${c.type_name}</option>`).join('');
+  ['mine-type-f','all-type-f'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<option value="">全部類型</option>' + opts;
+  });
+  renderTypeCategories();
+}
+
+async function loadMyRequests() {
+  const uid = window.currentUser?.id;
+  if (!uid) return;
+  myRequests = await api(`/api/approvals?type=list&applicant_id=${uid}`);
+  renderMine();
+  updateStats();
+}
+
+async function loadPendingApprovals() {
+  const role = window.currentUser?.role;
+  if (!role) return;
+  pendingItems = await api(`/api/approvals?type=pending&role=${role}`);
+  renderPending();
+  const cnt = pendingItems.length;
+  const badge = document.getElementById('pending-badge');
+  badge.textContent = cnt; badge.style.display = cnt > 0 ? '' : 'none';
+  document.getElementById('st-pending').textContent = cnt;
+}
+
+async function loadAllRequests() {
+  allRequests = await api('/api/approvals');
+  if (currentTab === 'all') renderAll();
+}
+
+function updateStats() {
+  const now = new Date();
+  const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  document.getElementById('st-mine').textContent = myRequests.length;
+  document.getElementById('st-done').textContent = myRequests.filter(r => r.status === 'completed' && (r.updated_at||'').startsWith(ym)).length;
+  document.getElementById('st-rejected').textContent = myRequests.filter(r => r.status === 'rejected').length;
+}
+
+/* ── Tab ─────────────────────────────────────────────────────────────────── */
+function switchTab(tab) {
+  currentTab = tab;
+  ['mine','pending','all','config'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t === tab ? '' : 'none';
+    const btn = document.getElementById('tab-'+t+'-btn');
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  if (tab === 'all' && !allRequests.length) loadAllRequests();
+  if (tab === 'config') renderConfigEditor();
+}
+
+/* ── My requests ─────────────────────────────────────────────────────────── */
+function renderMine() {
+  const search = document.getElementById('mine-search').value.toLowerCase();
+  const typeF  = document.getElementById('mine-type-f').value;
+  const statF  = document.getElementById('mine-status-f').value;
+  const rows = myRequests.filter(r => {
+    if (typeF && r.request_type !== typeF) return false;
+    if (statF && r.status !== statF) return false;
+    if (search && !(r.title||'').toLowerCase().includes(search)) return false;
+    return true;
+  });
+  const tbody = document.getElementById('mine-tbody');
+  const empty = document.getElementById('mine-empty');
+  if (!rows.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = rows.map(r => {
+    const c = allConfigs.find(x => x.request_type === r.request_type);
+    return `<tr style="cursor:pointer" onclick="openDetail('${r.id}')">
+      <td><span style="font-size:16px">${c?.icon||'📋'}</span> <span style="font-size:12px">${c?.type_name||r.request_type}</span></td>
+      <td style="font-weight:500">${r.title}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${fmtDate(r.created_at)}</td>
+      <td>${stepDots(r.current_step, r.total_steps, r.status)}</td>
+      <td>${statusBadge(r.status)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDetail('${r.id}')">詳情</button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── Pending approvals ───────────────────────────────────────────────────── */
+function renderPending() {
+  const list  = document.getElementById('pending-list');
+  const empty = document.getElementById('pending-empty');
+  if (!pendingItems.length) { list.innerHTML = ''; empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  list.innerHTML = pendingItems.map(step => {
+    const r   = step.approval_requests;
+    const emp = r?.employees;
+    const c   = allConfigs.find(x => x.request_type === r?.request_type);
+    return `<div class="pending-card" onclick="openDetail('${r?.id||''}')">
+      <div style="font-size:30px;line-height:1;flex-shrink:0">${c?.icon||'📋'}</div>
+      <div class="pc-body">
+        <div class="pc-title">${r?.title||'—'}</div>
+        <div class="pc-meta">
+          ${emp?.name||'—'} · ${emp?.dept||r?.dept||'—'} · ${emp?.position||'—'}
+          <span style="margin-left:8px;padding:1px 7px;background:rgba(91,141,239,.1);color:#7EB3FF;border-radius:10px;font-size:10px">${c?.type_name||r?.request_type}</span>
+        </div>
+        <div class="pc-meta">申請時間：${fmtDT(r?.created_at)} · 步驟 ${step.step_number}：${step.step_name}</div>
+      </div>
+      <div class="pc-actions">
+        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();quickApprove('${r?.id}','${step.step_number}')">✓ 通過</button>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDetail('${r?.id||''}')">查看</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ── All requests ────────────────────────────────────────────────────────── */
+function renderAll() {
+  const search = document.getElementById('all-search').value.toLowerCase();
+  const typeF  = document.getElementById('all-type-f').value;
+  const statF  = document.getElementById('all-status-f').value;
+  const rows = allRequests.filter(r => {
+    if (typeF && r.request_type !== typeF) return false;
+    if (statF && r.status !== statF) return false;
+    if (search && !(r.title||'').toLowerCase().includes(search) && !(r.employees?.name||'').toLowerCase().includes(search)) return false;
+    return true;
+  });
+  const tbody = document.getElementById('all-tbody');
+  tbody.innerHTML = rows.map(r => {
+    const c   = allConfigs.find(x => x.request_type === r.request_type);
+    const emp = r.employees;
+    return `<tr style="cursor:pointer" onclick="openDetail('${r.id}')">
+      <td><span style="font-size:15px">${c?.icon||'📋'}</span> <span style="font-size:12px">${c?.type_name||r.request_type}</span></td>
+      <td style="font-weight:500">${r.title}</td>
+      <td><div class="emp-cell"><div class="avatar" style="width:28px;height:28px;font-size:12px">${emp?.avatar||emp?.name?.[0]||'?'}</div><div class="emp-name" style="font-size:12px">${emp?.name||'—'}</div></div></td>
+      <td style="font-size:12px">${r.dept||emp?.dept||'—'}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${fmtDate(r.created_at)}</td>
+      <td>${stepDots(r.current_step, r.total_steps, r.status)}</td>
+      <td>${statusBadge(r.status)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDetail('${r.id}')">詳情</button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── New request ─────────────────────────────────────────────────────────── */
+function renderTypeCategories() {
+  const groups = {};
+  allConfigs.forEach(c => { if (!groups[c.category]) groups[c.category] = []; groups[c.category].push(c); });
+  document.getElementById('type-categories').innerHTML = Object.entries(groups).map(([cat, items]) => `
+    <div class="category-group">
+      <div class="category-label">${CAT_ICONS[cat]||'📌'} ${cat}</div>
+      <div class="type-grid">
+        ${items.map(c => `
+          <div class="type-card" onclick="selectType('${c.request_type}')">
+            <div class="type-icon">${c.icon}</div>
+            <div class="type-name">${c.type_name}</div>
+            <div class="type-desc">${c.description||''}</div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function openNewRequestModal() {
+  if (!allConfigs.length) { toast('申請類型載入中，請稍候', 'warn'); return; }
+  document.getElementById('new-type-modal').classList.add('open');
+}
+
+function selectType(requestType) {
+  currentConfig = allConfigs.find(c => c.request_type === requestType);
+  if (!currentConfig) return;
+  closeModal('new-type-modal');
+  document.getElementById('form-title').textContent = currentConfig.icon + ' ' + currentConfig.type_name;
+
+  const fields = FORM_SCHEMA[requestType] || [];
+  let html = `<div style="background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.15);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text-dim)">${currentConfig.description}</div>`;
+  fields.forEach(f => {
+    const req = f.required ? '<span style="color:var(--red)"> *</span>' : '';
+    let input;
+    if (f.type === 'select') {
+      input = `<select class="form-select" id="ff-${f.id}"><option value="">— 請選擇 —</option>${f.options.map(o=>`<option value="${o}">${o}</option>`).join('')}</select>`;
+    } else if (f.type === 'textarea') {
+      input = `<textarea class="form-input" id="ff-${f.id}" rows="2" style="resize:vertical"${f.placeholder?` placeholder="${f.placeholder}"`:''}></textarea>`;
+    } else {
+      input = `<input class="form-input" type="${f.type}" id="ff-${f.id}"${f.placeholder?` placeholder="${f.placeholder}"`:''}${f.type==='number'?' min="0"':''}>`;
+    }
+    html += `<div class="form-row"><label class="form-label">${f.label}${req}</label>${input}</div>`;
+  });
+  html += `<div class="form-row"><label class="form-label">備注（選填）</label><textarea class="form-input" id="ff-note" rows="2" placeholder="補充說明…"></textarea></div>`;
+
+  document.getElementById('form-body').innerHTML = html;
+  document.getElementById('new-form-modal').classList.add('open');
+}
+
+async function submitRequest() {
+  if (!currentConfig) return;
+  const fields = FORM_SCHEMA[currentConfig.request_type] || [];
+  for (const f of fields) {
+    if (f.required) {
+      const v = document.getElementById('ff-'+f.id)?.value?.trim();
+      if (!v) { toast(`請填寫「${f.label}」`, 'warn'); document.getElementById('ff-'+f.id)?.focus(); return; }
+    }
+  }
+  const form_data = {};
+  fields.forEach(f => { const el = document.getElementById('ff-'+f.id); if (el) form_data[f.id] = el.value; });
+  const note = document.getElementById('ff-note')?.value || '';
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({
+      action: 'create', request_type: currentConfig.request_type,
+      applicant_id: window.currentUser?.id, dept: window.currentUser?.dept,
+      form_data, note,
+    })});
+    closeModal('new-form-modal');
+    await loadMyRequests();
+    toast('✅ 申請已送出，等待審批', 'success');
+  } catch(e) { toast('送出失敗：'+e.message, 'error'); }
+}
+
+/* ── Detail modal ────────────────────────────────────────────────────────── */
+async function openDetail(id) {
+  if (!id) return;
+  document.getElementById('detail-title').textContent = '載入中…';
+  document.getElementById('detail-body').innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-dim)">載入中…</div>';
+  document.getElementById('detail-actions').innerHTML = '<button class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">關閉</button>';
+  document.getElementById('detail-modal').classList.add('open');
+  try {
+    const data = await api(`/api/approvals?id=${id}`);
+    renderDetail(data);
+  } catch(e) {
+    document.getElementById('detail-body').innerHTML = `<div style="padding:20px;color:var(--red)">載入失敗：${e.message}</div>`;
+  }
+}
+
+function renderDetail(data) {
+  const cfg   = allConfigs.find(c => c.request_type === data.request_type);
+  const emp   = data.employees;
+  const steps = data.steps || [];
+  document.getElementById('detail-title').textContent = (cfg?.icon||'📋') + ' ' + data.title;
+
+  // Info header
+  let html = `<div class="emp-modal-header" style="margin-bottom:14px">
+    <div class="avatar">${emp?.avatar||emp?.name?.[0]||'?'}</div>
+    <div>
+      <div style="font-weight:600">${emp?.name||'—'}</div>
+      <div style="font-size:12px;color:var(--text-dim)">${emp?.dept||data.dept||'—'} · ${emp?.position||'—'}</div>
+    </div>
+    <div style="margin-left:auto;text-align:right;margin-right:8px">
+      <div style="font-size:10px;color:var(--text-dim)">申請時間</div>
+      <div style="font-size:12px;font-family:'DM Mono',monospace">${fmtDate(data.created_at)}</div>
+    </div>
+    ${statusBadge(data.status)}
+  </div>`;
+
+  // Form data
+  const fields = FORM_SCHEMA[data.request_type] || [];
+  if (fields.length) {
+    const fd = data.form_data || {};
+    html += `<div class="section-sep">申請內容</div><div class="form-display">`;
+    fields.forEach(f => {
+      const val = fd[f.id];
+      const isLong = f.type === 'textarea' || String(val||'').length > 22;
+      html += `<div class="fd-item${isLong?' fd-full':''}">
+        <div class="fd-label">${f.label}</div>
+        <div class="fd-val">${val || '—'}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+  if (data.note) html += `<div style="font-size:12px;color:var(--text-dim);background:var(--surface2);border-radius:6px;padding:8px 12px;margin-bottom:12px">備注：${data.note}</div>`;
+
+  // Timeline
+  html += `<div class="section-sep">審批流程</div><div class="timeline">`;
+  steps.forEach((step, i) => {
+    const isLast = i === steps.length - 1;
+    const st = step.status;
+    const dotIco = st==='approved'?'✓': st==='rejected'?'✗': st==='in_progress'?'⏳':'○';
+    const lineDone = st === 'approved';
+    const approverName = step.employees?.name;
+    html += `<div class="tl-step">
+      <div class="tl-left">
+        <div class="tl-dot ${st}">${dotIco}</div>
+        ${!isLast?`<div class="tl-vline${lineDone?' done':''}"></div>`:''}
+      </div>
+      <div class="tl-body">
+        <div class="tl-step-name">步驟 ${step.step_number}：${step.step_name}</div>
+        <div class="tl-meta">
+          負責：${ROLE_LABELS[step.approver_role]||step.approver_role}
+          ${approverName?` · 審批人：${approverName}`:''}
+          ${step.handled_at?` · ${fmtDT(step.handled_at)}`:''}
+        </div>
+        ${step.note?`<div class="tl-note-box">💬 ${step.note}</div>`:''}
+      </div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  // Approve action box (for current approver)
+  const role = window.currentUser?.role;
+  const currentStep = steps.find(s => s.status === 'in_progress');
+  const isMyStep = currentStep && (currentStep.approver_role === role || (role==='chairman' && currentStep.approver_role==='ceo'));
+  if (isMyStep) {
+    html += `<div class="action-area">
+      <div style="font-size:13px;font-weight:500;margin-bottom:10px">📝 步驟 ${currentStep.step_number}：${currentStep.step_name}</div>
+      <div class="form-row" style="margin-bottom:0">
+        <label class="form-label">審批意見（選填）</label>
+        <textarea class="form-input" id="approve-note" rows="2" placeholder="填寫備注或退回原因…"></textarea>
+      </div>
+    </div>`;
+  }
+
+  document.getElementById('detail-body').innerHTML = html;
+
+  // Actions
+  const uid = window.currentUser?.id;
+  const isApplicant = data.applicant_id === uid;
+  const canCancel = isApplicant && ['pending','in_progress'].includes(data.status);
+  let actions = `<button class="btn btn-ghost" onclick="closeModal('detail-modal')">關閉</button>`;
+  if (canCancel) {
+    actions = `<button class="btn btn-ghost" onclick="cancelRequest('${data.id}')">🚫 取消申請</button>` + actions;
+  }
+  if (isMyStep) {
+    actions += `<button class="btn btn-reject" onclick="rejectStep('${data.id}','${currentStep.step_number}')">✗ 退回</button>
+                <button class="btn btn-primary" onclick="approveStep('${data.id}','${currentStep.step_number}')">✓ 審批通過</button>`;
+  }
+  document.getElementById('detail-actions').innerHTML = actions;
+}
+
+async function approveStep(requestId, stepNumber) {
+  const note = document.getElementById('approve-note')?.value || '';
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({
+      action:'approve', request_id:requestId, step_number:parseInt(stepNumber),
+      approver_id: window.currentUser?.id, note,
+    })});
+    closeModal('detail-modal');
+    await Promise.all([loadMyRequests(), loadPendingApprovals()]);
+    if (currentTab === 'all') loadAllRequests();
+    toast('✅ 已審批通過', 'success');
+  } catch(e) { toast('操作失敗：'+e.message, 'error'); }
+}
+
+async function rejectStep(requestId, stepNumber) {
+  const note = document.getElementById('approve-note')?.value || '';
+  if (!note && !confirm('確定要退回此申請嗎？（建議填寫退回原因）')) return;
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({
+      action:'reject', request_id:requestId, step_number:parseInt(stepNumber),
+      approver_id: window.currentUser?.id, note,
+    })});
+    closeModal('detail-modal');
+    await Promise.all([loadMyRequests(), loadPendingApprovals()]);
+    if (currentTab === 'all') loadAllRequests();
+    toast('已退回申請', 'warn');
+  } catch(e) { toast('操作失敗：'+e.message, 'error'); }
+}
+
+async function quickApprove(requestId, stepNumber) {
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({
+      action:'approve', request_id:requestId, step_number:parseInt(stepNumber),
+      approver_id: window.currentUser?.id, note:'',
+    })});
+    await Promise.all([loadMyRequests(), loadPendingApprovals()]);
+    if (currentTab === 'all') loadAllRequests();
+    toast('✅ 已審批通過', 'success');
+  } catch(e) { toast('操作失敗：'+e.message, 'error'); }
+}
+
+async function cancelRequest(requestId) {
+  if (!confirm('確定要取消此申請嗎？')) return;
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({ action:'cancel', request_id:requestId })});
+    closeModal('detail-modal');
+    await loadMyRequests();
+    toast('已取消申請', 'success');
+  } catch(e) { toast('操作失敗：'+e.message, 'error'); }
+}
+
+/* ── Config editor ───────────────────────────────────────────────────────── */
+function renderConfigEditor() {
+  if (!allConfigs.length) return;
+  const groups = {};
+  allConfigs.forEach(c => { if (!groups[c.category]) groups[c.category] = []; groups[c.category].push(c); });
+  let html = '';
+  Object.entries(groups).forEach(([cat, items]) => {
+    html += `<div style="padding:9px 16px;background:var(--surface2);font-size:10px;font-family:'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase;color:var(--text-dim)">${CAT_ICONS[cat]||''} ${cat}</div>`;
+    items.forEach(c => {
+      const stepsHtml = (c.steps||[]).map((s, i) => {
+        const arrow = i > 0 ? '<span style="color:var(--text-dim);font-size:11px;margin:0 2px">→</span>' : '';
+        return `${arrow}<div class="cfg-pill"><span style="color:var(--text-dim)">${i+1}.</span>
+          <select id="cfs-${c.id}-${s.step}" onchange="markDirty('${c.id}')">
+            ${['manager','ceo','hr'].map(r=>`<option value="${r}"${s.role===r?' selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
+          </select>
+        </div>`;
+      }).join('');
+      html += `<div class="cfg-row">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:16px">${c.icon}</span>
+          <span style="font-size:13px;font-weight:500">${c.type_name}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="cfg-steps">${stepsHtml}</div>
+          <button class="btn btn-primary btn-sm" id="cfsbtn-${c.id}" onclick="saveConfig('${c.id}')" style="display:none">儲存</button>
+        </div>
+      </div>`;
+    });
+  });
+  document.getElementById('config-list').innerHTML = html;
+}
+
+function markDirty(configId) {
+  const btn = document.getElementById('cfsbtn-'+configId);
+  if (btn) btn.style.display = '';
+}
+
+async function saveConfig(configId) {
+  const cfg = allConfigs.find(c => c.id === configId);
+  if (!cfg) return;
+  const newSteps = cfg.steps.map(s => ({
+    ...s, role: document.getElementById(`cfs-${configId}-${s.step}`).value,
+  }));
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({ action:'update_config', config_id:configId, steps:newSteps })});
+    const ci = allConfigs.findIndex(c => c.id === configId);
+    if (ci >= 0) allConfigs[ci].steps = newSteps;
+    document.getElementById('cfsbtn-'+configId).style.display = 'none';
+    toast('✅ 流程設定已儲存', 'success');
+  } catch(e) { toast('儲存失敗：'+e.message, 'error'); }
+}
+
+/* ── Helpers ─────────────────────────────────────────────────────────────── */
+function statusBadge(status) {
+  return `<span class="badge ${STATUS_CLS[status]||'badge-cancelled'}" style="font-size:11px">${STATUS_LABELS[status]||status}</span>`;
+}
+
+function stepDots(current, total, status) {
+  let h = '<div class="step-dots">';
+  const n = total || 3;
+  for (let i = 1; i <= n; i++) {
+    if (i > 1) h += `<div class="sline${i <= current && status !== 'rejected' ? ' done' : ''}"></div>`;
+    let cls = '';
+    if (status === 'completed') cls = 'done';
+    else if (status === 'rejected' && i === current) cls = 'rejected';
+    else if (i < current) cls = 'done';
+    else if (i === current && !['cancelled'].includes(status)) cls = 'active';
+    h += `<div class="sdot ${cls}"></div>`;
+  }
+  return h + '</div>';
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+<script src="/js/layout.js"></script>
+</body>
+</html>
