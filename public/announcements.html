@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>公告欄 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .ann-layout{display:grid;grid-template-columns:360px 1fr;gap:20px;height:calc(100vh - 148px)}
+  .ann-list-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto;display:flex;flex-direction:column}
+  .ann-search{padding:14px;border-bottom:1px solid var(--border)}
+  .ann-search input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none}
+  .ann-cats{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .cat-pill{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border);color:var(--text-dim);background:transparent;transition:all .15s}
+  .cat-pill.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .ann-items{flex:1;overflow-y:auto}
+  .ann-item{padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;position:relative}
+  .ann-item:hover{background:rgba(255,255,255,.03)}
+  .ann-item.active{background:rgba(91,141,239,.08);border-left:3px solid var(--accent)}
+  .ann-item.unread .ann-item-title::before{content:'';display:inline-block;width:7px;height:7px;background:#5B8DEF;border-radius:50%;margin-right:6px;vertical-align:middle;flex-shrink:0}
+  .priority-bar{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:var(--radius) 0 0 var(--radius)}
+  .ann-item.active .priority-bar{display:none}
+  .ann-item-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px}
+  .ann-item-title{font-size:13px;font-weight:500;line-height:1.4;flex:1}
+  .ann-item-meta{font-size:11px;color:var(--text-dim);display:flex;gap:8px;align-items:center}
+  .ann-pin{color:var(--orange);font-size:11px}
+  .ann-detail-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto;padding:32px}
+  .ann-detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-dim)}
+  .ann-detail-title{font-size:22px;font-weight:700;line-height:1.4;margin-bottom:16px}
+  .ann-detail-meta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+  .ann-content{font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text)}
+  .priority-badge{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:'DM Mono',monospace}
+  .p-urgent{background:rgba(248,113,113,.15);color:#F87171}
+  .p-high{background:rgba(251,146,60,.15);color:#FB923C}
+  .p-normal{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .p-low{background:rgba(107,114,128,.15);color:#9CA3AF}
+  @media(max-width:900px){
+    .ann-layout{grid-template-columns:1fr;height:auto}
+    .ann-list-panel{height:auto;max-height:none}
+    .ann-detail-panel{display:none}
+    .ann-detail-panel.mobile-open{display:block}
+    .ann-back-btn{display:inline-flex}
+  }
+  .ann-back-btn{display:none;align-items:center;gap:6px;margin-bottom:16px;color:var(--accent);cursor:pointer;font-size:13px;background:none;border:none}
+</style>
+</head>
+<body data-page="announcements">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main" style="padding-bottom:0">
+    <div class="page-header" style="margin-bottom:16px">
+      <div>
+        <div class="page-title">公告欄</div>
+        <div class="page-sub">公司公告與重要通知</div>
+      </div>
+    </div>
+
+    <div class="ann-layout">
+      <!-- 左：列表 -->
+      <div class="ann-list-panel">
+        <div class="ann-search">
+          <input type="text" id="ann-search" placeholder="搜尋公告…" oninput="filterAnn()">
+        </div>
+        <div class="ann-cats" id="ann-cats">
+          <button class="cat-pill active" data-cat="">全部</button>
+          <button class="cat-pill" data-cat="company">公司公告</button>
+          <button class="cat-pill" data-cat="hr">人事通知</button>
+          <button class="cat-pill" data-cat="event">活動訊息</button>
+          <button class="cat-pill" data-cat="system">系統通知</button>
+        </div>
+        <div class="ann-items" id="ann-items">
+          <div style="text-align:center;padding:30px;color:var(--text-dim);font-size:13px">載入中…</div>
+        </div>
+      </div>
+
+      <!-- 右：詳情 -->
+      <div class="ann-detail-panel" id="ann-detail">
+        <div class="ann-detail-empty">
+          <div style="font-size:40px;margin-bottom:12px">📢</div>
+          <div>點擊左側公告查看詳情</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+const CAT_LABEL = { general:'一般', company:'公司公告', hr:'人事通知', event:'活動訊息', system:'系統通知' };
+const PRIO_LABEL = { urgent:'緊急', high:'高', normal:'一般', low:'低' };
+const PRIO_COLOR = { urgent:'#F87171', high:'#FB923C', normal:'#5B8DEF', low:'#6B7280' };
+
+let allAnn = [], currentCat = '', currentId = null;
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 86400000) return d.toLocaleTimeString('zh-TW', { hour:'2-digit', minute:'2-digit' });
+  if (diff < 604800000) return Math.floor(diff/86400000) + ' 天前';
+  return d.toLocaleDateString('zh-TW');
+}
+
+function filterAnn() {
+  const q = document.getElementById('ann-search').value.toLowerCase();
+  const filtered = allAnn.filter(a =>
+    (!currentCat || a.category === currentCat) &&
+    (!q || a.title.toLowerCase().includes(q) || a.content.toLowerCase().includes(q))
+  );
+  renderList(filtered);
+}
+
+function renderList(items) {
+  const el = document.getElementById('ann-items');
+  if (!items.length) {
+    el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-dim);font-size:13px">沒有符合條件的公告</div>';
+    return;
+  }
+  el.innerHTML = items.map(a => {
+    const pColor = PRIO_COLOR[a.priority] || '#5B8DEF';
+    const isActive = a.id === currentId;
+    return `<div class="ann-item ${isActive?'active':''}" data-id="${a.id}" onclick="openAnn('${a.id}')">
+      ${!isActive ? `<div class="priority-bar" style="background:${pColor}"></div>` : ''}
+      <div class="ann-item-header">
+        <div class="ann-item-title">${a.is_pinned ? '<span class="ann-pin">📌 </span>' : ''}${a.title}</div>
+      </div>
+      <div class="ann-item-meta">
+        <span>${CAT_LABEL[a.category] || a.category}</span>
+        <span>·</span>
+        <span>${fmtTime(a.published_at)}</span>
+        ${a.view_count ? `<span>· 👁 ${a.view_count}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openAnn(id) {
+  currentId = id;
+  filterAnn(); // re-render list to show active state
+
+  const detail = document.getElementById('ann-detail');
+  detail.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-dim)">載入中…</div>';
+  detail.classList.add('mobile-open');
+
+  try {
+    const empId = window.currentUser?.id || '';
+    const data = await api(`/api/announcements?id=${id}${empId ? '&employee_id='+empId : ''}`);
+    const pClass = 'p-' + (data.priority || 'normal');
+    const authorName = data.author?.name || '系統';
+
+    detail.innerHTML = `
+      <button class="ann-back-btn" onclick="closeDetail()">← 返回列表</button>
+      <div class="ann-detail-title">${data.is_pinned ? '📌 ' : ''}${data.title}</div>
+      <div class="ann-detail-meta">
+        <span class="priority-badge ${pClass}">${PRIO_LABEL[data.priority] || data.priority}</span>
+        <span style="font-size:12px;color:var(--text-dim)">${CAT_LABEL[data.category] || data.category}</span>
+        <span style="font-size:12px;color:var(--text-dim)">發布：${authorName}</span>
+        <span style="font-size:12px;color:var(--text-dim)">${data.published_at ? new Date(data.published_at).toLocaleString('zh-TW') : ''}</span>
+        ${data.expires_at ? `<span style="font-size:12px;color:var(--orange)">到期：${new Date(data.expires_at).toLocaleDateString('zh-TW')}</span>` : ''}
+      </div>
+      <div class="ann-content">${data.content}</div>`;
+
+    // Update read status in list
+    const item = allAnn.find(a => a.id === id);
+    if (item) item._read = true;
+  } catch(e) {
+    detail.innerHTML = `<div style="text-align:center;padding:40px;color:#F87171">載入失敗：${e.message}</div>`;
+  }
+}
+
+function closeDetail() {
+  currentId = null;
+  document.getElementById('ann-detail').classList.remove('mobile-open');
+  filterAnn();
+}
+
+// Category filter
+document.getElementById('ann-cats').addEventListener('click', e => {
+  const pill = e.target.closest('.cat-pill');
+  if (!pill) return;
+  document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('active'));
+  pill.classList.add('active');
+  currentCat = pill.dataset.cat;
+  filterAnn();
+});
+
+async function loadAnn(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadAnn(retries + 1), 300);
+    return;
+  }
+  const role = window.currentUser?.role || '';
+  try {
+    allAnn = await api(`/api/announcements${role ? '?role='+role : ''}`);
+    filterAnn();
+
+    // Auto-open ?id param
+    const params = new URLSearchParams(location.search);
+    const openId = params.get('id');
+    if (openId) openAnn(openId);
+  } catch(e) {
+    document.getElementById('ann-items').innerHTML =
+      `<div style="text-align:center;padding:30px;color:#F87171;font-size:13px">載入失敗：${e.message}</div>`;
+  }
+}
+
+window.addEventListener('load', () => loadAnn());
+</script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

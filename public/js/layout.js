@@ -40,16 +40,18 @@
     {
       title: '總覽',
       items: [
-        { page:'dashboard', icon:'🏠', label:'總覽',   href:'/dashboard.html' },
-        { page:'calendar',  icon:'📅', label:'行事曆', href:'/calendar.html' },
+        { page:'dashboard',     icon:'🏠', label:'總覽',   href:'/dashboard.html' },
+        { page:'calendar',      icon:'📅', label:'行事曆', href:'/calendar.html' },
+        { page:'announcements', icon:'📢', label:'公告欄', href:'/announcements.html' },
       ]
     },
     {
       title: '人員管理',
       items: [
-        { page:'employees',   icon:'👥', label:'員工資料', href:'/employees.html' },
-        { page:'orgchart',    icon:'🗂️', label:'組織圖',   href:'/orgchart.html' },
-        { page:'departments', icon:'🏢', label:'部門管理',   href:'/departments.html' },
+        { page:'employees',          icon:'👥', label:'員工資料', href:'/employees.html' },
+        { page:'orgchart',           icon:'🗂️', label:'組織圖',   href:'/orgchart.html' },
+        { page:'departments',        icon:'🏢', label:'部門管理', href:'/departments.html' },
+        { page:'announcement-admin', icon:'📝', label:'公告管理', href:'/announcement-admin.html', adminOnly: true },
       ]
     },
     {
@@ -86,10 +88,11 @@
                  : '員工';
   const avatarChar = currentUser?.avatar || userName[0];
 
+  const isAdmin = currentUser && ['manager','hr','ceo','chairman','admin'].includes(currentUser.role);
   const navHTML = navGroups.map(g => `
     <div class="nav-section">
       <div class="nav-section-title">${g.title}</div>
-      ${g.items.map(n => `
+      ${g.items.filter(n => !n.adminOnly || isAdmin).map(n => `
         <a class="nav-item ${page === n.page ? 'active' : ''}" href="${n.href}">
           <span class="nav-icon">${n.icon}</span> ${n.label}
           ${n.page === 'notifications' ? `<span id="notif-badge" style="display:none;margin-left:auto;background:#F87171;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px"></span>` : ''}

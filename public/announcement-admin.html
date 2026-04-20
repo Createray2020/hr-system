@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>公告管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .priority-badge{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:'DM Mono',monospace}
+  .p-urgent{background:rgba(248,113,113,.15);color:#F87171}
+  .p-high{background:rgba(251,146,60,.15);color:#FB923C}
+  .p-normal{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .p-low{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .status-draft{background:rgba(107,114,128,.12);color:#9CA3AF;padding:3px 8px;border-radius:4px;font-size:11px}
+  .status-published{background:rgba(74,222,128,.12);color:#4ADE80;padding:3px 8px;border-radius:4px;font-size:11px}
+  .status-expired{background:rgba(251,146,60,.12);color:#FB923C;padding:3px 8px;border-radius:4px;font-size:11px}
+  .ann-content-editor{font-size:14px;line-height:1.7;min-height:200px;resize:vertical}
+  .target-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .target-chip{padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);transition:all .15s}
+  .target-chip.selected{background:rgba(91,141,239,.2);border-color:var(--accent);color:#7FBBFF}
+</style>
+</head>
+<body data-page="announcement-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">公告管理</div>
+        <div class="page-sub">建立與管理公告內容</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-primary" onclick="openCreate()">＋ 新增公告</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>標題</th><th>分類</th><th>優先度</th><th>發送對象</th>
+          <th>狀態</th><th>發布時間</th><th>瀏覽數</th><th>操作</th>
+        </tr></thead>
+        <tbody id="ann-tbody">
+          <tr class="loading-row"><td colspan="8">載入中…</td></tr>
+        </tbody>
+      </table>
+      <div id="ann-empty" class="empty-state" style="display:none">
+        <div class="icon">📢</div><div>尚未建立任何公告</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 新增/編輯 Modal -->
+<div class="modal-bg" id="ann-modal">
+  <div class="modal" style="max-width:660px;width:95vw">
+    <div class="modal-title" id="modal-title">新增公告</div>
+    <input type="hidden" id="f-id">
+    <div class="form-grid">
+      <div class="form-row" style="grid-column:1/-1">
+        <label class="form-label">標題 <span style="color:#F87171">*</span></label>
+        <input type="text" class="form-input" id="f-title" placeholder="公告標題">
+      </div>
+      <div class="form-row">
+        <label class="form-label">分類</label>
+        <select class="form-select" id="f-category">
+          <option value="general">一般</option>
+          <option value="company">公司公告</option>
+          <option value="hr">人事通知</option>
+          <option value="event">活動訊息</option>
+          <option value="system">系統通知</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">優先度</label>
+        <select class="form-select" id="f-priority">
+          <option value="low">低</option>
+          <option value="normal" selected>一般</option>
+          <option value="high">高</option>
+          <option value="urgent">緊急</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">到期時間（選填）</label>
+        <input type="datetime-local" class="form-input" id="f-expires">
+      </div>
+      <div class="form-row">
+        <label class="form-label" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="f-pinned"> 置頂顯示
+        </label>
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-top:12px">
+      <label class="form-label">發送對象</label>
+      <div class="target-grid" id="target-grid">
+        <div class="target-chip selected" data-val="all">全員</div>
+        <div class="target-chip" data-val="employee">一般員工</div>
+        <div class="target-chip" data-val="manager">主管</div>
+        <div class="target-chip" data-val="hr">人資</div>
+        <div class="target-chip" data-val="ceo">執行長</div>
+        <div class="target-chip" data-val="chairman">董事長</div>
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-top:14px">
+      <label class="form-label">內容 <span style="color:#F87171">*</span></label>
+      <textarea class="form-textarea ann-content-editor" id="f-content" rows="8" placeholder="公告內容…"></textarea>
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <button class="btn btn-ghost" onclick="closeModal('ann-modal')">取消</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="saveDraft()">💾 儲存草稿</button>
+        <button class="btn btn-primary" onclick="publishNow()">📢 立即發布</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+const ADMIN_ROLES = ['manager','hr','ceo','chairman','admin'];
+const CAT_LABEL = { general:'一般', company:'公司公告', hr:'人事通知', event:'活動訊息', system:'系統通知' };
+const PRIO_LABEL = { urgent:'緊急', high:'高', normal:'一般', low:'低' };
+const TARGET_LABEL = { all:'全員', employee:'員工', manager:'主管', hr:'人資', ceo:'執行長', chairman:'董事長' };
+
+let annList = [];
+
+// Target chips toggle
+document.getElementById('target-grid').addEventListener('click', e => {
+  const chip = e.target.closest('.target-chip');
+  if (!chip) return;
+  const val = chip.dataset.val;
+  if (val === 'all') {
+    document.querySelectorAll('.target-chip').forEach(c => c.classList.remove('selected'));
+    chip.classList.add('selected');
+  } else {
+    document.querySelector('.target-chip[data-val="all"]').classList.remove('selected');
+    chip.classList.toggle('selected');
+    if (!document.querySelector('.target-chip.selected')) {
+      document.querySelector('.target-chip[data-val="all"]').classList.add('selected');
+    }
+  }
+});
+
+function getTargets() {
+  return [...document.querySelectorAll('.target-chip.selected')].map(c => c.dataset.val);
+}
+
+function setTargets(targets) {
+  document.querySelectorAll('.target-chip').forEach(c => {
+    c.classList.toggle('selected', targets.includes(c.dataset.val));
+  });
+}
+
+function getFormData() {
+  return {
+    id:           document.getElementById('f-id').value,
+    title:        document.getElementById('f-title').value.trim(),
+    content:      document.getElementById('f-content').value.trim(),
+    category:     document.getElementById('f-category').value,
+    priority:     document.getElementById('f-priority').value,
+    is_pinned:    document.getElementById('f-pinned').checked,
+    target_roles: getTargets(),
+    expires_at:   document.getElementById('f-expires').value
+                    ? new Date(document.getElementById('f-expires').value).toISOString() : null,
+    author_id:    window.currentUser?.id || null,
+  };
+}
+
+function openCreate() {
+  document.getElementById('modal-title').textContent = '新增公告';
+  document.getElementById('f-id').value      = '';
+  document.getElementById('f-title').value   = '';
+  document.getElementById('f-content').value = '';
+  document.getElementById('f-category').value = 'general';
+  document.getElementById('f-priority').value = 'normal';
+  document.getElementById('f-pinned').checked = false;
+  document.getElementById('f-expires').value  = '';
+  setTargets(['all']);
+  document.getElementById('ann-modal').classList.add('open');
+}
+
+function openEdit(ann) {
+  document.getElementById('modal-title').textContent = '編輯公告';
+  document.getElementById('f-id').value      = ann.id;
+  document.getElementById('f-title').value   = ann.title;
+  document.getElementById('f-content').value = ann.content;
+  document.getElementById('f-category').value = ann.category || 'general';
+  document.getElementById('f-priority').value = ann.priority || 'normal';
+  document.getElementById('f-pinned').checked = ann.is_pinned || false;
+  document.getElementById('f-expires').value  = ann.expires_at
+    ? new Date(ann.expires_at).toISOString().slice(0,16) : '';
+  setTargets(ann.target_roles || ['all']);
+  document.getElementById('ann-modal').classList.add('open');
+}
+
+async function saveDraft() {
+  const f = getFormData();
+  if (!f.title || !f.content) { toast('請填寫標題和內容', 'error'); return; }
+  try {
+    if (f.id) {
+      await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'update', ...f }) });
+    } else {
+      await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'create', ...f }) });
+    }
+    closeModal('ann-modal');
+    await loadAnn();
+    toast('✅ 草稿已儲存');
+  } catch(e) { toast('儲存失敗：'+e.message, 'error'); }
+}
+
+async function publishNow() {
+  const f = getFormData();
+  if (!f.title || !f.content) { toast('請填寫標題和內容', 'error'); return; }
+
+  // If new, create draft first then publish
+  let annId = f.id;
+  try {
+    if (!annId) {
+      const res = await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'create', ...f }) });
+      annId = res.id;
+    } else {
+      await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'update', ...f }) });
+    }
+    if (!confirm(`確定要發布「${f.title}」嗎？將推播通知給相關員工。`)) return;
+    const result = await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'publish', id: annId }) });
+    closeModal('ann-modal');
+    await loadAnn();
+    toast(`📢 已發布，通知了 ${result.recipients} 位員工`);
+  } catch(e) { toast('發布失敗：'+e.message, 'error'); }
+}
+
+async function togglePin(id) {
+  try {
+    const res = await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'pin', id }) });
+    toast(res.message);
+    await loadAnn();
+  } catch(e) { toast('操作失敗', 'error'); }
+}
+
+async function publishAnn(id, title) {
+  if (!confirm(`確定要發布「${title}」嗎？將推播通知給相關員工。`)) return;
+  try {
+    const res = await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'publish', id }) });
+    toast(`📢 已發布，通知了 ${res.recipients} 位員工`);
+    await loadAnn();
+  } catch(e) { toast('發布失敗：'+e.message, 'error'); }
+}
+
+async function deleteAnn(id, title) {
+  if (!confirm(`確定要刪除「${title}」？此操作無法還原。`)) return;
+  try {
+    await api('/api/announcements', { method:'POST', body: JSON.stringify({ action:'delete', id }) });
+    toast('已刪除');
+    await loadAnn();
+  } catch(e) { toast('刪除失敗', 'error'); }
+}
+
+function getStatus(a) {
+  if (!a.is_published) return { cls:'status-draft', text:'草稿' };
+  if (a.expires_at && new Date(a.expires_at) < new Date()) return { cls:'status-expired', text:'已過期' };
+  return { cls:'status-published', text:'已發布' };
+}
+
+function renderAnn() {
+  const tbody = document.getElementById('ann-tbody');
+  const empty = document.getElementById('ann-empty');
+  if (!annList.length) { tbody.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = annList.map(a => {
+    const st = getStatus(a);
+    const targets = (a.target_roles || ['all']).map(t => TARGET_LABEL[t] || t).join('、');
+    return `<tr>
+      <td style="max-width:260px">
+        ${a.is_pinned ? '<span style="color:var(--orange)">📌 </span>' : ''}
+        <span style="font-weight:500">${a.title}</span>
+      </td>
+      <td>${CAT_LABEL[a.category] || a.category}</td>
+      <td><span class="priority-badge p-${a.priority}">${PRIO_LABEL[a.priority] || a.priority}</span></td>
+      <td style="font-size:12px;color:var(--text-dim)">${targets}</td>
+      <td><span class="${st.cls}">${st.text}</span></td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${a.published_at ? new Date(a.published_at).toLocaleDateString('zh-TW') : '—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${a.view_count || 0}</td>
+      <td>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          ${!a.is_published ? `<button class="btn btn-ghost btn-sm" onclick='openEdit(${JSON.stringify(a)})'>編輯</button>` : ''}
+          ${!a.is_published ? `<button class="btn btn-approve btn-sm" onclick="publishAnn('${a.id}','${a.title.replace(/'/g,"\\'")}')">發布</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="togglePin('${a.id}')">${a.is_pinned ? '取消置頂' : '置頂'}</button>
+          <button class="btn btn-reject btn-sm" onclick="deleteAnn('${a.id}','${a.title.replace(/'/g,"\\'")}')">刪除</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadAnn(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadAnn(retries + 1), 300);
+    return;
+  }
+
+  // Role guard
+  const role = window.currentUser?.role;
+  if (role && !ADMIN_ROLES.includes(role)) {
+    document.querySelector('.main').innerHTML = '<div class="empty-state"><div class="icon">🔒</div><div>無權限存取此頁面</div></div>';
+    return;
+  }
+
+  try {
+    annList = await api('/api/announcements?draft=true');
+    renderAnn();
+  } catch(e) { toast('載入失敗：'+e.message, 'error'); }
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+window.addEventListener('load', () => loadAnn());
+</script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

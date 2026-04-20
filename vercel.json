@@ -15,7 +15,19 @@
     },
     {
       "source": "/api/push",
-      "destination": "/api/push"
+      "destination": "/api/employees?_resource=push"
+    },
+    {
+      "source": "/api/announcements",
+      "destination": "/api/announcements"
+    },
+    {
+      "source": "/announcements",
+      "destination": "/public/announcements.html"
+    },
+    {
+      "source": "/announcement-admin",
+      "destination": "/public/announcement-admin.html"
     },
     {
       "source": "/",
