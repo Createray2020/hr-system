@@ -30,7 +30,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ date: today, punch_in: fmtTime(data.clock_in), punch_out: fmtTime(data.clock_out), status: data.status, work_hours: data.work_hours });
     }
 
-    const { employee_id, month, date, status } = req.query;
+    const { employee_id, month, date, status, all: allRecords, start, end, dept } = req.query;
+
+    // ── GET all employees' records with employee join ──────────────────────
+    if (allRecords === 'true') {
+      let q = supabase.from('attendance')
+        .select('*, employees(id, name, dept, avatar)')
+        .order('work_date', { ascending: false });
+      if (start)  q = q.gte('work_date', start);
+      if (end)    q = q.lte('work_date', end);
+      if (status) q = q.eq('status', status);
+      const { data, error } = await q;
+      if (error) return res.status(500).json({ error: error.message });
+      const rows = (data || []).filter(r => !dept || r.employees?.dept === dept);
+      return res.status(200).json(rows);
+    }
+
     let q = supabase.from('attendance').select('*').order('work_date', { ascending: false });
     if (employee_id) q = q.eq('employee_id', employee_id);
     if (status)      q = q.eq('status', status);
@@ -135,6 +150,14 @@ export default async function handler(req, res) {
 
     if (error) return res.status(500).json({ error: error.message });
     return res.status(201).json({ message: '補登成功' });
+  }
+
+  if (req.method === 'DELETE') {
+    const id = req.query._id || req.url.split('/').pop().split('?')[0];
+    if (!id || id === 'index') return res.status(400).json({ error: '缺少 id' });
+    const { error } = await supabase.from('attendance').delete().eq('id', id);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json({ message: '已刪除' });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

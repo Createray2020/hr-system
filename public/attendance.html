@@ -45,6 +45,7 @@
         </div>
         <button class="btn btn-pdf" onclick="exportPDF()">📄 匯出報表</button>
         <button class="btn btn-ghost" onclick="openManualModal()">✏️ 人工補登</button>
+        <button class="btn btn-ghost" onclick="openAllRecordsModal()">📋 所有打卡紀錄</button>
       </div>
     </div>
 
@@ -94,16 +95,24 @@
       </select>
     </div>
 
+    <!-- 批次操作（主表格） -->
+    <div id="main-batch-actions" style="display:none;padding:10px 0;display:none;gap:10px;align-items:center">
+      <span id="main-selected-count" style="font-size:13px;color:var(--text-dim)">已選 0 筆</span>
+      <button class="btn btn-danger btn-sm" onclick="deleteSelectedMain()">🗑️ 刪除選取</button>
+      <button class="btn btn-ghost btn-sm" onclick="clearMainSelection()">取消選取</button>
+    </div>
+
     <!-- 表格 -->
     <div class="table-wrap">
       <table>
         <thead><tr>
+          <th style="width:40px"><input type="checkbox" id="select-all-main" onchange="toggleSelectAllMain(this.checked)"></th>
           <th>員工</th><th>日期</th><th>上班打卡</th><th>下班打卡</th>
           <th>工時</th><th>加班</th><th>狀態</th><th>備注</th>
         </tr></thead>
-        <tbody id="att-tbody"><tr class="loading-row"><td colspan="8">載入中…</td></tr></tbody>
+        <tbody id="att-tbody"><tr class="loading-row"><td colspan="9">載入中…</td></tr></tbody>
       </table>
-      <div id="att-empty" class="empty-state" style="display:none">
+      <div id="att-empty" class="empty-state" style="display:none;">
         <div class="icon">📭</div><div>暫無出勤紀錄</div>
       </div>
     </div>
@@ -131,6 +140,66 @@
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('manual-modal')">取消</button>
       <button class="btn btn-primary" onclick="submitManual()">確認補登</button>
+    </div>
+  </div>
+</div>
+
+<!-- 所有打卡紀錄 Modal -->
+<div class="modal-bg" id="all-records-modal">
+  <div class="modal" style="max-width:860px;width:95vw">
+    <div class="modal-title">📋 所有打卡紀錄</div>
+
+    <!-- 篩選列 -->
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <input type="month" class="form-input" id="filter-month" onchange="loadAllRecords()" style="width:160px">
+      <select class="form-select" id="filter-dept" onchange="loadAllRecords()" style="width:140px">
+        <option value="">所有部門</option>
+      </select>
+      <input type="text" class="form-input" id="filter-name" placeholder="搜尋姓名…" oninput="filterRecords()" style="width:140px">
+      <select class="form-select" id="filter-status" onchange="filterRecords()" style="width:120px">
+        <option value="">所有狀態</option>
+        <option value="normal">正常</option>
+        <option value="late">遲到</option>
+        <option value="early_leave">早退</option>
+        <option value="absent">缺勤</option>
+        <option value="missing_punch">漏打卡</option>
+      </select>
+      <div id="batch-actions" style="display:none;margin-left:auto;gap:8px;align-items:center">
+        <span id="selected-count" style="font-size:13px;color:var(--text-dim)">已選 0 筆</span>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelected()">🗑️ 刪除選取</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearSelection()">取消選取</button>
+      </div>
+    </div>
+
+    <!-- 統計 -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px" id="records-stats"></div>
+
+    <!-- 表格 -->
+    <div style="overflow-x:auto;max-height:55vh">
+      <table style="width:100%;border-collapse:collapse;font-size:13px" id="all-records-table">
+        <thead style="position:sticky;top:0;z-index:1">
+          <tr style="background:var(--surface2)">
+            <th style="padding:10px 12px;text-align:left;width:40px">
+              <input type="checkbox" id="select-all-records" onchange="toggleSelectAll(this.checked)">
+            </th>
+            <th style="padding:10px 12px;text-align:left">員工</th>
+            <th style="padding:10px 12px;text-align:left">部門</th>
+            <th style="padding:10px 12px;text-align:left">日期</th>
+            <th style="padding:10px 12px;text-align:left">上班打卡</th>
+            <th style="padding:10px 12px;text-align:left">下班打卡</th>
+            <th style="padding:10px 12px;text-align:left">工時</th>
+            <th style="padding:10px 12px;text-align:left">狀態</th>
+          </tr>
+        </thead>
+        <tbody id="all-records-body">
+          <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+      <div id="records-pagination" style="font-size:13px;color:var(--text-dim)"></div>
+      <button class="btn btn-ghost" onclick="closeModal('all-records-modal')">關閉</button>
     </div>
   </div>
 </div>
@@ -225,7 +294,8 @@ async function loadAttendance() {
 
   const tbody = document.getElementById('att-tbody');
   const empty = document.getElementById('att-empty');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="8">載入中…</td></tr>';
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="9">載入中…</td></tr>';
+  clearMainSelection();
 
   try {
     const rows = await api('/api/attendance?' + p);
@@ -237,7 +307,8 @@ async function loadAttendance() {
       const outT = r.clock_out ? r.clock_out.slice(11,16) : '—';
       const isLate = r.status === 'late';
       const hasOT  = (r.overtime_hours||0) > 0;
-      return `<tr>
+      return `<tr data-id="${r.id}">
+        <td style="padding:10px 12px"><input type="checkbox" class="main-record-cb" data-id="${r.id}" onchange="toggleMainRecord('${r.id}', this.checked)"></td>
         <td><div class="emp-cell"><div class="avatar">${emp.avatar||'?'}</div><div><div class="emp-name">${emp.name||r.employee_id}</div><div class="emp-dept">${emp.dept||''}</div></div></div></td>
         <td style="font-family:'DM Mono',monospace;font-size:13px">${r.work_date}</td>
         <td>${inT} ${isLate?'<span class="late-tag">遲到</span>':''}</td>
@@ -340,6 +411,242 @@ function exportPDF() {
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/* ── 主表格 勾選 / 刪除 ─────────────────────────────────────────────── */
+let mainSelectedIds = new Set();
+
+function toggleSelectAllMain(checked) {
+  document.querySelectorAll('.main-record-cb').forEach(cb => {
+    cb.checked = checked;
+    toggleMainRecord(cb.dataset.id, checked);
+  });
+}
+
+function toggleMainRecord(id, checked) {
+  if (checked) mainSelectedIds.add(id);
+  else mainSelectedIds.delete(id);
+  updateMainBatchActions();
+  const total = document.querySelectorAll('.main-record-cb').length;
+  const sa = document.getElementById('select-all-main');
+  if (sa) {
+    sa.indeterminate = mainSelectedIds.size > 0 && mainSelectedIds.size < total;
+    sa.checked = mainSelectedIds.size === total && total > 0;
+  }
+}
+
+function updateMainBatchActions() {
+  const bar = document.getElementById('main-batch-actions');
+  const cnt = document.getElementById('main-selected-count');
+  if (mainSelectedIds.size > 0) {
+    bar.style.display = 'flex';
+    cnt.textContent = `已選 ${mainSelectedIds.size} 筆`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function clearMainSelection() {
+  mainSelectedIds.clear();
+  document.querySelectorAll('.main-record-cb').forEach(cb => cb.checked = false);
+  const sa = document.getElementById('select-all-main');
+  if (sa) { sa.checked = false; sa.indeterminate = false; }
+  updateMainBatchActions();
+}
+
+async function deleteSelectedMain() {
+  if (!mainSelectedIds.size) return;
+  const count = mainSelectedIds.size;
+  if (!confirm(`確定要刪除選取的 ${count} 筆打卡紀錄嗎？此操作無法還原。`)) return;
+  let ok = 0, fail = 0;
+  for (const id of mainSelectedIds) {
+    try { await api(`/api/attendance/${id}`, { method: 'DELETE' }); ok++; }
+    catch(e) { fail++; }
+  }
+  clearMainSelection();
+  await loadAttendance();
+  toast(`已刪除 ${ok} 筆紀錄${fail ? `，${fail} 筆失敗` : ''}`, ok > 0 ? 'success' : 'error');
+}
+
+/* ── 所有打卡紀錄 Modal ─────────────────────────────────────────────── */
+let allRecordsData = [];
+let filteredRecords = [];
+let selectedRecordIds = new Set();
+let deptOptionsLoaded = false;
+
+async function openAllRecordsModal() {
+  document.getElementById('all-records-modal').classList.add('open');
+  const now = new Date();
+  document.getElementById('filter-month').value =
+    `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  if (!deptOptionsLoaded) {
+    try {
+      const depts = await api('/api/departments');
+      const deptSel = document.getElementById('filter-dept');
+      depts.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.name; opt.textContent = d.name;
+        deptSel.appendChild(opt);
+      });
+      deptOptionsLoaded = true;
+    } catch(e) {}
+  }
+
+  await loadAllRecords();
+}
+
+async function loadAllRecords() {
+  const month = document.getElementById('filter-month').value;
+  const dept  = document.getElementById('filter-dept').value;
+
+  document.getElementById('all-records-body').innerHTML =
+    '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">載入中…</td></tr>';
+
+  try {
+    const [year, m] = month.split('-');
+    const startDate = `${year}-${m}-01`;
+    const endDate   = `${year}-${m}-31`;
+    let url = `/api/attendance?start=${startDate}&end=${endDate}&all=true`;
+    if (dept) url += `&dept=${encodeURIComponent(dept)}`;
+
+    allRecordsData = await api(url);
+    selectedRecordIds.clear();
+    filterRecords();
+    updateStats();
+  } catch(e) {
+    document.getElementById('all-records-body').innerHTML =
+      '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">載入失敗</td></tr>';
+  }
+}
+
+function filterRecords() {
+  const name   = document.getElementById('filter-name').value.toLowerCase();
+  const status = document.getElementById('filter-status').value;
+  filteredRecords = allRecordsData.filter(r => {
+    const empName = r.employees?.name || '';
+    if (name && !empName.toLowerCase().includes(name)) return false;
+    if (status && r.status !== status) return false;
+    return true;
+  });
+  renderAllRecords();
+}
+
+function renderAllRecords() {
+  const tbody = document.getElementById('all-records-body');
+  if (!filteredRecords.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">沒有符合條件的打卡紀錄</td></tr>';
+    document.getElementById('records-pagination').textContent = '共 0 筆紀錄';
+    return;
+  }
+
+  const STATUS_LABEL = {
+    normal:       { text:'正常',  color:'#4ADE80' },
+    late:         { text:'遲到',  color:'#FB923C' },
+    early_leave:  { text:'早退',  color:'#FBBF24' },
+    absent:       { text:'缺勤',  color:'#F87171' },
+    missing_punch:{ text:'漏打卡',color:'#A78BFA' },
+    leave:        { text:'請假',  color:'#7FBBFF' },
+  };
+
+  const fmtTime = iso => iso ? iso.slice(11,16) : '—';
+
+  tbody.innerHTML = filteredRecords.map(r => {
+    const s       = STATUS_LABEL[r.status] || { text: r.status||'—', color:'var(--text-dim)' };
+    const checked = selectedRecordIds.has(r.id) ? 'checked' : '';
+    const empName = r.employees?.name || '—';
+    const dept    = r.employees?.dept || '—';
+    return `<tr style="border-bottom:0.5px solid var(--border)">
+      <td style="padding:10px 12px">
+        <input type="checkbox" class="record-checkbox" data-id="${r.id}"
+          ${checked} onchange="toggleRecord('${r.id}', this.checked)">
+      </td>
+      <td style="padding:10px 12px;font-weight:500">${empName}</td>
+      <td style="padding:10px 12px;color:var(--text-dim)">${dept}</td>
+      <td style="padding:10px 12px;font-family:'DM Mono',monospace;font-size:12px">${r.work_date||'—'}</td>
+      <td style="padding:10px 12px">${fmtTime(r.clock_in)}</td>
+      <td style="padding:10px 12px">${fmtTime(r.clock_out)}</td>
+      <td style="padding:10px 12px;font-family:'DM Mono',monospace">${r.work_hours != null ? r.work_hours+'h' : '—'}</td>
+      <td style="padding:10px 12px"><span style="color:${s.color};font-size:12px;font-weight:500">${s.text}</span></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('records-pagination').textContent = `共 ${filteredRecords.length} 筆紀錄`;
+  updateBatchActions();
+}
+
+function updateStats() {
+  const total  = allRecordsData.length;
+  const normal = allRecordsData.filter(r => r.status === 'normal').length;
+  const late   = allRecordsData.filter(r => r.status === 'late').length;
+  const absent = allRecordsData.filter(r => r.status === 'absent').length;
+  document.getElementById('records-stats').innerHTML = `
+    <div style="background:var(--surface2);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:20px;font-weight:600">${total}</div>
+      <div style="font-size:11px;color:var(--text-dim)">總筆數</div>
+    </div>
+    <div style="background:rgba(74,222,128,.08);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:20px;font-weight:600;color:#4ADE80">${normal}</div>
+      <div style="font-size:11px;color:var(--text-dim)">正常出勤</div>
+    </div>
+    <div style="background:rgba(251,146,60,.08);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:20px;font-weight:600;color:#FB923C">${late}</div>
+      <div style="font-size:11px;color:var(--text-dim)">遲到</div>
+    </div>
+    <div style="background:rgba(248,113,113,.08);border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:20px;font-weight:600;color:#F87171">${absent}</div>
+      <div style="font-size:11px;color:var(--text-dim)">缺勤</div>
+    </div>`;
+}
+
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.record-checkbox').forEach(cb => {
+    cb.checked = checked;
+    toggleRecord(cb.dataset.id, checked);
+  });
+}
+
+function toggleRecord(id, checked) {
+  if (checked) selectedRecordIds.add(id);
+  else selectedRecordIds.delete(id);
+  updateBatchActions();
+  const total = document.querySelectorAll('.record-checkbox').length;
+  const sa = document.getElementById('select-all-records');
+  sa.indeterminate = selectedRecordIds.size > 0 && selectedRecordIds.size < total;
+  sa.checked = selectedRecordIds.size === total && total > 0;
+}
+
+function updateBatchActions() {
+  const batchDiv  = document.getElementById('batch-actions');
+  const countSpan = document.getElementById('selected-count');
+  if (selectedRecordIds.size > 0) {
+    batchDiv.style.display = 'flex';
+    countSpan.textContent  = `已選 ${selectedRecordIds.size} 筆`;
+  } else {
+    batchDiv.style.display = 'none';
+  }
+}
+
+function clearSelection() {
+  selectedRecordIds.clear();
+  document.querySelectorAll('.record-checkbox').forEach(cb => cb.checked = false);
+  const sa = document.getElementById('select-all-records');
+  if (sa) { sa.checked = false; sa.indeterminate = false; }
+  updateBatchActions();
+}
+
+async function deleteSelected() {
+  if (!selectedRecordIds.size) return;
+  const count = selectedRecordIds.size;
+  if (!confirm(`確定要刪除選取的 ${count} 筆打卡紀錄嗎？此操作無法還原。`)) return;
+  let ok = 0, fail = 0;
+  for (const id of selectedRecordIds) {
+    try { await api(`/api/attendance/${id}`, { method: 'DELETE' }); ok++; }
+    catch(e) { fail++; }
+  }
+  clearSelection();
+  await loadAllRecords();
+  toast(`已刪除 ${ok} 筆紀錄${fail ? `，${fail} 筆失敗` : ''}`, ok > 0 ? 'success' : 'error');
+}
 
 /* ── Import / Export ── */
 const ATT_COLUMNS = [

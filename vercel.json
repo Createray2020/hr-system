@@ -86,6 +86,10 @@
       "destination": "/api/attendance/index?_action=punch"
     },
     {
+      "source": "/api/attendance/:id",
+      "destination": "/api/attendance/index?_id=:id"
+    },
+    {
       "source": "/api/calendar",
       "destination": "/api/calendar/index"
     },
