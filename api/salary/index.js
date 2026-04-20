@@ -44,61 +44,78 @@ export default async function handler(req, res) {
     if (!year || !month) return res.status(400).json({ error: '缺少 year/month' });
 
     const { data: emps, error: empErr } = await supabase
-      .from('employees').select('id, base_salary, extra_allowance').eq('status', 'active');
+      .from('employees')
+      .select('id, employment_type, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, hourly_rate')
+      .eq('status', 'active');
     if (empErr) return res.status(500).json({ error: empErr.message });
 
-    const ymStart   = `${year}-${String(month).padStart(2,'0')}-01`;
-    const ymEndDate = new Date(year, month, 0);
-    const ymEnd     = `${ymEndDate.getFullYear()}-${String(ymEndDate.getMonth()+1).padStart(2,'0')}-${String(ymEndDate.getDate()).padStart(2,'0')}`;
+    const ymStart = `${year}-${String(month).padStart(2,'0')}-01`;
+    const ymEnd   = `${year}-${String(month).padStart(2,'0')}-31`;
 
     const { data: attData } = await supabase
-      .from('attendance').select('employee_id, overtime_hours, status')
+      .from('attendance').select('employee_id, work_hours, status')
       .gte('work_date', ymStart).lte('work_date', ymEnd);
 
-    const otMap = {}, absentMap = {};
+    const workHoursMap = {}, absentMap = {};
     (attData || []).forEach(a => {
-      otMap[a.employee_id]     = (otMap[a.employee_id]     || 0) + (a.overtime_hours || 0);
-      absentMap[a.employee_id] = (absentMap[a.employee_id] || 0) + (a.status === 'absent' ? 1 : 0);
+      workHoursMap[a.employee_id] = (workHoursMap[a.employee_id] || 0) + (a.work_hours || 0);
+      absentMap[a.employee_id]    = (absentMap[a.employee_id]    || 0) + (a.status === 'absent' ? 1 : 0);
     });
 
     const records = emps.map(emp => {
-      const base       = parseFloat(emp.base_salary) || 0;
-      const hourlyRate = base / 240;
-      const otHours    = otMap[emp.id]    || 0;
-      const otPay      = Math.round(otHours * hourlyRate * 1.33);
-      const absentDays = absentMap[emp.id] || 0;
-      const deductAbsent  = Math.round((base / 30) * absentDays);
-      const insBase       = Math.min(base, LABOR_INS_CAP);
-      const laborIns      = Math.round(insBase * LABOR_INS_RATE);
-      const healthIns     = Math.round(insBase * HEALTH_INS_RATE * 0.3);
-      const grossEst      = base + otPay;
-      const tax           = grossEst > 88501 ? Math.round((grossEst - 88501) * TAX_RATE) : 0;
-      const allowance     = 2000;
-      const extraAllowance = parseFloat(emp.extra_allowance) || 0;
+      const isPart = emp.employment_type === 'part_time';
+      const ym     = `S${emp.id}${year}${String(month).padStart(2,'0')}`;
 
-      return {
-        id:               `S${emp.id}${year}${String(month).padStart(2,'0')}`,
-        employee_id:      emp.id,
-        year:             parseInt(year),
-        month:            parseInt(month),
-        base_salary:      base,
-        overtime_pay:     otPay,
-        bonus:            0,
-        allowance,
-        extra_allowance:  extraAllowance,
-        deduct_absence:   deductAbsent,
-        deduct_labor_ins: laborIns,
-        deduct_health_ins:healthIns,
-        deduct_tax:       tax,
-        status:           'draft',
-      };
+      if (isPart) {
+        const totalHours = workHoursMap[emp.id] || 0;
+        const hourlyRate = parseFloat(emp.hourly_rate) || 200;
+        const gross      = Math.round(totalHours * hourlyRate);
+        return {
+          id: ym, employee_id: emp.id,
+          year: parseInt(year), month: parseInt(month),
+          base_salary: 0, overtime_pay: 0, bonus: 0, allowance: 0, extra_allowance: 0,
+          deduct_absence: 0, deduct_labor_ins: 0, deduct_health_ins: 0, deduct_tax: 0,
+          work_hours: totalHours, hourly_rate: hourlyRate,
+          employment_type: 'part_time',
+          gross_salary: gross, net_salary: gross,
+          status: 'draft',
+        };
+      } else {
+        const base       = parseFloat(emp.base_salary)       || 30000;
+        const attBonus   = parseFloat(emp.attendance_bonus)  || 0;
+        const gradeAllow = parseFloat(emp.grade_allowance)   || 0;
+        const mgrAllow   = parseFloat(emp.manager_allowance) || 0;
+        const extraAllow = parseFloat(emp.extra_allowance)   || 0;
+        const gross      = base + attBonus + gradeAllow + mgrAllow + extraAllow;
+
+        const absentDays   = absentMap[emp.id] || 0;
+        const deductAbsent = Math.round((base / 30) * absentDays);
+        const insBase      = Math.min(base, LABOR_INS_CAP);
+        const laborIns     = Math.round(insBase * LABOR_INS_RATE);
+        const healthIns    = Math.round(insBase * HEALTH_INS_RATE * 0.3);
+        const tax          = gross > 88501 ? Math.round((gross - 88501) * TAX_RATE) : 0;
+        const net          = gross - deductAbsent - laborIns - healthIns - tax;
+
+        return {
+          id: ym, employee_id: emp.id,
+          year: parseInt(year), month: parseInt(month),
+          base_salary: base, overtime_pay: 0,
+          bonus: attBonus, allowance: gradeAllow + mgrAllow, extra_allowance: extraAllow,
+          deduct_absence: deductAbsent, deduct_labor_ins: laborIns,
+          deduct_health_ins: healthIns, deduct_tax: tax,
+          work_hours: null, hourly_rate: null,
+          employment_type: 'full_time',
+          gross_salary: gross, net_salary: net,
+          status: 'draft',
+        };
+      }
     });
 
     const { error } = await supabase.from('salary_records')
       .upsert(records, { onConflict: 'employee_id,year,month', ignoreDuplicates: true });
     if (error) return res.status(500).json({ error: error.message });
 
-    return res.status(200).json({ total: records.length, message: '批次產生完成（已存在者略過）' });
+    return res.status(200).json({ created: records.length, message: '批次產生完成（已存在者略過）' });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

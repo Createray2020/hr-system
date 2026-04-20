@@ -96,13 +96,13 @@
       <div class="net-amount" id="sal-net">—</div>
     </div>
 
-    <div class="salary-breakdown">
+    <!-- 正職薪資明細 -->
+    <div class="salary-breakdown" id="sal-fulltime-breakdown">
       <div class="salary-col">
         <div class="salary-col-title">收入項目</div>
         <div class="salary-line"><span>底薪</span><span class="sal-pos" id="sal-base">—</span></div>
-        <div class="salary-line"><span>加班費</span><span class="sal-pos" id="sal-ot">—</span></div>
-        <div class="salary-line"><span>獎金</span><span class="sal-pos" id="sal-bonus">—</span></div>
-        <div class="salary-line"><span>津貼</span><span class="sal-pos" id="sal-allow">—</span></div>
+        <div class="salary-line"><span>全勤獎金</span><span class="sal-pos" id="sal-bonus">—</span></div>
+        <div class="salary-line"><span>職等/主管加給</span><span class="sal-pos" id="sal-allow">—</span></div>
         <div class="salary-line"><span>額外加給</span><span class="sal-pos" id="sal-extra-allow">—</span></div>
         <div class="salary-line total"><span>應發合計</span><span class="sal-pos" id="sal-gross">—</span></div>
       </div>
@@ -113,6 +113,16 @@
         <div class="salary-line"><span>健保費</span><span class="sal-neg" id="sal-health">—</span></div>
         <div class="salary-line"><span>所得稅</span><span class="sal-neg" id="sal-tax">—</span></div>
         <div class="salary-line total"><span>扣除合計</span><span class="sal-neg" id="sal-deduct-total">—</span></div>
+      </div>
+    </div>
+
+    <!-- 兼職薪資明細 -->
+    <div class="salary-breakdown" id="sal-parttime-breakdown" style="display:none;grid-template-columns:1fr">
+      <div class="salary-col">
+        <div class="salary-col-title">時薪制計算</div>
+        <div class="salary-line"><span>出勤時數</span><span class="sal-pos" id="sal-pt-hours">—</span></div>
+        <div class="salary-line"><span>時薪</span><span class="sal-pos" id="sal-pt-rate">—</span></div>
+        <div class="salary-line total"><span>薪資合計</span><span class="sal-pos" id="sal-pt-gross">—</span></div>
       </div>
     </div>
 
@@ -211,20 +221,23 @@ async function loadSalary() {
     const fmt = n => '$' + Number(n||0).toLocaleString();
     const totalDeduct = r => (r.deduct_absence||0)+(r.deduct_labor_ins||0)+(r.deduct_health_ins||0)+(r.deduct_tax||0);
 
-    tbody.innerHTML = rows.map(r => `<tr>
-      <td><div class="emp-cell"><div class="avatar">${r.avatar||r.emp_name?.[0]||'?'}</div><div><div class="emp-name">${r.emp_name||'—'}</div><div class="emp-dept">${r.dept||''}</div></div></div></td>
-      <td style="font-family:'DM Mono',monospace">${fmt(r.base_salary)}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${r.overtime_pay>0?'+'+fmt(r.overtime_pay):'—'}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${r.bonus>0?'+'+fmt(r.bonus):'—'}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${r.allowance>0?'+'+fmt(r.allowance):'—'}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--red)">-${fmt(totalDeduct(r))}</td>
+    tbody.innerHTML = rows.map(r => {
+      const isPt = r.employment_type === 'part_time';
+      return `<tr>
+      <td><div class="emp-cell"><div class="avatar">${r.avatar||r.emp_name?.[0]||'?'}</div><div><div class="emp-name">${r.emp_name||'—'}</div><div class="emp-dept">${r.dept||''}${isPt?' <span style="font-size:10px;color:#FFA050;opacity:.8">兼職</span>':''}</div></div></div></td>
+      <td style="font-family:'DM Mono',monospace">${isPt?`<span style="font-size:11px;color:var(--text-dim)">${r.work_hours||0}h × ${fmt(r.hourly_rate)}</span>`:fmt(r.base_salary)}</td>
+      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.bonus>0?'+'+fmt(r.bonus):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.allowance>0?'+'+fmt(r.allowance):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.extra_allowance>0?'+'+fmt(r.extra_allowance):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;color:var(--red)">${isPt?'—':'-'+fmt(totalDeduct(r))}</td>
       <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent2)">${fmt(r.net_salary)}</td>
       <td>${statusBadge(r.status)}</td>
       <td><div class="action-btns">
         <button class="btn btn-ghost btn-sm" onclick="openSalaryModal('${r.id}')">詳細</button>
         ${r.status==='confirmed'?`<button class="btn btn-warn btn-sm" onclick="markPaidDirect('${r.id}')">發放</button>`:''}
       </div></td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
   } catch(e) { toast('載入失敗','error'); }
 }
 
@@ -251,20 +264,29 @@ function openSalaryModal(id) {
   document.getElementById('sal-modal-title').textContent = `薪資明細 — ${r.emp_name} ${currentYear}/${String(currentMonth).padStart(2,'0')}`;
 
   const fmt = n => '$' + Number(n||0).toLocaleString();
-  const totalDeduct = (r.deduct_absence||0)+(r.deduct_labor_ins||0)+(r.deduct_health_ins||0)+(r.deduct_tax||0);
+  const isPart = r.employment_type === 'part_time';
 
-  document.getElementById('sal-net').textContent         = fmt(r.net_salary);
-  document.getElementById('sal-base').textContent        = fmt(r.base_salary);
-  document.getElementById('sal-ot').textContent          = fmt(r.overtime_pay);
-  document.getElementById('sal-bonus').textContent       = fmt(r.bonus);
-  document.getElementById('sal-allow').textContent       = fmt(r.allowance);
-  document.getElementById('sal-extra-allow').textContent = r.extra_allowance > 0 ? fmt(r.extra_allowance) : '—';
-  document.getElementById('sal-gross').textContent       = fmt(r.gross_salary);
-  document.getElementById('sal-absence').textContent     = fmt(r.deduct_absence);
-  document.getElementById('sal-labor').textContent       = fmt(r.deduct_labor_ins);
-  document.getElementById('sal-health').textContent      = fmt(r.deduct_health_ins);
-  document.getElementById('sal-tax').textContent         = fmt(r.deduct_tax);
-  document.getElementById('sal-deduct-total').textContent= fmt(totalDeduct);
+  document.getElementById('sal-net').textContent = fmt(r.net_salary);
+  document.getElementById('sal-fulltime-breakdown').style.display = isPart ? 'none' : '';
+  document.getElementById('sal-parttime-breakdown').style.display = isPart ? '' : 'none';
+
+  if (isPart) {
+    document.getElementById('sal-pt-hours').textContent = (r.work_hours || 0) + ' 小時';
+    document.getElementById('sal-pt-rate').textContent  = fmt(r.hourly_rate) + '/小時';
+    document.getElementById('sal-pt-gross').textContent = fmt(r.gross_salary);
+  } else {
+    const totalDeduct = (r.deduct_absence||0)+(r.deduct_labor_ins||0)+(r.deduct_health_ins||0)+(r.deduct_tax||0);
+    document.getElementById('sal-base').textContent        = fmt(r.base_salary);
+    document.getElementById('sal-bonus').textContent       = r.bonus > 0 ? fmt(r.bonus) : '—';
+    document.getElementById('sal-allow').textContent       = r.allowance > 0 ? fmt(r.allowance) : '—';
+    document.getElementById('sal-extra-allow').textContent = r.extra_allowance > 0 ? fmt(r.extra_allowance) : '—';
+    document.getElementById('sal-gross').textContent       = fmt(r.gross_salary);
+    document.getElementById('sal-absence').textContent     = fmt(r.deduct_absence);
+    document.getElementById('sal-labor').textContent       = fmt(r.deduct_labor_ins);
+    document.getElementById('sal-health').textContent      = fmt(r.deduct_health_ins);
+    document.getElementById('sal-tax').textContent         = fmt(r.deduct_tax);
+    document.getElementById('sal-deduct-total').textContent= fmt(totalDeduct);
+  }
 
   // Edit fields
   document.getElementById('e-ot').value              = r.overtime_pay||0;
