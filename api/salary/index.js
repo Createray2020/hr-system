@@ -100,7 +100,6 @@ export default async function handler(req, res) {
       if (isPart) {
         const totalHours = workHoursMap[emp.id] || 0;
         const hourlyRate = parseFloat(emp.hourly_rate) || 200;
-        const gross      = Math.round(totalHours * hourlyRate);
         return {
           id: ym, employee_id: emp.id,
           year: parseInt(year), month: parseInt(month),
@@ -108,7 +107,6 @@ export default async function handler(req, res) {
           deduct_absence: 0, deduct_labor_ins: 0, deduct_health_ins: 0, deduct_tax: 0,
           work_hours: totalHours, hourly_rate: hourlyRate,
           employment_type: 'part_time',
-          gross_salary: gross, net_salary: gross,
           status: 'draft',
         };
       } else {
@@ -117,14 +115,12 @@ export default async function handler(req, res) {
         const gradeAllow = parseFloat(emp.grade_allowance)   || 0;
         const mgrAllow   = parseFloat(emp.manager_allowance) || 0;
         const extraAllow = parseFloat(emp.extra_allowance)   || 0;
-        const gross      = base + attBonus + gradeAllow + mgrAllow + extraAllow;
 
         const ins = insMap[emp.id];
         const absentDays   = absentMap[emp.id] || 0;
         const deductAbsent = Math.round((base / 30) * absentDays);
         const laborIns     = emp.has_insurance ? (ins?.labor_ins_employee  || 0) : 0;
         const healthIns    = emp.has_insurance ? (ins?.health_ins_employee || 0) : 0;
-        const net          = gross - deductAbsent - laborIns - healthIns;
 
         return {
           id: ym, employee_id: emp.id,
@@ -135,7 +131,6 @@ export default async function handler(req, res) {
           deduct_health_ins: healthIns, deduct_tax: 0,
           work_hours: null, hourly_rate: null,
           employment_type: 'full_time',
-          gross_salary: gross, net_salary: net,
           status: 'draft',
         };
       }
