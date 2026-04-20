@@ -107,6 +107,9 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
   </div>
 
   <div class="scroll-content">
+    <!-- 緊急公告橫幅（高優先度才顯示）-->
+    <div id="urgent-banner" style="display:none;margin:8px 16px 4px;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.28);border-radius:12px;padding:10px 14px"></div>
+
     <!-- 打卡卡片 -->
     <div class="punch-card">
       <div class="card-label" style="margin-bottom:12px">今日打卡</div>
@@ -124,6 +127,17 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
       <div class="punch-btn-row" id="punch-btn-row">
         <button class="punch-btn punch-btn-in" id="btn-in" onclick="doPunch('in')">⏺ 上班打卡</button>
         <button class="punch-btn punch-btn-out" id="btn-out" onclick="doPunch('out')">⏹ 下班打卡</button>
+      </div>
+    </div>
+
+    <!-- 公告欄 -->
+    <div style="margin:4px 0 14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px;margin-bottom:8px">
+        <div style="font-size:11px;color:rgba(255,255,255,.35);letter-spacing:.5px">📢 最新公告</div>
+        <a href="/announcements.html" style="font-size:11px;color:#5B8DEF;text-decoration:none">查看全部 ›</a>
+      </div>
+      <div id="mobile-announcements" style="padding:0 16px;display:flex;flex-direction:column;gap:8px">
+        <div style="text-align:center;padding:14px;color:rgba(255,255,255,.25);font-size:12px">載入中…</div>
       </div>
     </div>
 
@@ -190,8 +204,10 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
     <a href="/employee-app.html" class="mobile-nav-item active">
       <span class="nav-icon">🏠</span><span class="nav-label">首頁</span>
     </a>
-    <a href="/employee-schedule.html" class="mobile-nav-item">
-      <span class="nav-icon">🗓️</span><span class="nav-label">班表</span>
+    <a href="/announcements.html" class="mobile-nav-item" style="position:relative">
+      <span class="nav-icon">📢</span>
+      <span id="ann-nav-badge" style="display:none;position:absolute;top:4px;right:18px;width:8px;height:8px;background:#F87171;border-radius:50%"></span>
+      <span class="nav-label">公告</span>
     </a>
     <a href="/employee-leave.html" class="mobile-nav-item">
       <span class="nav-icon">📋</span><span class="nav-label">請假</span>
@@ -203,6 +219,15 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
       <span class="nav-icon">👤</span><span class="nav-label">我的</span>
     </a>
   </nav>
+</div>
+
+<!-- 公告詳情 Modal（底部滑出）-->
+<div id="ann-detail-modal" style="display:none;position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.7)" onclick="closeAnnDetail(event)">
+  <div id="ann-detail-sheet" style="position:absolute;bottom:0;left:0;right:0;max-width:430px;margin:0 auto;background:#1a1f2e;border-radius:20px 20px 0 0;padding:20px;max-height:85vh;overflow-y:auto;transform:translateY(100%);transition:transform .3s ease">
+    <div style="width:40px;height:4px;background:rgba(255,255,255,.2);border-radius:2px;margin:0 auto 16px"></div>
+    <div id="ann-detail-content"></div>
+    <button onclick="closeAnnDetailBtn()" style="width:100%;margin-top:16px;background:rgba(255,255,255,.07);border:none;border-radius:12px;padding:14px;color:#fff;font-size:14px;cursor:pointer">關閉</button>
+  </div>
 </div>
 
 <div class="m-toast-wrap" id="toast-wrap"></div>
@@ -415,7 +440,132 @@ async function loadHours() {
 
   // Load hours
   loadHours();
+
+  // Load announcements
+  await loadUrgentAnnouncements();
+  loadMobileAnnouncements();
 })();
+
+/* ── 公告相關函式 ─────────────────────────────────────────────────────── */
+
+const PRIO_COLOR_M = { urgent:'#F87171', high:'#FB923C', normal:'#5B8DEF', low:'rgba(255,255,255,.3)' };
+const PRIO_LABEL_M = { urgent:'緊急', high:'重要', normal:'一般', low:'一般' };
+const CAT_LABEL_M  = { company:'公司', hr:'人事', event:'活動', system:'系統', general:'公告' };
+
+function formatTimeAgo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - new Date(ts);
+  if (diff < 3600000)   return Math.floor(diff / 60000) + ' 分鐘前';
+  if (diff < 86400000)  return Math.floor(diff / 3600000) + ' 小時前';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + ' 天前';
+  return new Date(ts).toLocaleDateString('zh-TW', { month:'numeric', day:'numeric' });
+}
+
+async function loadUrgentAnnouncements() {
+  if (!currentUser) return;
+  try {
+    const role = currentUser.role || 'employee';
+    const data = await apiFetch(`/api/announcements?role=${role}`);
+    const urgent = data.filter(a => a.priority === 'urgent' || a.priority === 'high');
+
+    // 更新公告導航紅點（有任何公告就顯示）
+    if (data.length > 0) {
+      const badge = document.getElementById('ann-nav-badge');
+      if (badge) badge.style.display = '';
+    }
+
+    const banner = document.getElementById('urgent-banner');
+    if (!urgent.length) { banner.style.display = 'none'; return; }
+
+    const ann = urgent[0];
+    const pColor = ann.priority === 'urgent' ? '#F87171' : '#FB923C';
+    const pLabel = ann.priority === 'urgent' ? '緊急' : '重要';
+    banner.style.display = '';
+    banner.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="openAnnouncementDetail('${ann.id}')">
+        <span style="background:${pColor};color:#fff;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;flex-shrink:0">${pLabel}</span>
+        <span style="font-size:13px;font-weight:500;color:#fff;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ann.title}</span>
+        <span style="color:rgba(255,255,255,.5);font-size:12px;flex-shrink:0">›</span>
+      </div>
+      ${urgent.length > 1 ? `<div style="font-size:10px;color:rgba(255,255,255,.4);margin-top:4px;text-align:right">還有 ${urgent.length - 1} 則重要公告</div>` : ''}`;
+  } catch(e) {
+    const banner = document.getElementById('urgent-banner');
+    if (banner) banner.style.display = 'none';
+  }
+}
+
+async function loadMobileAnnouncements() {
+  if (!currentUser) return;
+  const container = document.getElementById('mobile-announcements');
+  try {
+    const role = currentUser.role || 'employee';
+    const data = await apiFetch(`/api/announcements?role=${role}`);
+    const list = data.slice(0, 3);
+    if (!list.length) {
+      container.innerHTML = `<div style="text-align:center;padding:16px;color:rgba(255,255,255,.3);font-size:12px">目前沒有公告</div>`;
+      return;
+    }
+    container.innerHTML = list.map(ann => {
+      const color = PRIO_COLOR_M[ann.priority] || '#5B8DEF';
+      const timeAgo = formatTimeAgo(ann.published_at);
+      return `
+        <div onclick="openAnnouncementDetail('${ann.id}')"
+          style="background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);
+            border-left:3px solid ${color};border-radius:12px;padding:12px 14px;
+            cursor:pointer;display:flex;gap:10px;align-items:flex-start">
+          ${ann.is_pinned ? '<span style="font-size:12px;flex-shrink:0;margin-top:1px">📌</span>' : ''}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500;color:#E8EAF0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px">${ann.title}</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.4);display:flex;gap:8px">
+              <span style="color:${color};font-weight:500">${PRIO_LABEL_M[ann.priority] || ''}</span>
+              <span>${CAT_LABEL_M[ann.category] || ann.category}</span>
+              <span>${timeAgo}</span>
+            </div>
+          </div>
+          <span style="color:rgba(255,255,255,.3);font-size:14px;flex-shrink:0">›</span>
+        </div>`;
+    }).join('');
+  } catch(e) {
+    if (container) container.innerHTML = `<div style="text-align:center;padding:14px;color:rgba(255,255,255,.25);font-size:12px">無法載入公告</div>`;
+  }
+}
+
+async function openAnnouncementDetail(id) {
+  const sheet = document.getElementById('ann-detail-sheet');
+  const modal = document.getElementById('ann-detail-modal');
+  document.getElementById('ann-detail-content').innerHTML = '<div style="text-align:center;padding:30px;color:rgba(255,255,255,.4)">載入中…</div>';
+  modal.style.display = '';
+  requestAnimationFrame(() => { sheet.style.transform = 'translateY(0)'; });
+
+  try {
+    const empId = currentUser?.id || '';
+    const ann = await apiFetch(`/api/announcements?id=${id}${empId ? '&employee_id='+empId : ''}`);
+    const pColor = PRIO_COLOR_M[ann.priority] || '#5B8DEF';
+    document.getElementById('ann-detail-content').innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span style="background:${pColor};color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600">${PRIO_LABEL_M[ann.priority] || ann.priority}</span>
+        ${ann.is_pinned ? '<span>📌</span>' : ''}
+      </div>
+      <div style="font-size:17px;font-weight:600;color:#fff;margin-bottom:8px;line-height:1.4">${ann.title}</div>
+      <div style="font-size:12px;color:rgba(255,255,255,.4);margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap">
+        ${ann.author?.name ? `<span>${ann.author.name}</span>` : ''}
+        <span>${ann.published_at ? new Date(ann.published_at).toLocaleDateString('zh-TW') : ''}</span>
+        ${ann.view_count ? `<span>${ann.view_count} 次查看</span>` : ''}
+      </div>
+      <div style="font-size:14px;color:rgba(255,255,255,.85);line-height:1.8;white-space:pre-wrap;border-top:0.5px solid rgba(255,255,255,.08);padding-top:14px">${ann.content}</div>`;
+  } catch(e) {
+    document.getElementById('ann-detail-content').innerHTML = `<div style="color:#F87171;padding:20px;text-align:center">載入失敗：${e.message}</div>`;
+  }
+}
+
+function closeAnnDetail(e) {
+  if (e.target.id === 'ann-detail-modal') closeAnnDetailBtn();
+}
+function closeAnnDetailBtn() {
+  const sheet = document.getElementById('ann-detail-sheet');
+  sheet.style.transform = 'translateY(100%)';
+  setTimeout(() => { document.getElementById('ann-detail-modal').style.display = 'none'; }, 300);
+}
 </script>
 
 <script src="/js/pwa.js"></script>
