@@ -3,15 +3,12 @@
 // POST /api/salary?_action=batch → 批次產生草稿
 import { supabase } from '../../lib/supabase.js';
 
-// 簡易勞健保費率（台灣 2024 參考值）
-const LABOR_INS_RATE  = 0.001;   // 員工自付勞保費 0.1%
-const HEALTH_INS_RATE = 0.0236;  // 健保費率 2.36%（員工自付 30%）
-const TAX_RATE        = 0.05;    // 薪資所得稅 5%（簡化）
-const LABOR_INS_CAP   = 45800;   // 投保薪資上限
-
 function calcAttendanceBonus(emp) {
-  const noBonus = ['manager','ceo','chairman'].includes(emp.role) || emp.is_manager === true;
-  return noBonus ? 0 : parseFloat(emp.attendance_bonus) || 0;
+  if (!emp) return 0;
+  if (emp.employment_type === 'part_time') return 0;
+  if (['manager','ceo','chairman'].includes(emp.role)) return 0;
+  if (emp.is_manager === true) return 0;
+  return parseFloat(emp.attendance_bonus) || 0;
 }
 
 export default async function handler(req, res) {
@@ -21,7 +18,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { year, month, dept, status, employee_id } = req.query;
     let q = supabase.from('salary_records')
-      .select(`*, employees!inner(name, dept, avatar)`)
+      .select(`*, employees!inner(name, dept, avatar, role, is_manager, employment_type)`)
       .order('employee_id');
 
     if (year)        q = q.eq('year',        parseInt(year));
@@ -33,13 +30,29 @@ export default async function handler(req, res) {
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
 
-    const rows = data.map(r => ({
-      ...r,
-      emp_name:  r.employees.name,
-      dept:      r.employees.dept,
-      avatar:    r.employees.avatar,
-      employees: undefined,
-    }));
+    const rows = data.map(r => {
+      const emp = r.employees;
+      const noBonus = !emp || emp.employment_type === 'part_time' ||
+                      ['manager','ceo','chairman'].includes(emp.role) ||
+                      emp.is_manager === true;
+      const correctedBonus = noBonus ? 0 : (r.bonus || 0);
+      const gross = (r.base_salary||0) + correctedBonus + (r.allowance||0) +
+                    (r.extra_allowance||0) + (r.overtime_pay||0);
+      const totalDeduct = (r.deduct_absence||0) + (r.deduct_labor_ins||0) + (r.deduct_health_ins||0);
+      const net = gross - totalDeduct;
+      return {
+        ...r,
+        bonus:          correctedBonus,
+        gross_salary:   gross,
+        net_salary:     net,
+        emp_name:       emp?.name,
+        dept:           emp?.dept,
+        avatar:         emp?.avatar,
+        emp_role:       emp?.role,
+        emp_is_manager: emp?.is_manager,
+        employees:      undefined,
+      };
+    });
     return res.status(200).json(rows);
   }
 
@@ -50,7 +63,7 @@ export default async function handler(req, res) {
 
     const { data: emps, error: empErr } = await supabase
       .from('employees')
-      .select('id, employment_type, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, hourly_rate')
+      .select('id, employment_type, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, hourly_rate, role, is_manager, has_insurance')
       .eq('status', 'active');
     if (empErr) return res.status(500).json({ error: empErr.message });
 
@@ -67,11 +80,18 @@ export default async function handler(req, res) {
       absentMap[a.employee_id]    = (absentMap[a.employee_id]    || 0) + (a.status === 'absent' ? 1 : 0);
     });
 
-    // Fetch insurance settings (use DB values instead of calculated rates)
+    // Fetch insurance settings for employee contribution amounts
     const { data: insData } = await supabase
-      .from('insurance_settings').select('employee_id, has_insurance, labor_ins_employee, health_ins_employee');
+      .from('insurance_settings').select('employee_id, labor_ins_employee, health_ins_employee');
     const insMap = {};
     (insData || []).forEach(i => { insMap[i.employee_id] = i; });
+
+    // Delete existing drafts for this period before regenerating
+    await supabase.from('salary_records')
+      .delete()
+      .eq('year', parseInt(year))
+      .eq('month', parseInt(month))
+      .eq('status', 'draft');
 
     const records = emps.map(emp => {
       const isPart = emp.employment_type === 'part_time';
@@ -102,10 +122,9 @@ export default async function handler(req, res) {
         const ins = insMap[emp.id];
         const absentDays   = absentMap[emp.id] || 0;
         const deductAbsent = Math.round((base / 30) * absentDays);
-        const laborIns     = (ins && ins.has_insurance !== false) ? (ins.labor_ins_employee  || 0) : 0;
-        const healthIns    = (ins && ins.has_insurance !== false) ? (ins.health_ins_employee || 0) : 0;
-        const tax          = gross > 88501 ? Math.round((gross - 88501) * TAX_RATE) : 0;
-        const net          = gross - deductAbsent - laborIns - healthIns - tax;
+        const laborIns     = emp.has_insurance ? (ins?.labor_ins_employee  || 0) : 0;
+        const healthIns    = emp.has_insurance ? (ins?.health_ins_employee || 0) : 0;
+        const net          = gross - deductAbsent - laborIns - healthIns;
 
         return {
           id: ym, employee_id: emp.id,
@@ -113,7 +132,7 @@ export default async function handler(req, res) {
           base_salary: base, overtime_pay: 0,
           bonus: attBonus, allowance: gradeAllow + mgrAllow, extra_allowance: extraAllow,
           deduct_absence: deductAbsent, deduct_labor_ins: laborIns,
-          deduct_health_ins: healthIns, deduct_tax: tax,
+          deduct_health_ins: healthIns, deduct_tax: 0,
           work_hours: null, hourly_rate: null,
           employment_type: 'full_time',
           gross_salary: gross, net_salary: net,
@@ -122,11 +141,10 @@ export default async function handler(req, res) {
       }
     });
 
-    const { error } = await supabase.from('salary_records')
-      .upsert(records, { onConflict: 'employee_id,year,month', ignoreDuplicates: true });
+    const { error } = await supabase.from('salary_records').insert(records);
     if (error) return res.status(500).json({ error: error.message });
 
-    return res.status(200).json({ created: records.length, message: '批次產生完成（已存在者略過）' });
+    return res.status(200).json({ created: records.length, message: '批次產生完成' });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

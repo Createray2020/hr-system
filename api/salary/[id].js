@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   if (req.method === 'PUT') {
     const caller = await requireRole(req, res, ['hr', 'admin']);
     if (!caller) return;
-    const allowed = ['overtime_pay','bonus','allowance','deduct_absence',
+    const allowed = ['overtime_pay','bonus','allowance','extra_allowance','deduct_absence',
                      'deduct_labor_ins','deduct_health_ins','deduct_tax','note'];
     const update  = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });

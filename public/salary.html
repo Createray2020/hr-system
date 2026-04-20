@@ -175,6 +175,13 @@ function toast(msg, type='success') {
   if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
   const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
 }
+
+function shouldHaveAttendanceBonus(r) {
+  if (r.employment_type === 'part_time') return false;
+  if (['manager','ceo','chairman'].includes(r.emp_role)) return false;
+  if (r.emp_is_manager === true) return false;
+  return true;
+}
 let currentYear, currentMonth;
 let currentSalaryId = null;
 let salaryRows = [];
@@ -223,12 +230,13 @@ async function loadSalary() {
 
     tbody.innerHTML = rows.map(r => {
       const isPt = r.employment_type === 'part_time';
+      const bonusAmt = shouldHaveAttendanceBonus(r) ? (r.bonus || 0) : 0;
       return `<tr>
       <td><div class="emp-cell"><div class="avatar">${r.avatar||r.emp_name?.[0]||'?'}</div><div><div class="emp-name">${r.emp_name||'—'}</div><div class="emp-dept">${r.dept||''}${isPt?' <span style="font-size:10px;color:#FFA050;opacity:.8">兼職</span>':''}</div></div></div></td>
       <td style="font-family:'DM Mono',monospace">${isPt?`<span style="font-size:11px;color:var(--text-dim)">${r.work_hours||0}h × ${fmt(r.hourly_rate)}</span>`:fmt(r.base_salary)}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.bonus>0?'+'+fmt(r.bonus):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.overtime_pay>0?'+'+fmt(r.overtime_pay):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':bonusAmt>0?'+'+fmt(bonusAmt):'—'}</td>
       <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.allowance>0?'+'+fmt(r.allowance):'—'}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.extra_allowance>0?'+'+fmt(r.extra_allowance):'—'}</td>
       <td style="font-family:'DM Mono',monospace;color:var(--red)">${isPt?'—':'-'+fmt(totalDeduct(r))}</td>
       <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent2)">${fmt(r.net_salary)}</td>
       <td>${statusBadge(r.status)}</td>
@@ -275,9 +283,10 @@ function openSalaryModal(id) {
     document.getElementById('sal-pt-rate').textContent  = fmt(r.hourly_rate) + '/小時';
     document.getElementById('sal-pt-gross').textContent = fmt(r.gross_salary);
   } else {
+    const bonusAmt = shouldHaveAttendanceBonus(r) ? (r.bonus || 0) : 0;
     const totalDeduct = (r.deduct_absence||0)+(r.deduct_labor_ins||0)+(r.deduct_health_ins||0)+(r.deduct_tax||0);
     document.getElementById('sal-base').textContent        = fmt(r.base_salary);
-    document.getElementById('sal-bonus').textContent       = r.bonus > 0 ? fmt(r.bonus) : '—';
+    document.getElementById('sal-bonus').textContent       = bonusAmt > 0 ? fmt(bonusAmt) : '—';
     document.getElementById('sal-allow').textContent       = r.allowance > 0 ? fmt(r.allowance) : '—';
     document.getElementById('sal-extra-allow').textContent = r.extra_allowance > 0 ? fmt(r.extra_allowance) : '—';
     document.getElementById('sal-gross').textContent       = fmt(r.gross_salary);
@@ -289,8 +298,9 @@ function openSalaryModal(id) {
   }
 
   // Edit fields
+  const editBonusAmt = shouldHaveAttendanceBonus(r) ? (r.bonus || 0) : 0;
   document.getElementById('e-ot').value              = r.overtime_pay||0;
-  document.getElementById('e-bonus').value           = r.bonus||0;
+  document.getElementById('e-bonus').value           = editBonusAmt;
   document.getElementById('e-allow').value           = r.allowance||0;
   document.getElementById('e-extra-allow').value     = r.extra_allowance||0;
   document.getElementById('e-extra-allow-note').value= r.extra_allowance_note||'';
