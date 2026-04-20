@@ -10,7 +10,14 @@ const PWA = {
     try {
       const reg = await navigator.serviceWorker.register('/sw.js');
       PWA.registration = reg;
+      // 等 SW 真正就緒
+      await navigator.serviceWorker.ready;
+      PWA.registration = await navigator.serviceWorker.getRegistration('/sw.js') || reg;
       await PWA.checkNotificationPermission();
+      // 開發診斷（可移除）
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        setTimeout(() => PWA.diagnosePush(), 2000);
+      }
     } catch(e) {
       console.warn('SW registration failed:', e);
     }
@@ -62,24 +69,65 @@ const PWA = {
     }
   },
 
-  // 訂閱 Web Push
+  // 訂閱 Web Push（先檢查是否已存在，再儲存到 DB）
   async subscribePush() {
-    if (!PWA.registration) return;
+    if (!PWA.registration) {
+      console.warn('[PWA] SW 未就緒，無法訂閱 push');
+      return;
+    }
     try {
-      const sub = await PWA.registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: PWA.urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
+      // 先取得現有訂閱，避免重複創建
+      let sub = await PWA.registration.pushManager.getSubscription();
+      if (!sub) {
+        console.log('[PWA] 建立新 push 訂閱…');
+        sub = await PWA.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: PWA.urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+        console.log('[PWA] 訂閱建立成功:', sub.endpoint.slice(0, 50) + '…');
+      } else {
+        console.log('[PWA] 已有訂閱，重新儲存到 DB');
+      }
+
       const empId = window.currentUser?.id;
-      if (!empId) return;
-      await fetch('/api/push', {
+      if (!empId) {
+        console.warn('[PWA] currentUser 未載入，訂閱暫不儲存');
+        return;
+      }
+
+      const res = await fetch('/api/push', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ action: 'subscribe', employee_id: empId, subscription: sub }),
+        body:    JSON.stringify({ action: 'subscribe', employee_id: empId, subscription: sub.toJSON() }),
       });
+      const result = await res.json().catch(() => ({}));
+      console.log('[PWA] 訂閱儲存結果:', result.message || result);
     } catch(e) {
-      console.warn('Push subscription failed:', e);
+      if (e.name === 'NotAllowedError') {
+        console.warn('[PWA] 通知權限被拒絕');
+      } else {
+        console.warn('[PWA] push 訂閱失敗:', e.name, e.message);
+      }
     }
+  },
+
+  // 診斷推播狀態（開發用）
+  async diagnosePush() {
+    console.log('=== 推播診斷 ===');
+    console.log('Notification 支援:', 'Notification' in window);
+    console.log('通知權限:', Notification?.permission ?? '不支援');
+    console.log('SW 支援:', 'serviceWorker' in navigator);
+    console.log('PushManager 支援:', 'PushManager' in window);
+    if (!('serviceWorker' in navigator)) return;
+    const regs = await navigator.serviceWorker.getRegistrations();
+    console.log('已註冊 SW 數量:', regs.length);
+    regs.forEach((reg, i) => console.log(`  SW[${i}]`, reg.scope, reg.active?.state));
+    if (regs[0]) {
+      const sub = await regs[0].pushManager.getSubscription().catch(() => null);
+      console.log('Push 訂閱:', sub ? '已訂閱 → ' + sub.endpoint.slice(0, 60) + '…' : '未訂閱');
+    }
+    console.log('currentUser.id:', window.currentUser?.id ?? '未載入');
+    console.log('=================');
   },
 
   // 本地通知（不需要推播）

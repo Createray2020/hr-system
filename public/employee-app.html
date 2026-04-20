@@ -197,6 +197,12 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
         <div class="quick-sub">審批管理</div>
       </a>
     </div>
+
+    <!-- 開發測試區（上線後可移除）-->
+    <div style="padding:0 16px 8px;display:flex;gap:8px">
+      <button onclick="testLocalNotif()" style="flex:1;background:rgba(91,141,239,.12);border:0.5px solid rgba(91,141,239,.25);border-radius:10px;padding:10px;color:#7FBBFF;font-size:12px;cursor:pointer">🔔 測試本機通知</button>
+      <button onclick="PWA.diagnosePush()" style="flex:1;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.1);border-radius:10px;padding:10px;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer">🔍 推播診斷</button>
+    </div>
   </div>
 
   <!-- 底部導航 -->
@@ -419,6 +425,12 @@ async function loadHours() {
   } catch(e) { window.location.href = '/login.html'; return; }
 
   window.currentUser = currentUser;
+
+  // currentUser 已確認，補訂 push（若已授權但還沒存到 DB）
+  if (Notification?.permission === 'granted') {
+    setTimeout(() => PWA.subscribePush(), 1000);
+  }
+
   const hour = new Date().getHours();
   const gr = hour < 12 ? '早安' : hour < 18 ? '午安' : '晚安';
   document.querySelector('.greeting').textContent = `${gr}，歡迎回來 👋`;
@@ -565,6 +577,26 @@ function closeAnnDetailBtn() {
   const sheet = document.getElementById('ann-detail-sheet');
   sheet.style.transform = 'translateY(100%)';
   setTimeout(() => { document.getElementById('ann-detail-modal').style.display = 'none'; }, 300);
+}
+
+async function testLocalNotif() {
+  if (Notification.permission !== 'granted') {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('請先允許通知權限', 'warn'); return; }
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification('測試通知 🔔', {
+      body:  '如果你看到這個，代表通知功能正常！',
+      icon:  '/icons/icon-192.png',
+      badge: '/icons/icon-72.png',
+      data:  { url: '/announcements.html' },
+    });
+    toast('測試通知已發送', 'success');
+  } catch(e) {
+    toast('通知發送失敗：' + e.message, 'error');
+    console.error('[test]', e);
+  }
 }
 </script>
 

@@ -37,20 +37,31 @@ self.addEventListener('fetch', event => {
 
 // 推播通知接收
 self.addEventListener('push', event => {
-  if (!event.data) return;
-  const data = event.data.json();
+  console.log('[SW] 收到推播:', event.data?.text()?.slice(0, 80));
+  if (!event.data) { console.log('[SW] 推播無資料'); return; }
+
+  let data;
+  try {
+    data = event.data.json();
+  } catch(e) {
+    data = { title: 'CHUWA HR', body: event.data.text() };
+  }
+
   const options = {
-    body:     data.body || '',
-    icon:     '/icons/icon-192.png',
-    badge:    '/icons/icon-72.png',
-    vibrate:  [200, 100, 200],
-    data:     { url: data.url || '/dashboard.html' },
-    actions:  data.actions || [],
-    tag:      data.tag || 'chuwa-notification',
-    renotify: true,
+    body:               data.body || '',
+    icon:               '/icons/icon-192.png',
+    badge:              '/icons/icon-72.png',
+    vibrate:            [200, 100, 200],
+    data:               { url: data.url || '/dashboard.html' },
+    tag:                data.tag || 'chuwa-notification',
+    renotify:           true,
+    requireInteraction: false,
   };
+
   event.waitUntil(
     self.registration.showNotification(data.title || 'CHUWA HR', options)
+      .then(() => console.log('[SW] 通知已顯示:', data.title))
+      .catch(e => console.error('[SW] 通知顯示失敗:', e))
   );
 });
 
