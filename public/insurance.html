@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>勞健保管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+.ins-block{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.ins-block-title{font-size:10px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.ins-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;background:var(--surface2);border-radius:8px;padding:10px 14px;border:1px solid var(--border)}
+.ins-sum-item .is-label{font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.ins-sum-item .is-val{font-size:14px;font-weight:600;font-family:'DM Mono',monospace}
+.is-val.pos{color:var(--green)}.is-val.acc{color:var(--accent2)}
+.rec-tag{display:inline-block;font-size:10px;padding:1px 5px;background:rgba(91,141,239,.12);color:var(--accent2);border-radius:3px;margin-left:6px;font-family:'DM Mono',monospace;vertical-align:middle}
+.emp-modal-header{display:flex;align-items:center;gap:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:14px}
+.emp-modal-salary{margin-left:auto;text-align:right}
+.emp-modal-salary .sal-label{font-size:10px;color:var(--text-dim)}
+.emp-modal-salary .sal-val{font-size:18px;font-weight:700;font-family:'DM Mono',monospace;color:var(--accent2)}
+.no-ins-box{padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:14px}
+.badge-ins{background:rgba(74,222,128,.12);color:#4ADE80;border:1px solid rgba(74,222,128,.2)}
+.badge-no{background:rgba(122,133,160,.1);color:#7A85A0;border:1px solid rgba(122,133,160,.2)}
+.badge-unset{background:rgba(251,146,60,.1);color:#FB923C;border:1px solid rgba(251,146,60,.2)}
+.badge-pt{background:rgba(255,160,80,.1);color:#FFA050;border:1px solid rgba(255,160,80,.2)}
+.stat-card.purple{background:rgba(192,132,252,.06);border:1px solid rgba(192,132,252,.2)}
+.stat-card.purple .stat-value{color:#C084FC}
+</style>
+</head>
+<body data-page="insurance">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">勞健保管理</div>
+        <div class="page-sub">員工勞保、健保及勞退提撥管理 <span class="db-badge" id="db-status">● 連線中…</span></div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-ghost" onclick="batchApply()">⚡ 一鍵套用建議級距</button>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card green"><div class="stat-label">投保人數</div><div class="stat-value" id="st-insured">—</div><div class="stat-hint">位員工</div></div>
+      <div class="stat-card blue"><div class="stat-label">公司勞保</div><div class="stat-value" id="st-labor" style="font-size:18px">—</div><div class="stat-hint">本月負擔</div></div>
+      <div class="stat-card purple"><div class="stat-label">公司健保</div><div class="stat-value" id="st-health" style="font-size:18px">—</div><div class="stat-hint">本月負擔</div></div>
+      <div class="stat-card orange"><div class="stat-label">勞退提撥</div><div class="stat-value" id="st-pension" style="font-size:18px">—</div><div class="stat-hint">本月合計</div></div>
+    </div>
+
+    <div class="filter-bar">
+      <input type="text" id="search-input" placeholder="搜尋員工姓名…" oninput="renderTable()">
+      <select id="dept-filter" onchange="renderTable()"><option value="">全部部門</option></select>
+      <select id="ins-filter" onchange="renderTable()">
+        <option value="">全部狀態</option>
+        <option value="insured">已投保</option>
+        <option value="none">無投保</option>
+        <option value="unset">未設定</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>員工</th><th>月薪</th><th>投保狀態</th>
+          <th>勞保投保薪資</th><th>員工勞保費</th>
+          <th>健保投保金額</th><th>員工健保費</th>
+          <th>眷屬數</th><th>勞退提撥</th><th>操作</th>
+        </tr></thead>
+        <tbody id="ins-tbody"><tr class="loading-row"><td colspan="10">載入中…</td></tr></tbody>
+      </table>
+      <div id="ins-empty" class="empty-state" style="display:none">
+        <div class="icon">🏥</div><div>找不到符合條件的員工</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-bg" id="ins-modal">
+  <div class="modal">
+    <div class="modal-title">🏥 勞健保設定</div>
+
+    <div class="emp-modal-header">
+      <div class="avatar" id="m-avatar">?</div>
+      <div>
+        <div style="font-weight:600;font-size:15px" id="m-emp-name">—</div>
+        <div style="font-size:12px;color:var(--text-dim)" id="m-emp-info">—</div>
+      </div>
+      <div class="emp-modal-salary">
+        <div class="sal-label">月薪合計</div>
+        <div class="sal-val" id="m-salary">—</div>
+      </div>
+    </div>
+
+    <div class="no-ins-box">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="m-no-insurance" onchange="onNoInsChange()">
+        <span>此員工無勞健保投保（執行長 / 專案合作 / 特殊情況）</span>
+      </label>
+    </div>
+
+    <div id="m-ins-form">
+      <!-- 勞保 -->
+      <div class="ins-block">
+        <div class="ins-block-title">勞保設定</div>
+        <div class="form-row" style="margin-bottom:8px">
+          <label class="form-label">投保薪資級距</label>
+          <select class="form-select" id="m-labor-select" onchange="onLaborSelect()">
+            <option value="">— 選擇級距 —</option>
+          </select>
+        </div>
+        <div class="ins-summary">
+          <div class="ins-sum-item"><div class="is-label">員工自付</div><div class="is-val neg" id="m-labor-emp">—</div></div>
+          <div class="ins-sum-item"><div class="is-label">公司負擔</div><div class="is-val acc" id="m-labor-co">—</div></div>
+        </div>
+      </div>
+
+      <!-- 健保 -->
+      <div class="ins-block">
+        <div class="ins-block-title">健保設定</div>
+        <div class="form-grid" style="margin-bottom:8px">
+          <div class="form-row">
+            <label class="form-label">投保金額</label>
+            <select class="form-select" id="m-health-select" onchange="onHealthChange()">
+              <option value="">— 選擇級距 —</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">眷屬人數</label>
+            <select class="form-select" id="m-health-deps" onchange="onHealthChange()">
+              <option value="0">0 人</option><option value="1">1 人</option>
+              <option value="2">2 人</option><option value="3">3 人</option>
+              <option value="4">4 人</option><option value="5">5 人</option>
+              <option value="6">6 人</option>
+            </select>
+          </div>
+        </div>
+        <div class="ins-summary">
+          <div class="ins-sum-item"><div class="is-label">員工自付（含眷屬）</div><div class="is-val neg" id="m-health-emp">—</div></div>
+          <div class="ins-sum-item"><div class="is-label">公司負擔</div><div class="is-val acc" id="m-health-co">—</div></div>
+        </div>
+      </div>
+
+      <!-- 勞退 -->
+      <div class="ins-block">
+        <div class="ins-block-title">勞退設定（公司提撥）</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">提撥率 (%)</label>
+            <input type="number" class="form-input" id="m-pension-rate" min="0" max="20" step="0.5" value="6" oninput="onPensionChange()">
+          </div>
+          <div class="form-row">
+            <label class="form-label">每月提撥金額</label>
+            <div style="height:40px;display:flex;align-items:center;padding:0 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:'DM Mono',monospace;font-weight:600;color:var(--accent2)" id="m-pension-amount">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('ins-modal')">取消</button>
+      <button class="btn btn-primary" onclick="saveInsurance()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap=document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el=document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+const fmt  = n => '$' + Number(n||0).toLocaleString();
+const fmtN = n => Number(n||0).toLocaleString();
+
+let allEmployees  = [];
+let insMap        = {};  // employee_id → insurance_settings record
+let laborBrackets = [];
+let healthBrackets= [];
+let currentEmpId  = null;
+
+function calcSalary(emp) {
+  if (emp.employment_type === 'part_time') return null;
+  return (emp.base_salary||30000)+(emp.attendance_bonus||0)+
+         (emp.grade_allowance||0)+(emp.manager_allowance||0)+(emp.extra_allowance||0);
+}
+
+function recommendBracket(salary, brackets) {
+  if (!salary || !brackets.length) return null;
+  return brackets.find(b => salary >= b.monthly_wage_min && salary <= b.monthly_wage_max)
+    || brackets[brackets.length-1];
+}
+
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 600));
+  const badge = document.getElementById('db-status');
+  try {
+    await Promise.all([loadEmployees(), loadInsuranceData(), loadBrackets()]);
+    badge.textContent='● Supabase 已連線';
+    badge.style.cssText='background:rgba(74,222,128,.1);color:#4ADE80;border-color:rgba(74,222,128,.2)';
+  } catch(e) {
+    badge.textContent='● 連線失敗';
+    badge.style.cssText='background:rgba(248,113,113,.1);color:#F87171;border-color:rgba(248,113,113,.2)';
+    toast('載入失敗：'+e.message,'error');
+  }
+};
+
+async function loadEmployees() {
+  const data = await api('/api/employees');
+  allEmployees = data.filter(e => e.status === 'active');
+  // Populate dept filter
+  const depts = [...new Set(allEmployees.map(e=>e.dept).filter(Boolean))].sort();
+  document.getElementById('dept-filter').innerHTML =
+    '<option value="">全部部門</option>' + depts.map(d=>`<option value="${d}">${d}</option>`).join('');
+}
+
+async function loadInsuranceData() {
+  const data = await api('/api/insurance');
+  insMap = {};
+  (data||[]).forEach(s => { insMap[s.employee_id] = s; });
+  renderTable();
+  updateStats();
+}
+
+async function loadBrackets() {
+  const [lb, hb] = await Promise.all([
+    api('/api/insurance?brackets=labor'),
+    api('/api/insurance?brackets=health'),
+  ]);
+  laborBrackets  = lb || [];
+  healthBrackets = hb || [];
+  // Populate modal selects
+  const lSel = document.getElementById('m-labor-select');
+  lSel.innerHTML = '<option value="">— 選擇級距 —</option>' +
+    laborBrackets.map(b=>`<option value="${b.bracket_level}">${fmtN(b.insured_salary)}（員工${fmt(b.employee_premium)}/公司${fmt(b.company_premium)}）</option>`).join('');
+  const hSel = document.getElementById('m-health-select');
+  hSel.innerHTML = '<option value="">— 選擇級距 —</option>' +
+    healthBrackets.map(b=>`<option value="${b.bracket_level}">${fmtN(b.insured_salary)}（員工${fmt(b.employee_premium)}起/公司${fmt(b.company_premium)}）</option>`).join('');
+}
+
+function insStatus(emp) {
+  if (emp.employment_type === 'part_time') return 'part_time';
+  const ins = insMap[emp.id];
+  if (!ins) return 'unset';
+  if (ins.has_insurance === false || emp.has_insurance === false) return 'none';
+  return 'insured';
+}
+
+function statusBadge(status) {
+  const m = { insured:'已投保', none:'無投保', unset:'未設定', part_time:'時薪制' };
+  const c = { insured:'badge-ins', none:'badge-no', unset:'badge-unset', part_time:'badge-pt' };
+  return `<span class="badge ${c[status]||'badge-no'}" style="font-size:11px">${m[status]||status}</span>`;
+}
+
+function getFiltered() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const dept   = document.getElementById('dept-filter').value;
+  const isFil  = document.getElementById('ins-filter').value;
+  return allEmployees.filter(e => {
+    if (dept && e.dept !== dept) return false;
+    if (search && !(e.name||'').toLowerCase().includes(search)) return false;
+    if (isFil) {
+      const s = insStatus(e);
+      if (isFil === 'insured' && s !== 'insured') return false;
+      if (isFil === 'none'    && s !== 'none')    return false;
+      if (isFil === 'unset'   && s !== 'unset')   return false;
+    }
+    return true;
+  });
+}
+
+function renderTable() {
+  const rows  = getFiltered();
+  const tbody = document.getElementById('ins-tbody');
+  const empty = document.getElementById('ins-empty');
+  if (!rows.length) { tbody.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = rows.map(emp => {
+    const ins    = insMap[emp.id];
+    const salary = calcSalary(emp);
+    const status = insStatus(emp);
+    const isPt   = emp.employment_type === 'part_time';
+    const dim    = 'color:var(--text-dim);font-size:12px';
+    return `<tr>
+      <td><div class="emp-cell"><div class="avatar">${emp.avatar||emp.name?.[0]||'?'}</div>
+        <div><div class="emp-name">${emp.name}</div><div class="emp-dept">${emp.dept||''}</div></div></div></td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${isPt?'<span style="'+dim+'">時薪制</span>':salary?fmt(salary):'—'}</td>
+      <td>${statusBadge(status)}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${ins?.labor_ins_bracket?fmtN(ins.labor_ins_bracket):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px;color:var(--red)">${ins?.labor_ins_employee?fmt(ins.labor_ins_employee):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${ins?.health_ins_bracket?fmtN(ins.health_ins_bracket):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px;color:var(--red)">${ins?.health_ins_employee?fmt(ins.health_ins_employee):'—'}</td>
+      <td style="font-size:12px;text-align:center">${ins?.health_ins_dependents??'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px;color:var(--accent2)">${ins?.pension_company?fmt(ins.pension_company):'—'}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openModal('${emp.id}')">設定</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateStats() {
+  const active = allEmployees.filter(e => e.employment_type !== 'part_time');
+  const insured = active.filter(e => insStatus(e) === 'insured');
+  const laborTotal   = insured.reduce((s,e) => s+(insMap[e.id]?.labor_ins_company||0), 0);
+  const healthTotal  = insured.reduce((s,e) => s+(insMap[e.id]?.health_ins_company||0), 0);
+  const pensionTotal = insured.reduce((s,e) => s+(insMap[e.id]?.pension_company||0), 0);
+  document.getElementById('st-insured').textContent = insured.length;
+  document.getElementById('st-labor').textContent   = fmt(laborTotal);
+  document.getElementById('st-health').textContent  = fmt(healthTotal);
+  document.getElementById('st-pension').textContent = fmt(pensionTotal);
+}
+
+function openModal(empId) {
+  const emp = allEmployees.find(e => e.id === empId);
+  if (!emp) return;
+  currentEmpId = empId;
+
+  const ins    = insMap[empId];
+  const salary = calcSalary(emp);
+
+  document.getElementById('m-avatar').textContent    = emp.avatar || emp.name?.[0] || '?';
+  document.getElementById('m-emp-name').textContent  = emp.name;
+  document.getElementById('m-emp-info').textContent  = `${emp.dept} · ${emp.position}`;
+  document.getElementById('m-salary').textContent    = salary ? fmt(salary) : '時薪制';
+
+  const isPt = emp.employment_type === 'part_time';
+  const noIns = isPt || ins?.has_insurance === false || emp.has_insurance === false;
+  document.getElementById('m-no-insurance').checked = noIns;
+  document.getElementById('m-ins-form').style.opacity = noIns ? '0.4' : '1';
+  document.getElementById('m-ins-form').style.pointerEvents = noIns ? 'none' : '';
+
+  // Labor bracket
+  const recLabor = salary ? recommendBracket(salary, laborBrackets) : null;
+  const laborSel = document.getElementById('m-labor-select');
+  // Update option labels with recommended tag
+  Array.from(laborSel.options).forEach(o => {
+    const lvl = parseInt(o.value);
+    const b   = laborBrackets.find(x=>x.bracket_level===lvl);
+    if (b) {
+      const isRec = b.bracket_level === recLabor?.bracket_level;
+      o.textContent = `${fmtN(b.insured_salary)}（員工${fmt(b.employee_premium)}/公司${fmt(b.company_premium)}）${isRec?' ★ 建議':''}`;
+    }
+  });
+  if (ins?.labor_ins_bracket) {
+    const match = laborBrackets.find(b => b.insured_salary === ins.labor_ins_bracket);
+    laborSel.value = match?.bracket_level || '';
+  } else {
+    laborSel.value = recLabor?.bracket_level || '';
+  }
+  onLaborSelect(false);
+
+  // Health bracket
+  const recHealth = salary ? recommendBracket(salary, healthBrackets) : null;
+  const healthSel = document.getElementById('m-health-select');
+  Array.from(healthSel.options).forEach(o => {
+    const lvl = parseInt(o.value);
+    const b   = healthBrackets.find(x=>x.bracket_level===lvl);
+    if (b) {
+      const isRec = b.bracket_level === recHealth?.bracket_level;
+      o.textContent = `${fmtN(b.insured_salary)}（員工${fmt(b.employee_premium)}起/公司${fmt(b.company_premium)}）${isRec?' ★ 建議':''}`;
+    }
+  });
+  if (ins?.health_ins_bracket) {
+    const match = healthBrackets.find(b => b.insured_salary === ins.health_ins_bracket);
+    healthSel.value = match?.bracket_level || '';
+  } else {
+    healthSel.value = recHealth?.bracket_level || '';
+  }
+  document.getElementById('m-health-deps').value = ins?.health_ins_dependents ?? 0;
+  onHealthChange(false);
+
+  // Pension
+  document.getElementById('m-pension-rate').value = ins?.pension_rate ?? 6;
+  onPensionChange();
+
+  document.getElementById('ins-modal').classList.add('open');
+}
+
+function onNoInsChange() {
+  const noIns = document.getElementById('m-no-insurance').checked;
+  document.getElementById('m-ins-form').style.opacity = noIns ? '0.4' : '1';
+  document.getElementById('m-ins-form').style.pointerEvents = noIns ? 'none' : '';
+}
+
+function onLaborSelect(updateOnly=true) {
+  const lvl = parseInt(document.getElementById('m-labor-select').value);
+  const b = laborBrackets.find(x => x.bracket_level === lvl);
+  document.getElementById('m-labor-emp').textContent = b ? fmt(b.employee_premium) : '—';
+  document.getElementById('m-labor-co').textContent  = b ? fmt(b.company_premium)  : '—';
+}
+
+function onHealthChange(updateOnly=true) {
+  const lvl  = parseInt(document.getElementById('m-health-select').value);
+  const deps = parseInt(document.getElementById('m-health-deps').value) || 0;
+  const b    = healthBrackets.find(x => x.bracket_level === lvl);
+  if (b) {
+    const empTotal = (b.employee_premium || 0) + deps * (b.per_dependent || 0);
+    document.getElementById('m-health-emp').textContent = fmt(empTotal);
+    document.getElementById('m-health-co').textContent  = fmt(b.company_premium);
+  } else {
+    document.getElementById('m-health-emp').textContent = '—';
+    document.getElementById('m-health-co').textContent  = '—';
+  }
+}
+
+function onPensionChange() {
+  const emp = allEmployees.find(e => e.id === currentEmpId);
+  const salary = emp ? calcSalary(emp) : 0;
+  const rate   = parseFloat(document.getElementById('m-pension-rate').value) || 0;
+  const amount = salary ? Math.round(salary * rate / 100) : 0;
+  document.getElementById('m-pension-amount').textContent = amount ? fmt(amount) : '—';
+}
+
+async function saveInsurance() {
+  const emp = allEmployees.find(e => e.id === currentEmpId);
+  if (!emp) return;
+
+  const noIns     = document.getElementById('m-no-insurance').checked;
+  const laborLvl  = parseInt(document.getElementById('m-labor-select').value);
+  const healthLvl = parseInt(document.getElementById('m-health-select').value);
+  const deps      = parseInt(document.getElementById('m-health-deps').value) || 0;
+  const pRate     = parseFloat(document.getElementById('m-pension-rate').value) || 6;
+  const salary    = calcSalary(emp) || 0;
+
+  const lb = laborBrackets.find(b => b.bracket_level === laborLvl);
+  const hb = healthBrackets.find(b => b.bracket_level === healthLvl);
+  const healthEmpTotal = hb ? (hb.employee_premium||0) + deps*(hb.per_dependent||0) : 0;
+  const pension = Math.round(salary * pRate / 100);
+
+  const payload = {
+    employee_id:        currentEmpId,
+    has_insurance:      !noIns,
+    labor_ins_bracket:  lb?.insured_salary  || 0,
+    labor_ins_employee: lb?.employee_premium|| 0,
+    labor_ins_company:  lb?.company_premium || 0,
+    health_ins_bracket: hb?.insured_salary  || 0,
+    health_ins_employee:healthEmpTotal,
+    health_ins_company: hb?.company_premium || 0,
+    health_ins_dependents: deps,
+    pension_rate:       pRate,
+    pension_company:    pension,
+  };
+
+  try {
+    await api('/api/insurance', { method:'POST', body: JSON.stringify(payload) });
+    insMap[currentEmpId] = payload;
+    closeModal('ins-modal');
+    renderTable();
+    updateStats();
+    toast('✅ 勞健保設定已儲存', 'success');
+  } catch(e) { toast('儲存失敗：'+e.message, 'error'); }
+}
+
+async function batchApply() {
+  if (!laborBrackets.length || !healthBrackets.length) {
+    toast('級距表尚未載入，請稍候再試', 'warn'); return;
+  }
+  const targets = allEmployees.filter(e =>
+    e.employment_type !== 'part_time' && e.has_insurance !== false
+  );
+  if (!targets.length) { toast('沒有可套用的員工', 'warn'); return; }
+  if (!confirm(`確定要依月薪批次套用建議級距給 ${targets.length} 位員工嗎？`)) return;
+
+  let ok = 0, fail = 0;
+  for (const emp of targets) {
+    const salary = calcSalary(emp) || 30000;
+    const lb  = recommendBracket(salary, laborBrackets);
+    const hb  = recommendBracket(salary, healthBrackets);
+    const deps= insMap[emp.id]?.health_ins_dependents || 0;
+    const healthEmpTotal = hb ? (hb.employee_premium||0) + deps*(hb.per_dependent||0) : 0;
+    const pension = Math.round(salary * 6 / 100);
+    const payload = {
+      employee_id: emp.id, has_insurance: true,
+      labor_ins_bracket: lb?.insured_salary||0, labor_ins_employee: lb?.employee_premium||0, labor_ins_company: lb?.company_premium||0,
+      health_ins_bracket: hb?.insured_salary||0, health_ins_employee: healthEmpTotal, health_ins_company: hb?.company_premium||0,
+      health_ins_dependents: deps, pension_rate: 6, pension_company: pension,
+    };
+    try {
+      await api('/api/insurance', { method:'POST', body: JSON.stringify(payload) });
+      insMap[emp.id] = payload; ok++;
+    } catch(e) { fail++; }
+  }
+  renderTable();
+  updateStats();
+  toast(`✅ 已套用 ${ok} 位員工建議級距${fail?`，失敗 ${fail} 筆`:''}`, fail?'warn':'success');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+<script src="/js/layout.js"></script>
+</body>
+</html>

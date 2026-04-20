@@ -196,6 +196,9 @@
           <div class="radio-row">
             <label><input type="radio" name="f-emp-type" id="f-type-full" value="full_time" checked onchange="onEmpTypeOrHireChange()"> 正職（full_time）</label>
             <label><input type="radio" name="f-emp-type" id="f-type-part" value="part_time" onchange="onEmpTypeOrHireChange()"> 兼職（part_time）</label>
+            <label style="margin-left:8px;padding-left:8px;border-left:1px solid var(--border)">
+              <input type="checkbox" id="f-no-insurance"> 無勞健保投保
+            </label>
           </div>
         </div>
         <div class="form-row"><label class="form-label">部門 *</label>
@@ -454,6 +457,7 @@ function renderCards() {
           <div class="emp-card-name">${e.name}</div>
           <div class="emp-card-pos">${e.dept} · ${e.position}
             <span class="emp-type-badge ${e.employment_type==='part_time'?'emp-type-part':'emp-type-full'}" style="margin-left:4px">${e.employment_type==='part_time'?'兼職':'正職'}</span>
+            ${e.has_insurance===false?'<span class="emp-type-badge" style="margin-left:2px;background:rgba(122,133,160,.1);color:#7A85A0;border:1px solid rgba(122,133,160,.2)">無投保</span>':''}
           </div>
         </div>
       </div>
@@ -484,6 +488,7 @@ function renderTable() {
       <td>
         <span class="badge badge-${e.status}"><span class="badge-dot badge-dot-${e.status}"></span>${e.status==='active'?'在職':e.status==='resigned'?'已離職':'暫停'}</span>
         <span class="emp-type-badge ${e.employment_type==='part_time'?'emp-type-part':'emp-type-full'}" style="margin-left:4px">${e.employment_type==='part_time'?'兼職':'正職'}</span>
+        ${e.has_insurance===false?'<span class="emp-type-badge" style="margin-left:2px;background:rgba(122,133,160,.1);color:#7A85A0;border:1px solid rgba(122,133,160,.2)">無投保</span>':''}
       </td>
       <td><div class="action-btns">
         <button class="btn btn-ghost btn-sm" onclick="openEditModal('${e.id}')">編輯</button>
@@ -642,7 +647,8 @@ function openAddModal() {
   if (deptSel.options.length > 0) deptSel.selectedIndex = 0;
   document.getElementById('f-role').value   = 'employee';
   document.getElementById('f-status').value = 'active';
-  document.getElementById('f-type-full').checked = true;
+  document.getElementById('f-type-full').checked    = true;
+  document.getElementById('f-no-insurance').checked = false;
   document.getElementById('f-hire').value   = new Date().toISOString().split('T')[0];
   onEmpTypeOrHireChange(); // auto-generate emp_no from today's date
   document.getElementById('f-grade').value       = '';
@@ -667,8 +673,9 @@ function openEditModal(id) {
   document.getElementById('f-emp-no').value      = e.emp_no      || '';
   // Employment type radios
   const isPart = e.employment_type === 'part_time';
-  document.getElementById('f-type-full').checked = !isPart;
-  document.getElementById('f-type-part').checked =  isPart;
+  document.getElementById('f-type-full').checked    = !isPart;
+  document.getElementById('f-type-part').checked    =  isPart;
+  document.getElementById('f-no-insurance').checked = (e.has_insurance === false);
   document.getElementById('f-email').value       = e.email       || '';
   document.getElementById('f-phone').value       = e.phone       || '';
   document.getElementById('f-id-num').value      = e.id_number   || '';
@@ -740,6 +747,7 @@ async function saveEmployee() {
     })(),
     extra_allowance:      parseFloat(document.getElementById('f-extra-allow').value) || 0,
     extra_allowance_note: document.getElementById('f-extra-allow-note').value.trim() || null,
+    has_insurance:        !document.getElementById('f-no-insurance').checked,
     hire_date:    document.getElementById('f-hire').value          || null,
     resign_date:  document.getElementById('f-resign-date').value   || null,
     status:       document.getElementById('f-status').value,

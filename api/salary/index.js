@@ -62,6 +62,12 @@ export default async function handler(req, res) {
       absentMap[a.employee_id]    = (absentMap[a.employee_id]    || 0) + (a.status === 'absent' ? 1 : 0);
     });
 
+    // Fetch insurance settings (use DB values instead of calculated rates)
+    const { data: insData } = await supabase
+      .from('insurance_settings').select('employee_id, has_insurance, labor_ins_employee, health_ins_employee');
+    const insMap = {};
+    (insData || []).forEach(i => { insMap[i.employee_id] = i; });
+
     const records = emps.map(emp => {
       const isPart = emp.employment_type === 'part_time';
       const ym     = `S${emp.id}${year}${String(month).padStart(2,'0')}`;
@@ -88,11 +94,11 @@ export default async function handler(req, res) {
         const extraAllow = parseFloat(emp.extra_allowance)   || 0;
         const gross      = base + attBonus + gradeAllow + mgrAllow + extraAllow;
 
+        const ins = insMap[emp.id];
         const absentDays   = absentMap[emp.id] || 0;
         const deductAbsent = Math.round((base / 30) * absentDays);
-        const insBase      = Math.min(base, LABOR_INS_CAP);
-        const laborIns     = Math.round(insBase * LABOR_INS_RATE);
-        const healthIns    = Math.round(insBase * HEALTH_INS_RATE * 0.3);
+        const laborIns     = (ins && ins.has_insurance !== false) ? (ins.labor_ins_employee  || 0) : 0;
+        const healthIns    = (ins && ins.has_insurance !== false) ? (ins.health_ins_employee || 0) : 0;
         const tax          = gross > 88501 ? Math.round((gross - 88501) * TAX_RATE) : 0;
         const net          = gross - deductAbsent - laborIns - healthIns - tax;
 

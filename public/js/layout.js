@@ -63,7 +63,8 @@
     {
       title: '薪資管理',
       items: [
-        { page:'salary', icon:'💰', label:'薪資管理', href:'/salary.html' },
+        { page:'salary',    icon:'💰', label:'薪資管理', href:'/salary.html' },
+        { page:'insurance', icon:'🏥', label:'勞健保',   href:'/insurance.html' },
       ]
     },
   ];

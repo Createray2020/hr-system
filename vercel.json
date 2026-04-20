@@ -12,6 +12,7 @@
     { "source": "/calendar",             "destination": "/public/calendar.html" },
     { "source": "/salary",               "destination": "/public/salary.html" },
     { "source": "/api/departments",        "destination": "/api/departments" },
+    { "source": "/api/insurance",         "destination": "/api/salary-grade?_resource=insurance" },
     { "source": "/api/salary-grade",      "destination": "/api/salary-grade" },
     { "source": "/api/schedules",         "destination": "/api/schedules/index" },
     { "source": "/api/shift-types",       "destination": "/api/schedules/index?_resource=shift_types" },
