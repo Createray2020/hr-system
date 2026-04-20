@@ -70,7 +70,8 @@
     {
       title: '行政管理',
       items: [
-        { page:'approvals', icon:'✅', label:'審批管理', href:'/approvals.html' },
+        { page:'approvals',      icon:'✅', label:'審批管理',  href:'/approvals.html' },
+        { page:'notifications',  icon:'🔔', label:'通知中心',  href:'/notifications.html' },
       ]
     },
   ];
@@ -91,6 +92,7 @@
       ${g.items.map(n => `
         <a class="nav-item ${page === n.page ? 'active' : ''}" href="${n.href}">
           <span class="nav-icon">${n.icon}</span> ${n.label}
+          ${n.page === 'notifications' ? `<span id="notif-badge" style="display:none;margin-left:auto;background:#F87171;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px"></span>` : ''}
         </a>`).join('')}
     </div>`).join('');
 
@@ -109,4 +111,16 @@
         <div class="role">${userRole}</div>
       </div>
     </div>`;
+
+  // 載入未讀通知數量
+  if (currentUser?.id) {
+    try {
+      const { data: unread, error } = await _sb
+        .from('notifications')
+        .select('id')
+        .eq('employee_id', currentUser.id)
+        .eq('is_read', false);
+      if (!error) window.PWA?.updateBadge(unread?.length || 0);
+    } catch(_) {}
+  }
 })();

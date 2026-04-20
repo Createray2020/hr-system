@@ -1,36 +1,128 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/api/leaves/:id/review", "destination": "/api/leaves?id=:id" },
-    { "source": "/api/salary/batch",      "destination": "/api/salary/index?_action=batch" },
-    { "source": "/",                      "destination": "/public/login.html" },
-    { "source": "/dashboard",            "destination": "/public/dashboard.html" },
-    { "source": "/leave",                "destination": "/public/leave.html" },
-    { "source": "/attendance",           "destination": "/public/attendance.html" },
-    { "source": "/employees",             "destination": "/public/employees.html" },
-    { "source": "/staff-table",          "destination": "/public/staff-table.html" },
-    { "source": "/calendar",             "destination": "/public/calendar.html" },
-    { "source": "/salary",               "destination": "/public/salary.html" },
-    { "source": "/api/departments",        "destination": "/api/departments" },
-    { "source": "/api/insurance",         "destination": "/api/salary-grade?_resource=insurance" },
-    { "source": "/api/salary-grade",      "destination": "/api/salary-grade" },
-    { "source": "/api/schedules",         "destination": "/api/schedules/index" },
-    { "source": "/api/shift-types",       "destination": "/api/schedules/index?_resource=shift_types" },
-    { "source": "/api/auth", "destination": "/api/auth" },
-    { "source": "/api/attendance/today",  "destination": "/api/attendance/index?_action=today" },
-    { "source": "/api/approvals",          "destination": "/api/approvals" },
-    { "source": "/api/attendance/manual", "destination": "/api/attendance/index" },
-    { "source": "/api/attendance/punch",  "destination": "/api/attendance/index?_action=punch" },
-    { "source": "/api/calendar",          "destination": "/api/calendar/index" },
-    { "source": "/((?!api/).*)",         "destination": "/public/$1" }
+    {
+      "source": "/api/leaves/:id/review",
+      "destination": "/api/leaves?id=:id"
+    },
+    {
+      "source": "/api/salary/batch",
+      "destination": "/api/salary/index?_action=batch"
+    },
+    {
+      "source": "/api/departments",
+      "destination": "/api/employees?_resource=departments"
+    },
+    {
+      "source": "/api/push",
+      "destination": "/api/push"
+    },
+    {
+      "source": "/",
+      "destination": "/public/login.html"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/public/dashboard.html"
+    },
+    {
+      "source": "/leave",
+      "destination": "/public/leave.html"
+    },
+    {
+      "source": "/attendance",
+      "destination": "/public/attendance.html"
+    },
+    {
+      "source": "/employees",
+      "destination": "/public/employees.html"
+    },
+    {
+      "source": "/staff-table",
+      "destination": "/public/staff-table.html"
+    },
+    {
+      "source": "/calendar",
+      "destination": "/public/calendar.html"
+    },
+    {
+      "source": "/salary",
+      "destination": "/public/salary.html"
+    },
+    {
+      "source": "/api/insurance",
+      "destination": "/api/salary-grade?_resource=insurance"
+    },
+    {
+      "source": "/api/salary-grade",
+      "destination": "/api/salary-grade"
+    },
+    {
+      "source": "/api/schedules",
+      "destination": "/api/schedules/index"
+    },
+    {
+      "source": "/api/shift-types",
+      "destination": "/api/schedules/index?_resource=shift_types"
+    },
+    {
+      "source": "/api/auth",
+      "destination": "/api/auth"
+    },
+    {
+      "source": "/api/attendance/today",
+      "destination": "/api/attendance/index?_action=today"
+    },
+    {
+      "source": "/api/approvals",
+      "destination": "/api/approvals"
+    },
+    {
+      "source": "/api/attendance/manual",
+      "destination": "/api/attendance/index"
+    },
+    {
+      "source": "/api/attendance/punch",
+      "destination": "/api/attendance/index?_action=punch"
+    },
+    {
+      "source": "/api/calendar",
+      "destination": "/api/calendar/index"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/public/$1"
+    }
   ],
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin",  "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET,POST,PUT,DELETE,OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type,Authorization"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
       ]
     }
   ]

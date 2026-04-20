@@ -6,6 +6,7 @@
 // GET  /api/approvals                                          → 全部申請
 // POST /api/approvals { action: create|approve|reject|cancel|update_config }
 import { supabase } from '../lib/supabase.js';
+import { sendPushToEmployees, sendPushToRoles } from '../lib/push.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -139,6 +140,14 @@ export default async function handler(req, res) {
           completed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         }).eq('id', request_id);
+
+        // 通知申請人：審批完成
+        sendPushToEmployees([request.applicant_id], {
+          title: '✅ 申請已全部通過',
+          body:  `你的「${request.title}」已完成所有審批流程`,
+          url:   '/approvals.html',
+          tag:   'approval-' + request_id,
+        }).catch(() => {});
       } else {
         await supabase.from('approval_requests').update({
           status: 'in_progress',
@@ -148,6 +157,30 @@ export default async function handler(req, res) {
         await supabase.from('approval_steps')
           .update({ status: 'in_progress' })
           .eq('request_id', request_id).eq('step_number', nextStep);
+
+        // 通知申請人：本步驟通過，等待下一步
+        sendPushToEmployees([request.applicant_id], {
+          title: '✅ 審批步驟通過',
+          body:  `你的「${request.title}」第 ${step_number} 步已通過，進入下一審批`,
+          url:   '/approvals.html',
+          tag:   'approval-' + request_id,
+        }).catch(() => {});
+
+        // 通知下一步審批人
+        const { data: nextStepData } = await supabase
+          .from('approval_steps')
+          .select('approver_role')
+          .eq('request_id', request_id)
+          .eq('step_number', nextStep)
+          .single();
+        if (nextStepData?.approver_role) {
+          sendPushToRoles([nextStepData.approver_role], {
+            title: '📋 有新的審批待辦',
+            body:  `「${request.title}」等待你審批（第 ${nextStep} 步）`,
+            url:   '/approvals.html',
+            tag:   'pending-' + request_id,
+          }).catch(() => {});
+        }
       }
 
       return res.status(200).json({ message: '已審批通過' });
@@ -168,6 +201,18 @@ export default async function handler(req, res) {
         status: 'rejected',
         updated_at: new Date().toISOString(),
       }).eq('id', request_id);
+
+      // 通知申請人：被退回
+      const { data: rejReq } = await supabase
+        .from('approval_requests').select('applicant_id, title').eq('id', request_id).single();
+      if (rejReq) {
+        sendPushToEmployees([rejReq.applicant_id], {
+          title: '❌ 申請已被退回',
+          body:  `你的「${rejReq.title}」申請已被退回，請確認原因`,
+          url:   '/approvals.html',
+          tag:   'approval-' + request_id,
+        }).catch(() => {});
+      }
 
       return res.status(200).json({ message: '已退回' });
     }

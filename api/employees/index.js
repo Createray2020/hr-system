@@ -1,14 +1,99 @@
 // api/employees/index.js — GET all / POST new
+// Also handles: GET|POST|PUT|DELETE /api/departments (via ?_resource=departments)
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../lib/supabase.js';
 import { requireRoleOrPass } from '../../lib/auth.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const DEPT_WRITE_ROLES = ['hr', 'ceo', 'chairman', 'manager', 'admin'];
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // GET — 不需要權限驗證
+  // ── 部門管理（合併自 api/departments.js） ─────────────────────────────────
+  if (req.query._resource === 'departments') {
+    if (req.method === 'GET') {
+      try {
+        const { data: depts, error } = await supabase
+          .from('departments').select('*').order('name');
+        if (error) return res.status(500).json({ error: error.message });
+
+        const { data: emps } = await supabase
+          .from('employees').select('dept').eq('status', 'active');
+        const countMap = {};
+        (emps || []).forEach(e => { countMap[e.dept] = (countMap[e.dept] || 0) + 1; });
+
+        const managerIds = depts.map(d => d.manager_id).filter(Boolean);
+        let managerMap = {};
+        if (managerIds.length) {
+          const { data: mgrs } = await supabase
+            .from('employees').select('id, name').in('id', managerIds);
+          (mgrs || []).forEach(m => { managerMap[m.id] = m.name; });
+        }
+
+        return res.status(200).json(depts.map(d => ({
+          ...d,
+          emp_count:    countMap[d.name] || 0,
+          manager_name: managerMap[d.manager_id] || null,
+        })));
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
+    if (req.method === 'POST') {
+      const caller = await requireRoleOrPass(req, res, DEPT_WRITE_ROLES);
+      if (!caller) return;
+      const { name, description, color, manager_id } = req.body;
+      if (!name) return res.status(400).json({ error: '缺少部門名稱' });
+      const id = 'D' + Date.now();
+      const { error } = await supabase.from('departments').insert([{
+        id, name,
+        description: description || '',
+        color:       color || '#5B8DEF',
+        manager_id:  manager_id || null,
+      }]);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(201).json({ id, message: '部門已建立' });
+    }
+
+    if (req.method === 'PUT') {
+      const caller = await requireRoleOrPass(req, res, DEPT_WRITE_ROLES);
+      if (!caller) return;
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: '缺少 id' });
+      const allowed = ['name', 'description', 'color', 'manager_id'];
+      const update = {};
+      allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
+      const { error } = await supabase.from('departments').update(update).eq('id', id);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ message: '已更新' });
+    }
+
+    if (req.method === 'DELETE') {
+      const caller = await requireRoleOrPass(req, res, DEPT_WRITE_ROLES);
+      if (!caller) return;
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: '缺少 id' });
+
+      const { data: dept } = await supabase
+        .from('departments').select('name').eq('id', id).single();
+      if (!dept) return res.status(404).json({ error: '找不到部門' });
+
+      const { data: active } = await supabase
+        .from('employees').select('id').eq('dept', dept.name).eq('status', 'active').limit(1);
+      if (active && active.length > 0)
+        return res.status(409).json({ error: '該部門仍有在職員工，無法刪除' });
+
+      const { error } = await supabase.from('departments').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ message: '已刪除' });
+    }
+
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // ── 員工列表 GET ─────────────────────────────────────────────────────────
   if (req.method === 'GET') {
     const { status, dept, search } = req.query;
     let q = supabase.from('employees').select('*').order('name');
@@ -20,13 +105,13 @@ export default async function handler(req, res) {
     return res.status(200).json(data);
   }
 
+  // ── 新增員工 POST ────────────────────────────────────────────────────────
   if (req.method === 'POST') {
     const caller = await requireRoleOrPass(req, res, ['hr', 'ceo', 'admin']);
     if (!caller) return;
     const body = { ...req.body };
     const id = 'E' + Date.now();
 
-    // ── 自動產生員工編號（若未傳入）格式：01YYMMDD / 02YYMMDD，重複加 A/B/C ──
     if (!body.emp_no && body.hire_date) {
       const empType = body.employment_type === 'part_time' ? '02' : '01';
       const d  = new Date(body.hire_date);
@@ -35,11 +120,8 @@ export default async function handler(req, res) {
       const dd = String(d.getDate()).padStart(2, '0');
       const base = empType + yy + mm + dd;
 
-      // 查詢是否已有相同前綴的編號
       const { data: existing } = await supabase
-        .from('employees')
-        .select('emp_no')
-        .like('emp_no', base + '%');
+        .from('employees').select('emp_no').like('emp_no', base + '%');
       const taken = new Set((existing || []).map(e => e.emp_no));
 
       if (!taken.has(base)) {
@@ -47,7 +129,7 @@ export default async function handler(req, res) {
       } else {
         let suffix = '';
         for (let i = 0; i < 26; i++) {
-          const candidate = base + String.fromCharCode(65 + i); // A, B, C...
+          const candidate = base + String.fromCharCode(65 + i);
           if (!taken.has(candidate)) { suffix = String.fromCharCode(65 + i); break; }
         }
         body.emp_no = base + suffix;
@@ -57,7 +139,6 @@ export default async function handler(req, res) {
     const { error } = await supabase.from('employees').insert([{ id, ...body }]);
     if (error) return res.status(500).json({ error: error.message });
 
-    // ── 自動建立 Supabase Auth 帳號 ──
     let authEmail = null;
     if (SUPABASE_SERVICE_KEY) {
       try {

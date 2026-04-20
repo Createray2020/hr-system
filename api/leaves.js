@@ -5,6 +5,7 @@
 // PUT  /api/leaves?id=XXX       → 審核假單（manager/hr/admin）
 import { supabase } from '../lib/supabase.js';
 import { requireRole } from '../lib/auth.js';
+import { sendPushToEmployees } from '../lib/push.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -90,10 +91,27 @@ export default async function handler(req, res) {
     const { status, handler_note } = req.body;
     if (!['approved', 'rejected'].includes(status))
       return res.status(400).json({ error: '無效的 status' });
+    // 取得假單資訊以發送通知
+    const { data: leave } = await supabase
+      .from('leave_requests').select('employee_id, leave_type').eq('id', id).single();
+
     const { error } = await supabase.from('leave_requests')
       .update({ status, handler_note: handler_note || '', handled_at: new Date().toISOString() })
       .eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
+
+    // 推播通知申請人
+    if (leave?.employee_id) {
+      const LEAVE_TYPES = { annual:'特休假', sick:'病假', personal:'事假', maternity:'產假', funeral:'喪假', marriage:'婚假' };
+      const typeName = LEAVE_TYPES[leave.leave_type] || leave.leave_type;
+      sendPushToEmployees([leave.employee_id], {
+        title: status === 'approved' ? '✅ 假單已核准' : '❌ 假單已退回',
+        body:  `你的${typeName}申請${status === 'approved' ? '已核准' : '已被退回'}`,
+        url:   '/employee-leave.html',
+        tag:   'leave-' + id,
+      }).catch(() => {});
+    }
+
     return res.status(200).json({ message: '審核完成' });
   }
 

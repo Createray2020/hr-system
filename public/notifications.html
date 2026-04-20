@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>通知中心 — CHUWA HR</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .notif-list{display:flex;flex-direction:column;gap:8px}
+  .notif-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;align-items:flex-start;gap:12px;cursor:pointer;transition:all .2s}
+  .notif-item:hover{border-color:var(--accent);background:rgba(91,141,239,.05)}
+  .notif-item.unread{background:rgba(91,141,239,.08);border-color:rgba(91,141,239,.25)}
+  .notif-item.unread::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:5px}
+  .notif-item:not(.unread)::before{content:'';width:7px;height:7px;flex-shrink:0;margin-top:5px}
+  .notif-icon{font-size:22px;flex-shrink:0;line-height:1}
+  .notif-body{flex:1;min-width:0}
+  .notif-title{font-weight:600;font-size:13.5px;margin-bottom:3px}
+  .notif-text{font-size:12px;color:var(--text-dim);line-height:1.5}
+  .notif-time{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;white-space:nowrap;margin-top:2px}
+  .notif-item.read .notif-title{color:var(--text-dim);font-weight:500}
+  .type-icons{approval:'📋',leave:'🗓️',salary:'💰',system:'⚙️',default:'🔔'}
+</style>
+</head>
+<body data-page="notifications">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">通知中心</div>
+        <div class="page-sub">系統推播與待辦通知</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-ghost" onclick="markAllRead()">全部標為已讀</button>
+      </div>
+    </div>
+
+    <div id="notif-wrap">
+      <div class="loading-row"><div style="text-align:center;padding:40px;color:var(--text-dim)">載入中…</div></div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+const TYPE_ICON = { approval:'📋', leave:'🗓️', salary:'💰', system:'⚙️' };
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000)   return '剛剛';
+  if (diff < 3600000) return Math.floor(diff/60000) + ' 分鐘前';
+  if (diff < 86400000) return Math.floor(diff/3600000) + ' 小時前';
+  if (diff < 604800000) return Math.floor(diff/86400000) + ' 天前';
+  return d.toLocaleDateString('zh-TW');
+}
+
+let notifs = [];
+
+async function loadNotifications() {
+  const empId = window.currentUser?.id;
+  if (!empId) return;
+  const _sb = window._supabase;
+  const { data, error } = await _sb.from('notifications')
+    .select('*')
+    .eq('employee_id', empId)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error) { toast('載入失敗','error'); return; }
+  notifs = data || [];
+  renderNotifications();
+  window.PWA?.updateBadge(notifs.filter(n => !n.is_read).length);
+}
+
+function renderNotifications() {
+  const wrap = document.getElementById('notif-wrap');
+  if (!notifs.length) {
+    wrap.innerHTML = '<div class="empty-state"><div class="icon">🔔</div><div>目前沒有通知</div></div>';
+    return;
+  }
+
+  wrap.innerHTML = `<div class="notif-list">${notifs.map(n => `
+    <div class="notif-item ${n.is_read ? 'read' : 'unread'}" onclick="openNotif('${n.id}','${n.url||'/dashboard.html'}')">
+      <div class="notif-icon">${TYPE_ICON[n.type] || '🔔'}</div>
+      <div class="notif-body">
+        <div class="notif-title">${n.title}</div>
+        ${n.body ? `<div class="notif-text">${n.body}</div>` : ''}
+        <div class="notif-time">${fmtTime(n.created_at)}</div>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+async function openNotif(id, url) {
+  const _sb = window._supabase;
+  await _sb.from('notifications').update({ is_read: true }).eq('id', id);
+  const n = notifs.find(x => x.id === id);
+  if (n) n.is_read = true;
+  renderNotifications();
+  window.PWA?.updateBadge(notifs.filter(x => !x.is_read).length);
+  if (url && url !== '/notifications.html') window.location.href = url;
+}
+
+async function markAllRead() {
+  const empId = window.currentUser?.id;
+  if (!empId) return;
+  const _sb = window._supabase;
+  await _sb.from('notifications').update({ is_read: true }).eq('employee_id', empId).eq('is_read', false);
+  notifs.forEach(n => n.is_read = true);
+  renderNotifications();
+  window.PWA?.updateBadge(0);
+  toast('✅ 全部已標為已讀');
+}
+
+window.addEventListener('load', async () => {
+  await new Promise(r => setTimeout(r, 600));
+  await loadNotifications();
+});
+</script>
+<script src="/js/pwa.js"></script>
+<script src="/js/layout.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>
