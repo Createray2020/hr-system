@@ -77,6 +77,11 @@
   th.sorted-asc .col-sort,th.sorted-desc .col-sort{color:var(--accent2)}
   .sheet-footer{padding:10px 0 0;display:flex;align-items:center;gap:12px}
   .save-hint{font-size:11px;color:var(--text-dim)}
+  .btn-reject{background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)}
+  .btn-reject:hover{background:rgba(248,113,113,.22)}
+  .ins-change-table{width:100%;font-size:13px;border-collapse:collapse;margin-bottom:16px}
+  .ins-change-table th{background:var(--surface2);padding:8px 12px;text-align:left;font-weight:500}
+  .ins-change-table td{padding:8px 12px;border-bottom:0.5px solid var(--border)}
 </style>
 </head>
 <body data-page="employees">
@@ -757,15 +762,113 @@ async function saveEmployee() {
   if (!payload.name || !payload.position) { toast('請填寫姓名和職稱','error'); return; }
   try {
     if (editingId) {
-      await api(`/api/employees/${editingId}`, { method:'PUT', body: JSON.stringify(payload) });
+      const savedId = editingId;
+      const result = await api(`/api/employees/${savedId}`, { method:'PUT', body: JSON.stringify(payload) });
+      closeModal('emp-modal');
+      await loadEmployees();
       toast('✅ 員工資料已更新','success');
+      if (result.insurance_change?.triggered) {
+        showInsuranceChangeNotice(result.insurance_change, savedId);
+      }
     } else {
       await api('/api/employees', { method:'POST', body: JSON.stringify(payload) });
+      closeModal('emp-modal');
+      await loadEmployees();
       toast('✅ 員工已新增','success');
     }
-    closeModal('emp-modal');
-    await loadEmployees();
   } catch(e) { toast('儲存失敗：'+e.message,'error'); }
+}
+
+/* ── Insurance bracket change notice ── */
+function showInsuranceChangeNotice(change, empId) {
+  const emp = allEmployees.find(e => e.id === empId);
+  const fmt = n => '$' + Number(n||0).toLocaleString();
+
+  const laborRows = change.labor_changed ? `
+    <tr>
+      <td>勞保投保薪資</td>
+      <td style="text-align:right;color:var(--text-dim)">${fmt(change.old_labor_bracket)}</td>
+      <td style="text-align:right;color:#4ADE80;font-weight:500">${fmt(change.new_labor_bracket)}</td>
+    </tr>
+    <tr>
+      <td style="padding-left:20px;color:var(--text-dim)">員工自付勞保費</td>
+      <td style="text-align:right;color:var(--text-dim)">${fmt(change.old_labor_employee)}</td>
+      <td style="text-align:right;color:#4ADE80;font-weight:500">${fmt(change.new_labor_employee)}</td>
+    </tr>` : '';
+
+  const healthRows = change.health_changed ? `
+    <tr>
+      <td>健保投保金額</td>
+      <td style="text-align:right;color:var(--text-dim)">${fmt(change.old_health_bracket)}</td>
+      <td style="text-align:right;color:#4ADE80;font-weight:500">${fmt(change.new_health_bracket)}</td>
+    </tr>
+    <tr>
+      <td style="padding-left:20px;color:var(--text-dim)">員工自付健保費</td>
+      <td style="text-align:right;color:var(--text-dim)">${fmt(change.old_health_employee)}</td>
+      <td style="text-align:right;color:#4ADE80;font-weight:500">${fmt(change.new_health_employee)}</td>
+    </tr>` : '';
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-bg open';
+  modal.id = 'insurance-notice-modal';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:500px">
+      <div class="modal-title">🏥 勞健保級距變動通知</div>
+      <div style="background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2);border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:13px">
+        ⚠️ <strong>${emp?.name||'此員工'}</strong> 的薪資調整後，建議同步更新勞健保投保級距
+      </div>
+      <table class="ins-change-table">
+        <thead><tr>
+          <th>項目</th>
+          <th style="text-align:right">變動前</th>
+          <th style="text-align:right">建議（變動後）</th>
+        </tr></thead>
+        <tbody>${laborRows}${healthRows}</tbody>
+      </table>
+      <div class="form-row">
+        <label class="form-label">生效日期</label>
+        <input type="date" class="form-input" id="change-effective-date" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div class="form-row">
+        <label class="form-label">備注說明（選填）</label>
+        <input type="text" class="form-input" id="change-note" placeholder="例：2026年4月薪資調整">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="dismissInsuranceChange('${change.change_id}')">稍後處理</button>
+        <button class="btn btn-reject" onclick="rejectInsuranceChange('${change.change_id}')">不需要變更</button>
+        <button class="btn btn-primary" onclick="approveInsuranceChange('${change.change_id}', '${empId}')">✓ 確認更新級距</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function approveInsuranceChange(changeId, empId) {
+  const effectiveDate = document.getElementById('change-effective-date').value;
+  const note = document.getElementById('change-note').value;
+  try {
+    await api('/api/insurance', {
+      method: 'POST',
+      body: JSON.stringify({ action:'approve_change', change_id:changeId, employee_id:empId, effective_date:effectiveDate, note }),
+    });
+    document.getElementById('insurance-notice-modal').remove();
+    toast('✅ 勞健保級距已更新', 'success');
+  } catch(e) { toast('更新失敗：' + e.message, 'error'); }
+}
+
+async function rejectInsuranceChange(changeId) {
+  try {
+    await api('/api/insurance', {
+      method: 'POST',
+      body: JSON.stringify({ action:'reject_change', change_id:changeId }),
+    });
+  } catch(e) {}
+  document.getElementById('insurance-notice-modal').remove();
+  toast('已記錄：不變更勞健保級距', 'success');
+}
+
+function dismissInsuranceChange() {
+  document.getElementById('insurance-notice-modal').remove();
+  toast('已暫存，可至勞健保管理頁面處理', 'success');
 }
 
 /* ── Reset Password ── */

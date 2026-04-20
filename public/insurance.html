@@ -49,6 +49,15 @@
       </div>
     </div>
 
+    <!-- 待確認的級距變動申請 -->
+    <div id="pending-changes-section" style="display:none;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.15);border-radius:12px;padding:16px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span style="font-size:15px;font-weight:500">⚠️ 待確認的級距變動</span>
+        <span id="pending-changes-count" style="background:rgba(251,191,36,.2);color:#FBB724;padding:2px 8px;border-radius:10px;font-size:12px">0</span>
+      </div>
+      <div id="pending-changes-wrap"></div>
+    </div>
+
     <div class="stats-row">
       <div class="stat-card green"><div class="stat-label">投保人數</div><div class="stat-value" id="st-insured">—</div><div class="stat-hint">位員工</div></div>
       <div class="stat-card blue"><div class="stat-label">公司勞保</div><div class="stat-value" id="st-labor" style="font-size:18px">—</div><div class="stat-hint">本月負擔</div></div>
@@ -281,7 +290,7 @@ window.onload = async () => {
   await new Promise(r => setTimeout(r, 600));
   const badge = document.getElementById('db-status');
   try {
-    await Promise.all([loadEmployees(), loadInsuranceData(), loadBrackets()]);
+    await Promise.all([loadEmployees(), loadInsuranceData(), loadBrackets(), loadPendingChanges()]);
     checkUnsetNotice();
     badge.textContent='● Supabase 已連線';
     badge.style.cssText='background:rgba(74,222,128,.1);color:#4ADE80;border-color:rgba(74,222,128,.2)';
@@ -751,6 +760,64 @@ async function saveInsurance() {
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/* ── Pending change requests ────────────────────────────────────────────── */
+async function loadPendingChanges() {
+  try {
+    const data = await api('/api/insurance?brackets=pending');
+    const section = document.getElementById('pending-changes-section');
+    if (!data?.length) { section.style.display = 'none'; return; }
+
+    document.getElementById('pending-changes-count').textContent = data.length;
+    document.getElementById('pending-changes-wrap').innerHTML = data.map(c => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid var(--border)">
+        <div>
+          <span style="font-weight:500">${c.employees?.name||'—'}</span>
+          <span style="font-size:12px;color:var(--text-dim);margin-left:8px">${c.employees?.dept||''}</span>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:3px">
+            新月薪 ${fmt(c.new_monthly_salary)} →
+            勞保 ${fmtN(c.new_labor_bracket||0)} /
+            健保 ${fmtN(c.new_health_bracket||0)}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-ghost btn-sm" onclick="rejectPendingChange('${c.id}')">略過</button>
+          <button class="btn btn-primary btn-sm" onclick="quickApproveChange('${c.id}', '${c.employee_id}')">確認更新</button>
+        </div>
+      </div>`).join('');
+    section.style.display = '';
+  } catch(e) {
+    document.getElementById('pending-changes-section').style.display = 'none';
+  }
+}
+
+async function quickApproveChange(changeId, empId) {
+  try {
+    await api('/api/insurance', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'approve_change',
+        change_id: changeId,
+        employee_id: empId,
+        effective_date: new Date().toISOString().slice(0,10),
+      }),
+    });
+    toast('✅ 勞健保級距已更新', 'success');
+    await Promise.all([loadInsuranceData(), loadPendingChanges()]);
+    checkUnsetNotice();
+  } catch(e) { toast('更新失敗：' + e.message, 'error'); }
+}
+
+async function rejectPendingChange(changeId) {
+  try {
+    await api('/api/insurance', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'reject_change', change_id: changeId }),
+    });
+    toast('已略過此筆變動', 'success');
+    await loadPendingChanges();
+  } catch(e) { toast('操作失敗：' + e.message, 'error'); }
+}
 </script>
 <script src="/js/layout.js"></script>
 </body>
