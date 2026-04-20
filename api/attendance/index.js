@@ -32,17 +32,27 @@ export default async function handler(req, res) {
 
     const { employee_id, month, date, status, all: allRecords, start, end, dept } = req.query;
 
-    // ── GET all employees' records with employee join ──────────────────────
+    // ── GET all employees' records (管理者用，JS 合併員工資料) ─────────────
     if (allRecords === 'true') {
-      let q = supabase.from('attendance')
-        .select('*, employees(id, name, dept, avatar)')
-        .order('work_date', { ascending: false });
+      // 取打卡紀錄
+      let q = supabase.from('attendance').select('*').order('work_date', { ascending: false });
       if (start)  q = q.gte('work_date', start);
       if (end)    q = q.lte('work_date', end);
       if (status) q = q.eq('status', status);
-      const { data, error } = await q;
-      if (error) return res.status(500).json({ error: error.message });
-      const rows = (data || []).filter(r => !dept || r.employees?.dept === dept);
+      const { data: attData, error: attErr } = await q;
+      if (attErr) return res.status(500).json({ error: attErr.message });
+
+      // 取員工資料（一次全撈，在 JS 合併）
+      const { data: empData } = await supabase.from('employees').select('id, name, dept, avatar');
+      const empMap = {};
+      (empData || []).forEach(e => { empMap[e.id] = e; });
+
+      let rows = (attData || []).map(r => ({
+        ...r,
+        employees: empMap[r.employee_id] || null,
+      }));
+
+      if (dept) rows = rows.filter(r => r.employees?.dept === dept);
       return res.status(200).json(rows);
     }
 

@@ -502,20 +502,24 @@ async function loadAllRecords() {
   document.getElementById('all-records-body').innerHTML =
     '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">載入中…</td></tr>';
 
-  try {
-    const [year, m] = month.split('-');
-    const startDate = `${year}-${m}-01`;
-    const endDate   = `${year}-${m}-31`;
-    let url = `/api/attendance?start=${startDate}&end=${endDate}&all=true`;
-    if (dept) url += `&dept=${encodeURIComponent(dept)}`;
+  const [year, m] = month.split('-');
+  const startDate = `${year}-${m}-01`;
+  const endDate   = `${year}-${m}-31`;
+  let url = `/api/attendance?start=${startDate}&end=${endDate}&all=true`;
+  if (dept) url += `&dept=${encodeURIComponent(dept)}`;
+  console.log('[loadAllRecords] GET', url);
 
-    allRecordsData = await api(url);
+  try {
+    const data = await api(url);
+    console.log('[loadAllRecords] 回傳', data?.length, '筆');
+    allRecordsData = Array.isArray(data) ? data : [];
     selectedRecordIds.clear();
     filterRecords();
     updateStats();
   } catch(e) {
+    console.error('[loadAllRecords] 失敗：', e);
     document.getElementById('all-records-body').innerHTML =
-      '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">載入失敗</td></tr>';
+      `<tr><td colspan="8" style="text-align:center;padding:30px;color:#F87171">載入失敗：${e.message}</td></tr>`;
   }
 }
 
