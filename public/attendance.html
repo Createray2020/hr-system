@@ -504,7 +504,7 @@ async function loadAllRecords() {
 
   const [year, m] = month.split('-');
   const startDate = `${year}-${m}-01`;
-  const endDate   = `${year}-${m}-31`;
+  const endDate   = new Date(parseInt(year), parseInt(m), 0).toISOString().slice(0, 10);
   let url = `/api/attendance?start=${startDate}&end=${endDate}&all=true`;
   if (dept) url += `&dept=${encodeURIComponent(dept)}`;
   console.log('[loadAllRecords] GET', url);
