@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#5B8DEF">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -9,50 +9,94 @@
 <meta name="apple-mobile-web-app-title" content="CHUWA HR">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
 <title>公告欄 — HR System</title>
+
+<!-- 在所有 script 載入之前就決定版本，避免電腦版 layout 閃現 -->
+<script>
+(function() {
+  const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const isSmallScreen  = window.innerWidth <= 768;
+  const preferMobile   = localStorage.getItem('preferred_version') === 'mobile';
+
+  if (isMobileDevice || isSmallScreen || preferMobile) {
+    document.documentElement.setAttribute('data-layout', 'mobile');
+  }
+})();
+</script>
+
+<!-- data-layout=mobile 時直接隱藏電腦版元素 -->
+<style>
+html[data-layout="mobile"] body {
+  background: #0F1117!important;
+}
+html[data-layout="mobile"] #sidebar,
+html[data-layout="mobile"] .sidebar,
+html[data-layout="mobile"] nav.sidebar,
+html[data-layout="mobile"] .main-header,
+html[data-layout="mobile"] header {
+  display: none!important;
+}
+html[data-layout="mobile"] .main-content,
+html[data-layout="mobile"] .content-area,
+html[data-layout="mobile"] main {
+  margin-left: 0!important;
+  padding: 0!important;
+  max-width: 100%!important;
+  width: 100%!important;
+}
+html[data-layout="mobile"] #desktop-announcements {
+  display: none!important;
+}
+html[data-layout="mobile"] #mobile-announcements-page {
+  display: block!important;
+}
+</style>
+
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  .ann-layout{display:grid;grid-template-columns:360px 1fr;gap:20px;height:calc(100vh - 148px)}
-  .ann-list-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto;display:flex;flex-direction:column}
-  .ann-search{padding:14px;border-bottom:1px solid var(--border)}
-  .ann-search input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none}
-  .ann-cats{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-  .cat-pill{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border);color:var(--text-dim);background:transparent;transition:all .15s}
-  .cat-pill.active{background:var(--accent);color:#fff;border-color:var(--accent)}
-  .ann-items{flex:1;overflow-y:auto}
-  .ann-item{padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;position:relative}
-  .ann-item:hover{background:rgba(255,255,255,.03)}
-  .ann-item.active{background:rgba(91,141,239,.08);border-left:3px solid var(--accent)}
-  .ann-item.unread .ann-item-title::before{content:'';display:inline-block;width:7px;height:7px;background:#5B8DEF;border-radius:50%;margin-right:6px;vertical-align:middle;flex-shrink:0}
-  .priority-bar{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:var(--radius) 0 0 var(--radius)}
-  .ann-item.active .priority-bar{display:none}
-  .ann-item-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px}
-  .ann-item-title{font-size:13px;font-weight:500;line-height:1.4;flex:1}
-  .ann-item-meta{font-size:11px;color:var(--text-dim);display:flex;gap:8px;align-items:center}
-  .ann-pin{color:var(--orange);font-size:11px}
-  .ann-detail-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto;padding:32px}
-  .ann-detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-dim)}
-  .ann-detail-title{font-size:22px;font-weight:700;line-height:1.4;margin-bottom:16px}
-  .ann-detail-meta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border)}
-  .ann-content{font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text)}
-  .priority-badge{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:'DM Mono',monospace}
-  .p-urgent{background:rgba(248,113,113,.15);color:#F87171}
-  .p-high{background:rgba(251,146,60,.15);color:#FB923C}
-  .p-normal{background:rgba(91,141,239,.15);color:#7FBBFF}
-  .p-low{background:rgba(107,114,128,.15);color:#9CA3AF}
-  @media(max-width:900px){
-    .ann-layout{grid-template-columns:1fr;height:auto}
-    .ann-list-panel{height:auto;max-height:none}
-    .ann-detail-panel{display:none}
-    .ann-detail-panel.mobile-open{display:block}
-    .ann-back-btn{display:inline-flex}
-  }
-  .ann-back-btn{display:none;align-items:center;gap:6px;margin-bottom:16px;color:var(--accent);cursor:pointer;font-size:13px;background:none;border:none}
+/* ── Desktop layout ── */
+.ann-layout{display:grid;grid-template-columns:360px 1fr;gap:20px;height:calc(100vh - 148px)}
+.ann-list-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto;display:flex;flex-direction:column}
+.ann-search{padding:14px;border-bottom:1px solid var(--border)}
+.ann-search input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none}
+.ann-cats{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.cat-pill{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--border);color:var(--text-dim);background:transparent;transition:all .15s}
+.cat-pill.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ann-items{flex:1;overflow-y:auto}
+.ann-item{padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;position:relative}
+.ann-item:hover{background:rgba(255,255,255,.03)}
+.ann-item.active{background:rgba(91,141,239,.08);border-left:3px solid var(--accent)}
+.priority-bar{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:var(--radius) 0 0 var(--radius)}
+.ann-item.active .priority-bar{display:none}
+.ann-item-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px}
+.ann-item-title{font-size:13px;font-weight:500;line-height:1.4;flex:1}
+.ann-item-meta{font-size:11px;color:var(--text-dim);display:flex;gap:8px;align-items:center}
+.ann-pin{color:var(--orange);font-size:11px}
+.ann-detail-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto;padding:32px}
+.ann-detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-dim)}
+.ann-detail-title{font-size:22px;font-weight:700;line-height:1.4;margin-bottom:16px}
+.ann-detail-meta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+.ann-content{font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text)}
+.priority-badge{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:'DM Mono',monospace}
+.p-urgent{background:rgba(248,113,113,.15);color:#F87171}
+.p-high{background:rgba(251,146,60,.15);color:#FB923C}
+.p-normal{background:rgba(91,141,239,.15);color:#7FBBFF}
+.p-low{background:rgba(107,114,128,.15);color:#9CA3AF}
+.ann-back-btn{display:none;align-items:center;gap:6px;margin-bottom:16px;color:var(--accent);cursor:pointer;font-size:13px;background:none;border:none}
+@media(max-width:900px){
+  .ann-layout{grid-template-columns:1fr;height:auto}
+  .ann-list-panel{height:auto;max-height:none}
+  .ann-detail-panel{display:none}
+  .ann-detail-panel.mobile-open{display:block}
+  .ann-back-btn{display:inline-flex}
+}
 </style>
 </head>
 <body data-page="announcements">
-<div class="shell">
+
+<!-- ── Desktop shell ── -->
+<div class="shell" id="desktop-announcements">
   <aside class="sidebar" id="sidebar"></aside>
   <main class="main" style="padding-bottom:0">
     <div class="page-header" style="margin-bottom:16px">
@@ -63,7 +107,6 @@
     </div>
 
     <div class="ann-layout">
-      <!-- 左：列表 -->
       <div class="ann-list-panel">
         <div class="ann-search">
           <input type="text" id="ann-search" placeholder="搜尋公告…" oninput="filterAnn()">
@@ -80,7 +123,6 @@
         </div>
       </div>
 
-      <!-- 右：詳情 -->
       <div class="ann-detail-panel" id="ann-detail">
         <div class="ann-detail-empty">
           <div style="font-size:40px;margin-bottom:12px">📢</div>
@@ -91,34 +133,129 @@
   </main>
 </div>
 
+<!-- 手機版公告頁面（預設隱藏，mobile layout 時才顯示）-->
+<div id="mobile-announcements-page" style="display:none;min-height:100vh;background:#0F1117;font-family:'Noto Sans TC',sans-serif">
+
+  <!-- 頂部導航 -->
+  <div style="position:sticky;top:0;z-index:100;background:#0F1117;
+    border-bottom:0.5px solid rgba(255,255,255,.08);padding:48px 16px 12px;
+    display:flex;align-items:center;gap:12px">
+    <button onclick="history.back()" style="background:rgba(255,255,255,.08);
+      border:none;border-radius:8px;width:34px;height:34px;color:#fff;
+      font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center">
+      ‹
+    </button>
+    <div style="font-size:17px;font-weight:600;color:#fff;flex:1">公告欄</div>
+    <div id="mob-unread-count" style="display:none;background:#F87171;color:#fff;
+      border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600"></div>
+  </div>
+
+  <!-- 分類篩選 -->
+  <div style="padding:12px 16px;display:flex;gap:8px;overflow-x:auto;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch">
+    <button class="mob-cat-btn active" onclick="filterMobCategory('all', this)"
+      style="background:#5B8DEF;border:none;border-radius:20px;padding:6px 14px;
+        color:#fff;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;
+        font-family:'Noto Sans TC',sans-serif">全部</button>
+    <button class="mob-cat-btn" onclick="filterMobCategory('company', this)"
+      style="background:rgba(255,255,255,.08);border:none;border-radius:20px;padding:6px 14px;
+        color:rgba(255,255,255,.6);font-size:12px;cursor:pointer;white-space:nowrap;
+        font-family:'Noto Sans TC',sans-serif">公司公告</button>
+    <button class="mob-cat-btn" onclick="filterMobCategory('hr', this)"
+      style="background:rgba(255,255,255,.08);border:none;border-radius:20px;padding:6px 14px;
+        color:rgba(255,255,255,.6);font-size:12px;cursor:pointer;white-space:nowrap;
+        font-family:'Noto Sans TC',sans-serif">人事通知</button>
+    <button class="mob-cat-btn" onclick="filterMobCategory('event', this)"
+      style="background:rgba(255,255,255,.08);border:none;border-radius:20px;padding:6px 14px;
+        color:rgba(255,255,255,.6);font-size:12px;cursor:pointer;white-space:nowrap;
+        font-family:'Noto Sans TC',sans-serif">活動訊息</button>
+    <button class="mob-cat-btn" onclick="filterMobCategory('system', this)"
+      style="background:rgba(255,255,255,.08);border:none;border-radius:20px;padding:6px 14px;
+        color:rgba(255,255,255,.6);font-size:12px;cursor:pointer;white-space:nowrap;
+        font-family:'Noto Sans TC',sans-serif">系統通知</button>
+  </div>
+
+  <!-- 公告列表 -->
+  <div id="mob-ann-list" style="padding:0 0 100px">
+    <div style="text-align:center;padding:40px;color:rgba(255,255,255,.3);font-size:13px">
+      載入中...
+    </div>
+  </div>
+
+  <!-- 底部導航 -->
+  <div style="position:fixed;bottom:0;left:0;right:0;background:#0a0c12;
+    border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:100">
+    <a href="/employee-app.html" style="flex:1;display:flex;flex-direction:column;
+      align-items:center;gap:3px;text-decoration:none">
+      <span style="font-size:20px;opacity:.4">🏠</span>
+      <span style="font-size:10px;color:rgba(255,255,255,.4)">首頁</span>
+    </a>
+    <a href="/announcements.html" style="flex:1;display:flex;flex-direction:column;
+      align-items:center;gap:3px;text-decoration:none">
+      <span style="font-size:20px">📢</span>
+      <span style="font-size:10px;color:#5B8DEF">公告</span>
+    </a>
+    <a href="/employee-leave.html" style="flex:1;display:flex;flex-direction:column;
+      align-items:center;gap:3px;text-decoration:none">
+      <span style="font-size:20px;opacity:.4">📋</span>
+      <span style="font-size:10px;color:rgba(255,255,255,.4)">請假</span>
+    </a>
+    <a href="/employee-salary.html" style="flex:1;display:flex;flex-direction:column;
+      align-items:center;gap:3px;text-decoration:none">
+      <span style="font-size:20px;opacity:.4">💰</span>
+      <span style="font-size:10px;color:rgba(255,255,255,.4)">薪資</span>
+    </a>
+    <a href="/employee-profile.html" style="flex:1;display:flex;flex-direction:column;
+      align-items:center;gap:3px;text-decoration:none">
+      <span style="font-size:20px;opacity:.4">👤</span>
+      <span style="font-size:10px;color:rgba(255,255,255,.4)">我的</span>
+    </a>
+  </div>
+</div>
+
+<!-- 公告詳情底部 Sheet -->
+<div id="mob-ann-sheet-bg" style="display:none;position:fixed;inset:0;
+  background:rgba(0,0,0,.7);z-index:200"
+  onclick="closeMobSheet()">
+  <div id="mob-ann-sheet" style="position:absolute;bottom:0;left:0;right:0;
+    background:#1a1f2e;border-radius:20px 20px 0 0;padding:16px 20px 40px;
+    max-height:85vh;overflow-y:auto;
+    transform:translateY(100%);transition:transform .3s ease;
+    font-family:'Noto Sans TC',sans-serif"
+    onclick="event.stopPropagation()">
+    <div style="width:40px;height:4px;background:rgba(255,255,255,.2);
+      border-radius:2px;margin:0 auto 16px"></div>
+    <div id="mob-ann-sheet-content"></div>
+    <button onclick="closeMobSheet()" style="width:100%;margin-top:20px;
+      background:rgba(255,255,255,.07);border:none;border-radius:12px;
+      padding:14px;color:#fff;font-size:14px;cursor:pointer;
+      font-family:'Noto Sans TC',sans-serif">關閉</button>
+  </div>
+</div>
+
 <script>
-function toast(msg, type='success') {
-  let wrap = document.getElementById('toast-wrap');
-  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
-  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
-}
-
-const CAT_LABEL = { general:'一般', company:'公司公告', hr:'人事通知', event:'活動訊息', system:'系統通知' };
-const PRIO_LABEL = { urgent:'緊急', high:'高', normal:'一般', low:'低' };
-const PRIO_COLOR = { urgent:'#F87171', high:'#FB923C', normal:'#5B8DEF', low:'#6B7280' };
-
-let allAnn = [], currentCat = '', currentId = null;
+// ── Shared constants ──
+const CAT_LABEL   = { general:'一般', company:'公司公告', hr:'人事通知', event:'活動訊息', system:'系統通知' };
+const PRIO_LABEL  = { urgent:'緊急', high:'高', normal:'一般', low:'低' };
+const PRIO_COLOR  = { urgent:'#F87171', high:'#FB923C', normal:'#5B8DEF', low:'#6B7280' };
 
 function fmtTime(ts) {
   if (!ts) return '';
-  const d = new Date(ts);
-  const now = new Date();
-  const diff = now - d;
-  if (diff < 86400000) return d.toLocaleTimeString('zh-TW', { hour:'2-digit', minute:'2-digit' });
+  const diff = Date.now() - new Date(ts);
+  if (diff < 3600000)   return Math.floor(diff/60000)   + ' 分鐘前';
+  if (diff < 86400000)  return Math.floor(diff/3600000)  + ' 小時前';
   if (diff < 604800000) return Math.floor(diff/86400000) + ' 天前';
-  return d.toLocaleDateString('zh-TW');
+  return new Date(ts).toLocaleDateString('zh-TW');
 }
+
+// ── Desktop ──
+let allAnn = [], currentCat = '', currentId = null;
 
 function filterAnn() {
   const q = document.getElementById('ann-search').value.toLowerCase();
   const filtered = allAnn.filter(a =>
     (!currentCat || a.category === currentCat) &&
-    (!q || a.title.toLowerCase().includes(q) || a.content.toLowerCase().includes(q))
+    (!q || a.title.toLowerCase().includes(q) || (a.content||'').toLowerCase().includes(q))
   );
   renderList(filtered);
 }
@@ -130,64 +267,55 @@ function renderList(items) {
     return;
   }
   el.innerHTML = items.map(a => {
-    const pColor = PRIO_COLOR[a.priority] || '#5B8DEF';
+    const pColor  = PRIO_COLOR[a.priority] || '#5B8DEF';
     const isActive = a.id === currentId;
-    return `<div class="ann-item ${isActive?'active':''}" data-id="${a.id}" onclick="openAnn('${a.id}')">
+    return `<div class="ann-item ${isActive?'active':''}" onclick="openDesktopAnn('${a.id}')">
       ${!isActive ? `<div class="priority-bar" style="background:${pColor}"></div>` : ''}
       <div class="ann-item-header">
-        <div class="ann-item-title">${a.is_pinned ? '<span class="ann-pin">📌 </span>' : ''}${a.title}</div>
+        <div class="ann-item-title">${a.is_pinned?'<span class="ann-pin">📌 </span>':''}${a.title}</div>
       </div>
       <div class="ann-item-meta">
-        <span>${CAT_LABEL[a.category] || a.category}</span>
+        <span>${CAT_LABEL[a.category]||a.category}</span>
         <span>·</span>
         <span>${fmtTime(a.published_at)}</span>
-        ${a.view_count ? `<span>· 👁 ${a.view_count}</span>` : ''}
+        ${a.view_count?`<span>· 👁 ${a.view_count}</span>`:''}
       </div>
     </div>`;
   }).join('');
 }
 
-async function openAnn(id) {
+async function openDesktopAnn(id) {
   currentId = id;
-  filterAnn(); // re-render list to show active state
-
+  filterAnn();
   const detail = document.getElementById('ann-detail');
   detail.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-dim)">載入中…</div>';
   detail.classList.add('mobile-open');
-
   try {
     const empId = window.currentUser?.id || '';
-    const data = await api(`/api/announcements?id=${id}${empId ? '&employee_id='+empId : ''}`);
-    const pClass = 'p-' + (data.priority || 'normal');
-    const authorName = data.author?.name || '系統';
-
+    const data  = await api(`/api/announcements?id=${id}${empId?'&employee_id='+empId:''}`);
+    const pClass = 'p-' + (data.priority||'normal');
     detail.innerHTML = `
-      <button class="ann-back-btn" onclick="closeDetail()">← 返回列表</button>
-      <div class="ann-detail-title">${data.is_pinned ? '📌 ' : ''}${data.title}</div>
+      <button class="ann-back-btn" onclick="closeDesktopDetail()">← 返回列表</button>
+      <div class="ann-detail-title">${data.is_pinned?'📌 ':''}${data.title}</div>
       <div class="ann-detail-meta">
-        <span class="priority-badge ${pClass}">${PRIO_LABEL[data.priority] || data.priority}</span>
-        <span style="font-size:12px;color:var(--text-dim)">${CAT_LABEL[data.category] || data.category}</span>
-        <span style="font-size:12px;color:var(--text-dim)">發布：${authorName}</span>
-        <span style="font-size:12px;color:var(--text-dim)">${data.published_at ? new Date(data.published_at).toLocaleString('zh-TW') : ''}</span>
-        ${data.expires_at ? `<span style="font-size:12px;color:var(--orange)">到期：${new Date(data.expires_at).toLocaleDateString('zh-TW')}</span>` : ''}
+        <span class="priority-badge ${pClass}">${PRIO_LABEL[data.priority]||data.priority}</span>
+        <span style="font-size:12px;color:var(--text-dim)">${CAT_LABEL[data.category]||data.category}</span>
+        <span style="font-size:12px;color:var(--text-dim)">發布：${data.author?.name||'系統'}</span>
+        <span style="font-size:12px;color:var(--text-dim)">${data.published_at?new Date(data.published_at).toLocaleString('zh-TW'):''}</span>
+        ${data.expires_at?`<span style="font-size:12px;color:var(--orange)">到期：${new Date(data.expires_at).toLocaleDateString('zh-TW')}</span>`:''}
       </div>
       <div class="ann-content">${data.content}</div>`;
-
-    // Update read status in list
-    const item = allAnn.find(a => a.id === id);
-    if (item) item._read = true;
   } catch(e) {
     detail.innerHTML = `<div style="text-align:center;padding:40px;color:#F87171">載入失敗：${e.message}</div>`;
   }
 }
 
-function closeDetail() {
+function closeDesktopDetail() {
   currentId = null;
   document.getElementById('ann-detail').classList.remove('mobile-open');
   filterAnn();
 }
 
-// Category filter
 document.getElementById('ann-cats').addEventListener('click', e => {
   const pill = e.target.closest('.cat-pill');
   if (!pill) return;
@@ -197,27 +325,162 @@ document.getElementById('ann-cats').addEventListener('click', e => {
   filterAnn();
 });
 
-async function loadAnn(retries = 0) {
+// ── Mobile ──
+let mobAnnData = [];
+let mobCurrentCategory = 'all';
+
+async function loadMobAnnouncements() {
+  const role = window.currentUser?.role || 'employee';
+  try {
+    const res  = await fetch(`/api/announcements?role=${role}`);
+    const data = await res.json();
+    mobAnnData = data || [];
+    renderMobList(mobAnnData);
+  } catch(e) {
+    document.getElementById('mob-ann-list').innerHTML =
+      '<div style="text-align:center;padding:40px;color:#F87171;font-size:13px">載入失敗</div>';
+  }
+}
+
+function filterMobCategory(cat, btn) {
+  mobCurrentCategory = cat;
+  document.querySelectorAll('.mob-cat-btn').forEach(b => {
+    b.style.background = 'rgba(255,255,255,.08)';
+    b.style.color      = 'rgba(255,255,255,.6)';
+  });
+  btn.style.background = '#5B8DEF';
+  btn.style.color      = '#fff';
+  const filtered = cat === 'all' ? mobAnnData : mobAnnData.filter(a => a.category === cat);
+  renderMobList(filtered);
+}
+
+function renderMobList(list) {
+  const container = document.getElementById('mob-ann-list');
+  if (!list.length) {
+    container.innerHTML = `
+      <div style="text-align:center;padding:60px 20px;color:rgba(255,255,255,.3)">
+        <div style="font-size:36px;margin-bottom:10px">📢</div>
+        <div style="font-size:13px">沒有符合條件的公告</div>
+      </div>`;
+    return;
+  }
+  const PRIORITY_LABEL = { urgent:'緊急', high:'重要', normal:'', low:'' };
+  container.innerHTML = list.map(ann => {
+    const color   = PRIO_COLOR[ann.priority] || '#5B8DEF';
+    const preview = (ann.content||'').slice(0,55) + ((ann.content||'').length>55?'...':'');
+    const timeAgo = fmtTime(ann.published_at);
+    const prioLbl = PRIORITY_LABEL[ann.priority];
+    return `<div onclick="openMobDetail('${ann.id}')"
+      style="margin:0 16px 10px;background:rgba(255,255,255,.04);
+        border:0.5px solid rgba(255,255,255,.08);border-left:3px solid ${color};
+        border-radius:12px;padding:14px;cursor:pointer">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px">
+        <div style="font-size:14px;font-weight:500;color:#fff;flex:1;line-height:1.4">
+          ${ann.is_pinned?'📌 ':''}${ann.title}
+        </div>
+        ${prioLbl?`<span style="background:${color};color:#fff;padding:2px 7px;
+          border-radius:4px;font-size:10px;font-weight:600;flex-shrink:0">${prioLbl}</span>`:''}
+      </div>
+      <div style="font-size:12px;color:rgba(255,255,255,.45);margin-bottom:8px;line-height:1.5">
+        ${preview}
+      </div>
+      <div style="font-size:11px;color:rgba(255,255,255,.3);display:flex;gap:8px;flex-wrap:wrap">
+        <span>${CAT_LABEL[ann.category]||ann.category}</span>
+        <span>•</span>
+        <span>${timeAgo}</span>
+        <span style="margin-left:auto">${ann.view_count||0} 次查看</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openMobDetail(id) {
+  const empId = window.currentUser?.id || '';
+  const bg    = document.getElementById('mob-ann-sheet-bg');
+  const sheet = document.getElementById('mob-ann-sheet');
+  const cont  = document.getElementById('mob-ann-sheet-content');
+  cont.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,.4)">載入中…</div>';
+  bg.style.display = '';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    sheet.style.transform = 'translateY(0)';
+  }));
+  try {
+    const res = await fetch(`/api/announcements?id=${id}${empId?'&employee_id='+empId:''}`);
+    const ann = await res.json();
+    const color = PRIO_COLOR[ann.priority] || '#5B8DEF';
+    const PRIO_LBL = { urgent:'緊急', high:'重要', normal:'一般', low:'一般' };
+    cont.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span style="background:${color};color:#fff;padding:3px 10px;border-radius:5px;font-size:11px;font-weight:600">
+          ${PRIO_LBL[ann.priority]||'一般'}
+        </span>
+        ${ann.is_pinned?'<span style="font-size:12px;color:rgba(255,255,255,.6)">📌 置頂</span>':''}
+      </div>
+      <div style="font-size:18px;font-weight:600;color:#fff;margin-bottom:10px;line-height:1.4">
+        ${ann.title}
+      </div>
+      <div style="font-size:12px;color:rgba(255,255,255,.4);margin-bottom:16px;
+        display:flex;flex-wrap:wrap;gap:10px">
+        <span>👤 ${ann.author?.name||'系統'}</span>
+        <span>📅 ${ann.published_at?new Date(ann.published_at).toLocaleDateString('zh-TW'):''}</span>
+        <span>👁 ${ann.view_count||0} 次查看</span>
+      </div>
+      <div style="border-top:0.5px solid rgba(255,255,255,.08);padding-top:14px;
+        font-size:14px;color:rgba(255,255,255,.85);line-height:1.8;white-space:pre-wrap">
+        ${ann.content}
+      </div>`;
+  } catch(e) {
+    cont.innerHTML = '<div style="text-align:center;padding:40px;color:#F87171">載入失敗</div>';
+  }
+}
+
+function closeMobSheet() {
+  const sheet = document.getElementById('mob-ann-sheet');
+  sheet.style.transform = 'translateY(100%)';
+  setTimeout(() => {
+    document.getElementById('mob-ann-sheet-bg').style.display = 'none';
+  }, 300);
+}
+
+// ── Desktop load (waits for window.api) ──
+async function loadDesktopAnn(retries = 0) {
   if (!window.api) {
-    if (retries < 20) setTimeout(() => loadAnn(retries + 1), 300);
+    if (retries < 20) setTimeout(() => loadDesktopAnn(retries + 1), 300);
     return;
   }
   const role = window.currentUser?.role || '';
   try {
-    allAnn = await api(`/api/announcements${role ? '?role='+role : ''}`);
+    allAnn = await api(`/api/announcements${role?'?role='+role:''}`);
     filterAnn();
-
-    // Auto-open ?id param
-    const params = new URLSearchParams(location.search);
-    const openId = params.get('id');
-    if (openId) openAnn(openId);
+    const openId = new URLSearchParams(location.search).get('id');
+    if (openId) openDesktopAnn(openId);
   } catch(e) {
     document.getElementById('ann-items').innerHTML =
       `<div style="text-align:center;padding:30px;color:#F87171;font-size:13px">載入失敗：${e.message}</div>`;
   }
 }
 
-window.addEventListener('load', () => loadAnn());
+// ── Init ──
+document.addEventListener('DOMContentLoaded', () => {
+  const isMobile = document.documentElement.getAttribute('data-layout') === 'mobile';
+
+  if (isMobile) {
+    // 等 currentUser 載入後再執行
+    const tryLoad = setInterval(() => {
+      if (window.currentUser) {
+        clearInterval(tryLoad);
+        loadMobAnnouncements();
+      }
+    }, 200);
+    // 最多等 3 秒
+    setTimeout(() => {
+      clearInterval(tryLoad);
+      loadMobAnnouncements();
+    }, 3000);
+  } else {
+    loadDesktopAnn();
+  }
+});
 </script>
 <script src="/js/layout.js"></script>
 <script src="/js/pwa.js"></script>
