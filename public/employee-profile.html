@@ -12,6 +12,7 @@
 <title>我的資料</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/roles.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
@@ -195,7 +196,6 @@ const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
 const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const MANAGER_ROLES = ['chairman', 'ceo', 'manager', 'hr', 'admin'];
 let API = '';
 
 async function apiFetch(path, opts={}) {
@@ -309,7 +309,7 @@ async function doLogout() {
   document.getElementById('i-email').textContent = u.email || '—';
 
   // 管理者才顯示切換按鈕
-  if (MANAGER_ROLES.includes(u.role)) {
+  if (Roles.canAccessBackoffice(u)) {
     document.getElementById('switch-version-btn').style.display = '';
   }
 })();

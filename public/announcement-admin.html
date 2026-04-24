@@ -132,7 +132,6 @@ function toast(msg, type='success') {
   const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
 }
 
-const ADMIN_ROLES = ['manager','hr','ceo','chairman','admin'];
 const CAT_LABEL = { general:'一般', company:'公司公告', hr:'人事通知', event:'活動訊息', system:'系統通知' };
 const PRIO_LABEL = { urgent:'緊急', high:'高', normal:'一般', low:'低' };
 const TARGET_LABEL = { all:'全員', employee:'員工', manager:'主管', hr:'人資', ceo:'執行長', chairman:'董事長' };
@@ -314,8 +313,7 @@ async function loadAnn(retries = 0) {
   }
 
   // Role guard
-  const role = window.currentUser?.role;
-  if (role && !ADMIN_ROLES.includes(role)) {
+  if (window.currentUser && !Roles.canManageAnnouncements(window.currentUser)) {
     document.querySelector('.main').innerHTML = '<div class="empty-state"><div class="icon">🔒</div><div>無權限存取此頁面</div></div>';
     return;
   }
@@ -330,6 +328,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 
 window.addEventListener('load', () => loadAnn());
 </script>
+<script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 <script src="/js/pwa.js"></script>
 <script>PWA.init();</script>

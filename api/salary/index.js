@@ -2,12 +2,12 @@
 // GET  /api/salary              → 薪資清單
 // POST /api/salary?_action=batch → 批次產生草稿
 import { supabase } from '../../lib/supabase.js';
+import { skipAttendanceBonus } from '../../lib/roles.js';
 
 function calcAttendanceBonus(emp) {
   if (!emp) return 0;
   if (emp.employment_type === 'part_time') return 0;
-  if (['manager','ceo','chairman'].includes(emp.role)) return 0;
-  if (emp.is_manager === true) return 0;
+  if (skipAttendanceBonus(emp)) return 0;
   return parseFloat(emp.attendance_bonus) || 0;
 }
 
@@ -32,9 +32,7 @@ export default async function handler(req, res) {
 
     const rows = data.map(r => {
       const emp = r.employees;
-      const noBonus = !emp || emp.employment_type === 'part_time' ||
-                      ['manager','ceo','chairman'].includes(emp.role) ||
-                      emp.is_manager === true;
+      const noBonus = !emp || emp.employment_type === 'part_time' || skipAttendanceBonus(emp);
       const correctedBonus = noBonus ? 0 : (r.bonus || 0);
       const gross = (r.base_salary||0) + correctedBonus + (r.allowance||0) +
                     (r.extra_allowance||0) + (r.overtime_pay||0);

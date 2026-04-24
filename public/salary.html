@@ -184,8 +184,7 @@ function toast(msg, type='success') {
 
 function shouldHaveAttendanceBonus(r) {
   if (r.employment_type === 'part_time') return false;
-  if (['manager','ceo','chairman'].includes(r.emp_role)) return false;
-  if (r.emp_is_manager === true) return false;
+  if (Roles.skipAttendanceBonus({ role: r.emp_role, is_manager: r.emp_is_manager })) return false;
   return true;
 }
 let currentYear, currentMonth;
@@ -460,6 +459,7 @@ function exportSalaryData() {
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/js/excel-tools.js"></script>
+<script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 
 <script src="/js/pwa.js"></script>

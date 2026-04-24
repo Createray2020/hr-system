@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS employees (
   dept_id       TEXT REFERENCES departments(id),
   dept          TEXT NOT NULL,
   position      TEXT NOT NULL,
-  role          TEXT DEFAULT 'employee' CHECK (role IN ('employee','manager','hr','admin')),
+  role          TEXT DEFAULT 'employee' CHECK (role IN ('employee','hr','ceo','chairman','admin')),
+  is_manager    BOOLEAN NOT NULL DEFAULT false,
   manager_id    TEXT,
   avatar        TEXT,
   hire_date     DATE,
@@ -124,17 +125,17 @@ INSERT INTO departments (id, name) VALUES
 ON CONFLICT DO NOTHING;
 
 INSERT INTO employees
-  (id,name,email,phone,dept_id,dept,position,role,manager_id,avatar,hire_date,base_salary,status)
+  (id,name,email,phone,dept_id,dept,position,role,is_manager,manager_id,avatar,hire_date,base_salary,status)
 VALUES
-  ('M001','李部長','li@hr.com','0912-001001','D001','研發部','部門主管','manager',NULL,'李','2018-03-01',120000,'active'),
-  ('M002','吳副理','wu@hr.com','0912-002002','D002','行銷部','部門副理','manager',NULL,'吳','2019-06-01',95000,'active'),
-  ('M003','趙經理','chao@hr.com','0912-003003','D003','財務部','財務經理','manager',NULL,'趙','2017-09-01',105000,'active'),
-  ('M004','黃總監','huang@hr.com','0912-004004','D004','業務部','業務總監','manager',NULL,'黃','2016-01-01',130000,'active'),
-  ('E001','陳小明','chen@hr.com','0912-100001','D001','研發部','工程師','employee','M001','陳','2021-07-01',65000,'active'),
-  ('E002','林美華','lin@hr.com','0912-100002','D002','行銷部','行銷專員','employee','M002','林','2022-02-01',55000,'active'),
-  ('E003','張志遠','chang@hr.com','0912-100003','D001','研發部','資深工程師','employee','M001','張','2020-04-01',80000,'active'),
-  ('E004','王雅婷','wang@hr.com','0912-100004','D003','財務部','會計師','employee','M003','王','2021-11-01',60000,'active'),
-  ('E005','劉建國','liu@hr.com','0912-100005','D004','業務部','業務代表','employee','M004','劉','2023-01-01',50000,'active')
+  ('M001','李部長','li@hr.com','0912-001001','D001','研發部','部門主管','employee',true, NULL,'李','2018-03-01',120000,'active'),
+  ('M002','吳副理','wu@hr.com','0912-002002','D002','行銷部','部門副理','employee',true, NULL,'吳','2019-06-01',95000,'active'),
+  ('M003','趙經理','chao@hr.com','0912-003003','D003','財務部','財務經理','employee',true, NULL,'趙','2017-09-01',105000,'active'),
+  ('M004','黃總監','huang@hr.com','0912-004004','D004','業務部','業務總監','employee',true, NULL,'黃','2016-01-01',130000,'active'),
+  ('E001','陳小明','chen@hr.com','0912-100001','D001','研發部','工程師','employee',false,'M001','陳','2021-07-01',65000,'active'),
+  ('E002','林美華','lin@hr.com','0912-100002','D002','行銷部','行銷專員','employee',false,'M002','林','2022-02-01',55000,'active'),
+  ('E003','張志遠','chang@hr.com','0912-100003','D001','研發部','資深工程師','employee',false,'M001','張','2020-04-01',80000,'active'),
+  ('E004','王雅婷','wang@hr.com','0912-100004','D003','財務部','會計師','employee',false,'M003','王','2021-11-01',60000,'active'),
+  ('E005','劉建國','liu@hr.com','0912-100005','D004','業務部','業務代表','employee',false,'M004','劉','2023-01-01',50000,'active')
 ON CONFLICT DO NOTHING;
 
 -- 請假資料

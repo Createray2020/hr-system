@@ -7,7 +7,32 @@ import { requireRoleOrPass } from '../../lib/auth.js';
 import { sendPushToEmployees, sendPushToRoles } from '../../lib/push.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const DEPT_WRITE_ROLES = ['hr', 'ceo', 'chairman', 'manager', 'admin'];
+// 可寫部門資料的權限白名單（requireRoleOrPass 目前為 pass-through，此為意圖宣告）
+// 部門主管（is_manager=true）也應被視為後台使用者；未來 requireRoleOrPass 轉嚴格時應改走 canAccessBackoffice。
+const DEPT_WRITE_ROLES = ['hr', 'ceo', 'chairman', 'admin'];
+
+// 同步 employees.is_manager。在 departments 表變動「之後」呼叫。
+// oldManagerId / newManagerId 可為 null。
+// Exported for testability; handler 內部使用 supabase 預設值。
+export async function syncDeptManagerFlag({ oldManagerId, newManagerId }, sb = supabase) {
+  if (oldManagerId === newManagerId) return;
+
+  if (newManagerId) {
+    await sb.from('employees')
+      .update({ is_manager: true }).eq('id', newManagerId);
+  }
+
+  if (oldManagerId) {
+    // 若原主管已無其他部門在帶，降級為一般員工
+    const { count } = await sb.from('departments')
+      .select('id', { count: 'exact', head: true })
+      .eq('manager_id', oldManagerId);
+    if (!count) {
+      await sb.from('employees')
+        .update({ is_manager: false }).eq('id', oldManagerId);
+    }
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -85,13 +110,15 @@ export default async function handler(req, res) {
       const { name, description, color, manager_id } = req.body;
       if (!name) return res.status(400).json({ error: '缺少部門名稱' });
       const id = 'D' + Date.now();
+      const newManagerId = manager_id || null;
       const { error } = await supabase.from('departments').insert([{
         id, name,
         description: description || '',
         color:       color || '#5B8DEF',
-        manager_id:  manager_id || null,
+        manager_id:  newManagerId,
       }]);
       if (error) return res.status(500).json({ error: error.message });
+      await syncDeptManagerFlag({ oldManagerId: null, newManagerId });
       return res.status(201).json({ id, message: '部門已建立' });
     }
 
@@ -103,8 +130,22 @@ export default async function handler(req, res) {
       const allowed = ['name', 'description', 'color', 'manager_id'];
       const update = {};
       allowed.forEach(k => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
+
+      // 只有當 body 帶 manager_id 時才做同步（PUT 支援部分更新）
+      const managerIdChanging = Object.prototype.hasOwnProperty.call(req.body, 'manager_id');
+      let oldManagerId = null;
+      if (managerIdChanging) {
+        const { data: cur } = await supabase.from('departments')
+          .select('manager_id').eq('id', id).single();
+        oldManagerId = cur?.manager_id || null;
+      }
+
       const { error } = await supabase.from('departments').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
+
+      if (managerIdChanging) {
+        await syncDeptManagerFlag({ oldManagerId, newManagerId: req.body.manager_id || null });
+      }
       return res.status(200).json({ message: '已更新' });
     }
 
@@ -115,7 +156,7 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: '缺少 id' });
 
       const { data: dept } = await supabase
-        .from('departments').select('name').eq('id', id).single();
+        .from('departments').select('name, manager_id').eq('id', id).single();
       if (!dept) return res.status(404).json({ error: '找不到部門' });
 
       const { data: active } = await supabase
@@ -125,6 +166,7 @@ export default async function handler(req, res) {
 
       const { error } = await supabase.from('departments').delete().eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
+      await syncDeptManagerFlag({ oldManagerId: dept.manager_id || null, newManagerId: null });
       return res.status(200).json({ message: '已刪除' });
     }
 

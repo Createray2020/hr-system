@@ -221,7 +221,6 @@
         <div class="form-row"><label class="form-label">角色</label>
           <select class="form-select" id="f-role">
             <option value="employee">一般員工</option>
-            <option value="manager">主管</option>
             <option value="hr">人資</option>
             <option value="ceo">執行長</option>
             <option value="chairman">董事長</option>
@@ -510,7 +509,7 @@ function renderTable() {
 }
 
 function noAttBonus(e) {
-  return ['manager','ceo','chairman'].includes(e.role) || e.is_manager === true;
+  return Roles.skipAttendanceBonus(e);
 }
 
 function calcTotal(e) {
@@ -530,7 +529,7 @@ function onExtraAllowChange() {
   const ga     = row?.grade_allowance   || 0;
   const isMgr  = document.getElementById('f-is-manager').checked;
   const role   = document.getElementById('f-role').value;
-  const skipAb = ['manager','ceo','chairman'].includes(role) || isMgr;
+  const skipAb = Roles.skipAttendanceBonus({ role, is_manager: isMgr });
   const ab     = skipAb ? 0 : (row?.attendance_bonus || 0);
   const canMgr = row ? !!row.can_be_manager : false;
   const ma     = (isMgr && canMgr) ? (row?.manager_allowance || 0) : 0;
@@ -618,7 +617,7 @@ function onGradeLevelChange() {
 
   const base   = 30000;
   const ga     = row ? (row.grade_allowance  || 0) : 0;
-  const skipAb = ['manager','ceo','chairman'].includes(role) || isManager;
+  const skipAb = Roles.skipAttendanceBonus({ role, is_manager: isManager });
   const ab     = skipAb ? 0 : (row ? (row.attendance_bonus || 0) : 0);
   const canMgr = row ? !!row.can_be_manager : false;
   const ma     = (isManager && canMgr) ? (row?.manager_allowance || 0) : 0;
@@ -763,7 +762,7 @@ async function saveEmployee() {
     attendance_bonus:  (() => {
       const r2 = document.getElementById('f-role').value;
       const m2 = document.getElementById('f-is-manager').checked;
-      if (['manager','ceo','chairman'].includes(r2) || m2) return 0;
+      if (Roles.skipAttendanceBonus({ role: r2, is_manager: m2 })) return 0;
       return currentGradeRow()?.attendance_bonus ?? 0;
     })(),
     manager_allowance: (() => {
@@ -1321,6 +1320,7 @@ async function importEmpExcel(input) {
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/js/excel-tools.js"></script>
+<script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 
 <script src="/js/pwa.js"></script>

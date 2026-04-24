@@ -346,12 +346,12 @@ window.onload = async () => {
   const badge = document.getElementById('db-status');
   try {
     await Promise.all([loadConfigs(), loadMyRequests(), loadPendingApprovals()]);
-    const role = window.currentUser?.role;
-    if (['hr','ceo','chairman','admin'].includes(role)) {
+    const u = window.currentUser;
+    if (Roles.canViewAllApprovals(u)) {
       document.getElementById('tab-all-btn').style.display = '';
       loadAllRequests();
     }
-    if (['hr','admin'].includes(role)) {
+    if (Roles.canEditApprovalConfig(u)) {
       document.getElementById('tab-config-btn').style.display = '';
     }
     badge.textContent = '● Supabase 已連線';
@@ -382,9 +382,9 @@ async function loadMyRequests() {
 }
 
 async function loadPendingApprovals() {
-  const role = window.currentUser?.role;
-  if (!role) return;
-  pendingItems = await api(`/api/approvals?type=pending&role=${role}`);
+  const effRole = Roles.effectiveApprovalRole(window.currentUser);
+  if (!effRole) return;
+  pendingItems = await api(`/api/approvals?type=pending&role=${effRole}`);
   renderPending();
   const cnt = pendingItems.length;
   const badge = document.getElementById('pending-badge');
@@ -718,9 +718,9 @@ function renderDetail(data) {
   html += `</div>`;
 
   // Approve action box (for current approver)
-  const role = window.currentUser?.role;
+  const effRole = Roles.effectiveApprovalRole(window.currentUser);
   const currentStep = steps.find(s => s.status === 'in_progress');
-  const isMyStep = currentStep && (currentStep.approver_role === role || (role==='chairman' && currentStep.approver_role==='ceo'));
+  const isMyStep = currentStep && (currentStep.approver_role === effRole || (effRole==='chairman' && currentStep.approver_role==='ceo'));
   if (isMyStep) {
     html += `<div class="action-area">
       <div style="font-size:13px;font-weight:500;margin-bottom:10px">📝 步驟 ${currentStep.step_number}：${currentStep.step_name}</div>
@@ -912,6 +912,7 @@ function stepDots(current, total, status) {
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 </script>
+<script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 
 <script src="/js/pwa.js"></script>

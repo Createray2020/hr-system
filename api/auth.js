@@ -2,8 +2,7 @@
 // POST /api/auth?action=change-password  → 員工修改自己密碼
 // POST /api/auth?action=reset-password   → 管理員重設員工密碼
 import { createClient } from '@supabase/supabase-js';
-
-const ALLOWED_ADMIN_ROLES = ['hr', 'chairman', 'admin'];
+import { canManageAuthAccounts } from '../lib/roles.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -59,7 +58,7 @@ export default async function handler(req, res) {
       .from('employees').select('id, role, status').eq('emp_no', admin_emp_no).single();
     if (adminErr || !admin)
       return res.status(403).json({ error: '找不到管理員帳號' });
-    if (!ALLOWED_ADMIN_ROLES.includes(admin.role))
+    if (!canManageAuthAccounts(admin))
       return res.status(403).json({ error: '權限不足，僅 HR 或董事長可重設密碼' });
     if (admin.status === 'resigned')
       return res.status(403).json({ error: '管理員帳號已停用' });

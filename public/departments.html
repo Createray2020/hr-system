@@ -154,8 +154,8 @@ async function loadDepts() {
 }
 
 async function loadManagers() {
-  const emps = await api('/api/employees?status=active');
-  allManagers = emps.filter(e => ['manager','hr','admin'].includes(e.role));
+  // 候選池為「所有 active 員工」。實際 is_manager 由後端在指派/卸任時同步維護。
+  allManagers = await api('/api/employees?status=active');
 }
 
 function updateStats() {
@@ -334,6 +334,7 @@ async function importDeptExcel(input) {
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/js/excel-tools.js"></script>
+<script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 
 <script src="/js/pwa.js"></script>

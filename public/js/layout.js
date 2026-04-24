@@ -51,7 +51,7 @@
         { page:'employees',          icon:'👥', label:'員工資料', href:'/employees.html' },
         { page:'orgchart',           icon:'🗂️', label:'組織圖',   href:'/orgchart.html' },
         { page:'departments',        icon:'🏢', label:'部門管理', href:'/departments.html' },
-        { page:'announcement-admin', icon:'📝', label:'公告管理', href:'/announcement-admin.html', adminOnly: true },
+        { page:'announcement-admin', icon:'📝', label:'公告管理', href:'/announcement-admin.html', gate: u => window.Roles?.canManageAnnouncements(u) },
       ]
     },
     {
@@ -82,17 +82,23 @@
   if (!sidebar) return;
 
   const userName = currentUser?.name || session.user.email.split('@')[0];
-  const userRole = currentUser?.role === 'manager' ? '部門主管'
-                 : currentUser?.role === 'hr'      ? '人資專員'
-                 : currentUser?.role === 'admin'   ? '系統管理員'
+  const userRole = currentUser?.role === 'chairman' ? '董事長'
+                 : currentUser?.role === 'ceo'      ? '執行長'
+                 : currentUser?.role === 'admin'    ? '系統管理員'
+                 : currentUser?.role === 'hr'       ? '人資專員'
+                 : currentUser?.is_manager          ? '部門主管'
                  : '員工';
   const avatarChar = currentUser?.avatar || userName[0];
 
-  const isAdmin = currentUser && ['manager','hr','ceo','chairman','admin'].includes(currentUser.role);
+  const isAdmin = window.Roles?.canAccessBackoffice(currentUser);
   const navHTML = navGroups.map(g => `
     <div class="nav-section">
       <div class="nav-section-title">${g.title}</div>
-      ${g.items.filter(n => !n.adminOnly || isAdmin).map(n => `
+      ${g.items.filter(n => {
+        if (typeof n.gate === 'function') return n.gate(currentUser);
+        if (n.adminOnly) return isAdmin;
+        return true;
+      }).map(n => `
         <a class="nav-item ${page === n.page ? 'active' : ''}" href="${n.href}">
           <span class="nav-icon">${n.icon}</span> ${n.label}
           ${n.page === 'notifications' ? `<span id="notif-badge" style="display:none;margin-left:auto;background:#F87171;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px"></span>` : ''}

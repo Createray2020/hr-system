@@ -12,6 +12,7 @@
 <title>CHUWA HR — 登入</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/roles.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
@@ -145,8 +146,6 @@ const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
 const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const MANAGER_ROLES = ['chairman', 'ceo', 'manager', 'hr', 'admin'];
-
 function showError(msg) {
   const el = document.getElementById('err-box');
   el.textContent = msg;
@@ -155,20 +154,16 @@ function showError(msg) {
 function hideError() { document.getElementById('err-box').style.display = 'none'; }
 
 function redirectByRole(emp) {
-  if (emp.role === 'employee') {
+  if (!Roles.canAccessBackoffice(emp)) {
     window.location.href = '/employee-app.html';
     return;
   }
-  if (MANAGER_ROLES.includes(emp.role)) {
-    const preferred = localStorage.getItem('preferred_version');
-    if (preferred) {
-      window.location.href = preferred === 'desktop' ? '/dashboard.html' : '/employee-app.html';
-    } else {
-      document.getElementById('version-modal').classList.add('open');
-    }
-    return;
+  const preferred = localStorage.getItem('preferred_version');
+  if (preferred) {
+    window.location.href = preferred === 'desktop' ? '/dashboard.html' : '/employee-app.html';
+  } else {
+    document.getElementById('version-modal').classList.add('open');
   }
-  window.location.href = '/dashboard.html';
 }
 
 function chooseVersion(v) {

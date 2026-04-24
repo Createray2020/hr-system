@@ -86,7 +86,7 @@ export default async function handler(req, res) {
   // ── PUT: 審核假單（原 leave.js PUT）────────────────────────────────────────
   if (req.method === 'PUT') {
     if (!id) return res.status(400).json({ error: '缺少 id' });
-    const caller = await requireRole(req, res, ['hr', 'admin', 'manager']);
+    const caller = await requireRole(req, res, ['hr', 'admin'], { allowManager: true });
     if (!caller) return;
     const { status, handler_note } = req.body;
     if (!['approved', 'rejected'].includes(status))

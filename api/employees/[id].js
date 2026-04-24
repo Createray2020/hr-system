@@ -30,7 +30,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'PUT') {
     try {
-      const caller = await requireRoleOrPass(req, res, ['hr', 'ceo', 'manager', 'chairman', 'admin']);
+      const caller = await requireRoleOrPass(req, res, ['hr', 'ceo', 'chairman', 'admin'], { allowManager: true });
       if (!caller) return;
 
       const body = req.body;
