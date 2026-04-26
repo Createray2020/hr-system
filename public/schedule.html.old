@@ -1,0 +1,1495 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>排班管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+<style>
+/* ── Toolbar ── */
+.sched-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.week-nav{display:flex;align-items:center;gap:6px}
+.week-nav button{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:5px 12px;border-radius:7px;cursor:pointer;font-size:13px;transition:all .15s}
+.week-nav button:hover{border-color:var(--accent);color:var(--accent)}
+.period-label{font-family:'DM Mono',monospace;font-size:13px;color:var(--text-dim);white-space:nowrap;padding:0 4px}
+
+/* ── Quick toolbar ── */
+.quick-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--surface);
+  border:2px solid var(--accent);border-radius:8px;padding:10px 14px;margin-bottom:12px}
+.qt-label{font-size:12px;font-weight:600;color:var(--accent2);white-space:nowrap;margin-right:4px}
+.qt-shift-btn{border:2px solid transparent;border-radius:6px;padding:4px 14px;cursor:pointer;
+  font-size:12px;font-weight:600;transition:all .15s;color:#fff}
+.qt-shift-btn.active{border-color:#fff!important;box-shadow:0 0 0 2px rgba(255,255,255,.25)}
+.qt-shift-btn.clear-mode{background:rgba(180,180,180,.2)!important;color:var(--text-dim);border-color:var(--border)}
+.qt-shift-btn.clear-mode.active{border-color:var(--text)!important;color:var(--text)}
+.qt-divider{width:1px;height:24px;background:var(--border);margin:0 4px}
+
+/* ── Evening shift dropdown ── */
+.qt-evening-wrap{position:relative;display:flex;align-items:center;gap:2px}
+.qt-evening-btn{border-radius:6px 0 0 6px!important}
+.qt-gear-btn{background:rgba(255,255,255,.12);border:none;border-radius:0 6px 6px 0;
+  padding:4px 7px;cursor:pointer;font-size:13px;color:#fff;transition:background .15s;
+  line-height:1;height:100%}
+.qt-gear-btn:hover{background:rgba(255,255,255,.25)}
+.qt-evening-dropdown{position:absolute;top:calc(100% + 6px);left:0;
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  min-width:210px;box-shadow:0 8px 28px rgba(0,0,0,.45);z-index:200;
+  padding:4px 0;display:none}
+.qt-evening-dropdown.open{display:block}
+.qt-dd-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;transition:background .15s}
+.qt-dd-item:hover{background:rgba(255,255,255,.06)}
+.qt-dd-item.slot-active{color:var(--accent2)}
+.qt-dd-time{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-dim);font-weight:400}
+.qt-dd-custom{padding:6px 14px}
+.qt-dd-custom-row{display:flex;align-items:center;gap:6px;margin-top:6px}
+.qt-dd-custom-row input[type=time]{background:var(--surface);border:1px solid var(--border);
+  color:var(--text);border-radius:4px;padding:3px 6px;font-size:11px;font-family:'DM Mono',monospace;width:90px}
+.qt-dd-sep{height:1px;background:var(--border);margin:4px 0}
+.qt-dd-footer{padding:6px 14px;font-size:11px;color:var(--text-dim);cursor:pointer;transition:background .15s}
+.qt-dd-footer:hover{background:rgba(255,255,255,.06);color:var(--accent2)}
+
+/* ── Evening slot management modal ── */
+.eslot-item{display:flex;align-items:center;gap:10px;padding:10px 0;
+  border-bottom:1px solid var(--border)}
+.eslot-item:last-child{border-bottom:none}
+.eslot-name{font-size:13px;font-weight:600;flex:1}
+.eslot-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--accent2);white-space:nowrap}
+.eslot-del{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;
+  padding:2px 6px;border-radius:4px;transition:all .15s;line-height:1}
+.eslot-del:hover{background:rgba(244,67,54,.15);color:var(--red)}
+.eslot-add-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;
+  align-items:end;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+
+/* ── Tab bar ── */
+.tab-bar{display:flex;gap:0;background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;overflow:hidden;margin-bottom:16px;width:fit-content}
+.tab-btn{background:none;border:none;color:var(--text-dim);padding:8px 20px;font-size:13px;
+  cursor:pointer;font-family:'Noto Sans TC',sans-serif;transition:all .2s}
+.tab-btn.active{background:var(--accent);color:#fff}
+
+/* ── Week grid ── */
+.grid-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+.sched-grid{border-collapse:collapse;min-width:max-content;width:100%}
+.sched-grid th,.sched-grid td{border:1px solid var(--border);padding:0}
+.sched-grid th{background:var(--surface2);font-size:12px;font-weight:600;
+  padding:8px 12px;white-space:nowrap;text-align:center;color:var(--text-dim)}
+.sched-grid th.today-col{color:var(--accent);border-bottom:2px solid var(--accent)}
+.emp-col{min-width:140px;padding:8px 12px!important;background:var(--surface2)!important;position:sticky;left:0;z-index:2}
+.emp-cell-wrap{display:flex;align-items:center;gap:8px}
+.emp-av-sm{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;
+  background:linear-gradient(135deg,#3B5FD4,#7B6CF6);color:#fff}
+.emp-nm{font-size:12px;font-weight:600}
+.emp-dept{font-size:10px;color:var(--text-dim)}
+
+/* ── Shift cell ── */
+.shift-cell{height:52px;min-width:100px;cursor:pointer;position:relative;
+  transition:background .12s,outline .1s;text-align:center;vertical-align:middle;
+  user-select:none}
+.shift-cell:hover{filter:brightness(1.12)}
+.shift-cell.empty{background:transparent}
+.shift-cell.empty:hover{background:rgba(91,141,239,.08)}
+/* Quick mode hover preview */
+.sched-grid.quick-active .shift-cell{cursor:crosshair}
+.sched-grid.quick-active .shift-cell.drag-over{outline:2px solid var(--qcolor,#5B8DEF);
+  background:var(--qcolor-light,rgba(91,141,239,.18))!important;filter:none}
+.sched-grid.quick-active .shift-cell.empty:hover{background:var(--qcolor-light,rgba(91,141,239,.14))!important}
+/* Filled cells in quick mode hover */
+.sched-grid.quick-active .shift-cell:not(.empty):hover{outline:2px solid var(--qcolor,#5B8DEF)}
+
+.shift-pill{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
+  border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;line-height:1.3;
+  min-width:72px;max-width:90px;pointer-events:none}
+.shift-pill .sp-name{font-size:12px;font-weight:700}
+.shift-pill .sp-time{font-size:10px;opacity:.8;margin-top:1px}
+.shift-empty-hint{font-size:18px;color:var(--border);line-height:52px;pointer-events:none}
+
+/* ── Stats row ── */
+.stats-row-sched{background:var(--surface2);font-size:11px}
+.stat-cell{padding:6px 12px!important;font-family:'DM Mono',monospace;font-size:11px;text-align:center}
+.stat-cell.over{color:var(--red);font-weight:700}
+.stat-cell.ok{color:var(--green)}
+
+/* ── Hours columns ── */
+.hours-hd-col{min-width:74px;font-size:10px;text-align:center;padding:8px 6px!important;
+  color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.5px;background:var(--surface2)}
+.hours-cell{min-width:74px;padding:0 4px!important;text-align:center;vertical-align:middle;
+  font-family:'DM Mono',monospace;font-size:10px;font-weight:600;white-space:nowrap;
+  background:rgba(255,255,255,.018)}
+.hours-cell.h-green{color:var(--green)}
+.hours-cell.h-orange{color:var(--orange)}
+.hours-cell.h-red{color:var(--red)}
+.hours-cell.h-darkred{color:#cc2222;font-weight:700}
+
+/* ── Calendar view ── */
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.cal-day-hd{background:var(--surface2);text-align:center;padding:8px;font-size:11px;font-weight:600;color:var(--text-dim)}
+.cal-day{background:var(--surface);min-height:90px;padding:6px 8px;cursor:pointer;transition:background .15s}
+.cal-day:hover{background:var(--surface2)}
+.cal-day.today{outline:2px solid var(--accent);outline-offset:-2px}
+.cal-day.other-month{opacity:.35}
+.cal-date{font-size:12px;font-weight:600;margin-bottom:4px;font-family:'DM Mono',monospace}
+.cal-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.cal-chip{font-size:9px;padding:1px 5px;border-radius:4px;font-weight:600;color:#fff}
+.cal-more{font-size:10px;color:var(--text-dim);margin-top:2px}
+
+/* ── Shift assignment modal ── */
+.shift-modal .modal{max-width:440px}
+.shift-type-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.shift-type-btn{border:2px solid transparent;border-radius:8px;padding:10px 12px;
+  cursor:pointer;text-align:left;transition:all .15s;background:var(--surface2)}
+.shift-type-btn:hover{border-color:var(--accent)}
+.shift-type-btn.selected{border-color:var(--accent);box-shadow:0 0 0 2px rgba(91,141,239,.2)}
+.shift-type-btn .st-name{font-size:13px;font-weight:600}
+.shift-type-btn .st-time{font-size:11px;color:var(--text-dim);margin-top:2px}
+.shift-type-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;flex-shrink:0}
+
+/* ── Import modal ── */
+.import-modal .modal{max-width:680px;max-height:90vh;overflow-y:auto}
+.upload-zone{border:2px dashed var(--border);border-radius:10px;padding:32px;
+  text-align:center;cursor:pointer;transition:all .2s;margin:12px 0}
+.upload-zone:hover,.upload-zone.drag-on{border-color:var(--accent);background:rgba(91,141,239,.06)}
+.upload-hint{font-size:13px;color:var(--text-dim);margin-top:8px}
+.preview-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+.preview-table th,.preview-table td{border:1px solid var(--border);padding:4px 8px;white-space:nowrap}
+.preview-table th{background:var(--surface2);font-weight:600}
+.preview-row-ok   td:first-child{border-left:3px solid #4CAF50}
+.preview-row-warn td:first-child{border-left:3px solid #FF9800}
+.preview-row-err  td:first-child{border-left:3px solid #F44336}
+.preview-row-err  {opacity:.7}
+.preview-cell-ok  {color:var(--green);font-weight:600}
+.preview-cell-warn{color:#FFA726;font-weight:600}
+.preview-cell-err {color:var(--red);font-weight:600}
+.import-legend{display:flex;gap:16px;font-size:11px;color:var(--text-dim);margin-top:8px}
+.import-legend span{display:flex;align-items:center;gap:5px}
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+</style>
+</head>
+<body data-page="schedule">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+
+    <div class="page-header">
+      <div>
+        <div class="page-title">排班管理</div>
+        <div class="page-sub">四週輪班規劃與班表管理</div>
+      </div>
+    </div>
+
+    <!-- Main Toolbar -->
+    <div class="sched-toolbar">
+      <select class="form-select" id="dept-sel" onchange="onDeptChange()" style="width:140px">
+        <option value="">全部部門</option>
+      </select>
+      <div class="week-nav">
+        <button onclick="movePeriod(-1)">‹ 上期</button>
+        <span class="period-label" id="period-label">—</span>
+        <button onclick="movePeriod(1)">下期 ›</button>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="goToday()">今天</button>
+        <button class="btn btn-ghost btn-sm" id="quick-toggle-btn" onclick="toggleQuickMode()">⚡ 快速排班</button>
+        <button class="btn btn-ghost btn-sm" onclick="openImportModal()">📥 匯入 Excel</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportExcel()">📤 匯出 Excel</button>
+        <button class="btn btn-primary btn-sm" onclick="submitPeriod()">提交審核</button>
+      </div>
+    </div>
+
+    <!-- Quick Scheduling Toolbar -->
+    <div id="quick-toolbar" class="quick-toolbar" style="display:none">
+      <span class="qt-label">⚡ 快速排班：</span>
+      <div id="qt-btns" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      <div class="qt-divider"></div>
+      <button class="qt-shift-btn clear-mode" id="qt-clear-btn" onclick="setQuickClear()">🧹 清除模式</button>
+      <button class="btn btn-ghost btn-sm" onclick="exitQuickMode()" style="margin-left:auto">✕ 關閉快速模式</button>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tb-week" onclick="setTab('week',this)">📋 週班表</button>
+      <button class="tab-btn"        id="tb-cal"  onclick="setTab('cal',this)">📆 月班表</button>
+    </div>
+
+    <!-- Week grid view -->
+    <div id="view-week">
+      <div class="grid-wrap">
+        <table class="sched-grid" id="sched-table">
+          <thead id="sched-thead"></thead>
+          <tbody id="sched-tbody"></tbody>
+          <tfoot id="sched-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Calendar view -->
+    <div id="view-cal" style="display:none">
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Shift assignment modal -->
+<div class="modal-bg shift-modal" id="shift-modal">
+  <div class="modal">
+    <div class="modal-title" id="shift-modal-title">排班</div>
+    <div id="shift-hours-warn" style="display:none;padding:8px 12px;border-radius:6px;background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);color:var(--orange);font-size:12px;margin-bottom:12px;line-height:1.5"></div>
+    <div style="margin-bottom:14px">
+      <div class="form-label" style="margin-bottom:8px">選擇班別</div>
+      <div class="shift-type-grid" id="shift-type-btns"></div>
+    </div>
+    <div id="flex-time-row" style="display:none;margin-bottom:14px">
+      <div class="detail-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-row"><label class="form-label">開始時間</label><input class="form-input" id="sf-start" type="time"></div>
+        <div class="form-row"><label class="form-label">結束時間</label><input class="form-input" id="sf-end" type="time"></div>
+      </div>
+    </div>
+    <div class="form-row" style="margin-bottom:16px">
+      <label class="form-label">備注</label>
+      <input class="form-input" id="sf-note" placeholder="選填">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" id="sf-clear-btn" onclick="clearShift()" style="margin-right:auto">清除排班</button>
+      <button class="btn btn-ghost" onclick="closeModal('shift-modal')">取消</button>
+      <button class="btn btn-primary" onclick="saveShift()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Excel Import modal -->
+<div class="modal-bg import-modal" id="import-modal">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-title">📥 匯入 Excel 班表</div>
+    <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">
+      請先下載範本，在 Excel 中填寫班別名稱後上傳。班別名稱請參考範本中的「班別說明」工作表。
+    </p>
+    <button class="btn btn-ghost btn-sm" onclick="downloadTemplate()">📄 下載範本 (.xlsx)</button>
+
+    <!-- Upload zone -->
+    <div class="upload-zone" id="upload-zone"
+         onclick="document.getElementById('xlsx-file').click()"
+         ondragover="e=>e.preventDefault()" ondrop="handleFileDrop(event)">
+      <div style="font-size:28px">📂</div>
+      <div style="font-size:14px;font-weight:600;margin-top:8px" id="upload-filename">拖拉 .xlsx 到這裡，或點擊選擇</div>
+      <div class="upload-hint">支援 .xlsx 格式</div>
+      <input type="file" id="xlsx-file" accept=".xlsx,.xls" style="display:none"
+             onchange="handleFileSelect(this.files[0])">
+    </div>
+
+    <!-- Preview -->
+    <div id="import-preview" style="display:none">
+      <div class="import-legend">
+        <span><span class="legend-dot" style="background:#4CAF50"></span>正常</span>
+        <span><span class="legend-dot" style="background:#FF9800"></span>警告（班別名稱模糊匹配）</span>
+        <span><span class="legend-dot" style="background:#F44336"></span>錯誤（略過此行）</span>
+      </div>
+      <div style="overflow-x:auto;margin-top:8px;max-height:280px;overflow-y:auto">
+        <table class="preview-table" id="preview-table"></table>
+      </div>
+      <div id="import-summary" style="font-size:12px;color:var(--text-dim);margin-top:8px"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('import-modal')">取消</button>
+      <button class="btn btn-primary" id="confirm-import-btn" onclick="confirmImport()" style="display:none">✅ 確認匯入</button>
+    </div>
+  </div>
+</div>
+
+<!-- Evening Slot Management Modal -->
+<div class="modal-bg" id="eslot-modal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">⚙️ 晚班時段設定</div>
+    <p style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+      設定常用的晚班時段，排班時可快速選擇
+    </p>
+    <!-- Slot list -->
+    <div id="eslot-list"></div>
+    <!-- Add form -->
+    <div class="eslot-add-row">
+      <div class="form-row" style="margin:0">
+        <label class="form-label">名稱（選填）</label>
+        <input class="form-input" id="eslot-new-name" placeholder="晚班A">
+      </div>
+      <div class="form-row" style="margin:0">
+        <label class="form-label">開始時間</label>
+        <input class="form-input" id="eslot-new-start" type="time" value="19:00">
+      </div>
+      <div class="form-row" style="margin:0">
+        <label class="form-label">結束時間</label>
+        <input class="form-input" id="eslot-new-end" type="time" value="22:00">
+      </div>
+      <div class="form-row" style="margin:0">
+        <label class="form-label">&nbsp;</label>
+        <button class="btn btn-primary" onclick="addEveningSlot()" style="width:100%">新增</button>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal('eslot-modal')">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+</script>
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+/* ══════════════════════════════════════════
+   State
+══════════════════════════════════════════ */
+let allEmployees  = [];
+let allShiftTypes = [];
+let allSchedules  = [];
+let currentTab    = 'week';
+
+let periodStart = null;
+const PERIOD_DAYS = 28;
+
+// Modal context
+let shiftCtx = { empId: null, date: null, shiftId: null };
+
+// Quick mode
+let quickMode      = false;
+let quickShiftId   = null;  // null = clear mode
+let quickStartTime = null;  // custom start for flexible/evening shifts
+let quickEndTime   = null;  // custom end   for flexible/evening shifts
+
+// Drag fill
+let dragCells = new Map(); // key "empId|date" → {empId, dateStr, td}
+let dragStarted = false;
+
+// Import parsed data
+let importRows = []; // [{empId, dateStr, shiftTypeId, startTime, endTime, status, msg}]
+
+// Evening time slots (localStorage)
+let eveningSlots = [];
+const LS_KEY = 'custom_shift_times';
+const DEFAULT_EVENING_SLOTS = [
+  { id: 'default-a', name: '晚班A', start: '19:00', end: '22:00' },
+  { id: 'default-b', name: '晚班B', start: '18:00', end: '23:00' },
+  { id: 'default-c', name: '晚班C', start: '20:00', end: '02:00' },
+];
+
+/* ══════════════════════════════════════════
+   Init
+══════════════════════════════════════════ */
+window.onload = async () => {
+  await new Promise(r => setTimeout(r, 650));
+  initPeriod();
+  try {
+    [allEmployees, allShiftTypes] = await Promise.all([
+      api('/api/employees?status=active'),
+      api('/api/shift-types'),
+    ]);
+    fillDeptSel();
+    await loadSchedules();
+  } catch(e) { toast('載入失敗：' + e.message, 'error'); }
+
+  // Load evening time slots from localStorage
+  loadEveningSlots();
+
+  // ── Event delegation for shift cells ──
+  const tbl = document.getElementById('sched-table');
+  tbl.addEventListener('click',     onCellClick);
+  tbl.addEventListener('mousedown', onCellMousedown);
+  tbl.addEventListener('mouseover', onCellMouseover);
+  document.addEventListener('mouseup', onDocMouseup);
+
+  // Close evening dropdown on outside click
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.qt-evening-wrap')) closeAllDropdowns();
+  });
+
+  // Upload zone drag events
+  const zone = document.getElementById('upload-zone');
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-on'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-on'));
+  zone.addEventListener('drop',      handleFileDrop);
+};
+
+/* ══════════════════════════════════════════
+   Period helpers
+══════════════════════════════════════════ */
+function initPeriod() {
+  const today = new Date();
+  const dow   = today.getDay();
+  const diff  = dow === 0 ? -6 : 1 - dow;
+  periodStart = new Date(today);
+  periodStart.setDate(today.getDate() + diff);
+  periodStart.setHours(0,0,0,0);
+  updatePeriodLabel();
+}
+
+function periodEnd() {
+  const d = new Date(periodStart);
+  d.setDate(d.getDate() + PERIOD_DAYS - 1);
+  return d;
+}
+
+function updatePeriodLabel() {
+  const fmt = d => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+  document.getElementById('period-label').textContent = `${fmt(periodStart)} ～ ${fmt(periodEnd())}`;
+}
+
+function movePeriod(dir) {
+  periodStart.setDate(periodStart.getDate() + dir * PERIOD_DAYS);
+  updatePeriodLabel();
+  loadSchedules();
+}
+
+function goToday() { initPeriod(); loadSchedules(); }
+
+function fillDeptSel() {
+  const depts = [...new Set(allEmployees.map(e => e.dept).filter(Boolean))].sort();
+  const sel   = document.getElementById('dept-sel');
+  sel.innerHTML = '<option value="">全部部門</option>' +
+    depts.map(d => `<option value="${d}">${d}</option>`).join('');
+}
+
+function onDeptChange() { renderView(); }
+
+function getFilteredEmps() {
+  const dept = document.getElementById('dept-sel').value;
+  return dept ? allEmployees.filter(e => e.dept === dept) : allEmployees;
+}
+
+/* ══════════════════════════════════════════
+   Data load
+══════════════════════════════════════════ */
+async function loadSchedules() {
+  const start = fmtDate(periodStart);
+  const end   = fmtDate(periodEnd());
+  try {
+    allSchedules = await api(`/api/schedules?start=${start}&end=${end}`);
+  } catch(e) { allSchedules = []; toast('班表載入失敗', 'error'); }
+  renderView();
+}
+
+/* ══════════════════════════════════════════
+   Tab / View
+══════════════════════════════════════════ */
+function setTab(t, btn) {
+  currentTab = t;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('view-week').style.display = t === 'week' ? '' : 'none';
+  document.getElementById('view-cal').style.display  = t === 'cal'  ? '' : 'none';
+  renderView();
+}
+
+function renderView() {
+  if (currentTab === 'week') renderWeekGrid();
+  else renderCalendar();
+}
+
+/* ══════════════════════════════════════════
+   Hours helpers
+══════════════════════════════════════════ */
+function calcHours(start, end) {
+  if (!start || !end) return 0;
+  const toMins = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  let s = toMins(start);
+  let e = toMins(end);
+  if (e <= s) e += 24 * 60; // overnight
+  return Math.max(0, (e - s) / 60 - 1); // deduct 1h break
+}
+
+function getSchedHours(sched) {
+  if (!sched || sched.is_off) return 0;
+  if (sched.shift_start && sched.shift_end) return calcHours(sched.shift_start, sched.shift_end);
+  return 8; // default for shifts without explicit time
+}
+
+function calcEmpMonthHours(empId) {
+  return allSchedules
+    .filter(s => s.employee_id === empId)
+    .reduce((sum, s) => sum + getSchedHours(s), 0);
+}
+
+function calcEmpWeekHours(empId, wStart, wEnd) {
+  return allSchedules
+    .filter(s => s.employee_id === empId && s.work_date >= wStart && s.work_date <= wEnd)
+    .reduce((sum, s) => sum + getSchedHours(s), 0);
+}
+
+function getCurrentWeekRange() {
+  const today = new Date();
+  const dow   = today.getDay();
+  const diff  = dow === 0 ? -6 : 1 - dow;
+  const mon   = new Date(today); mon.setDate(today.getDate() + diff);
+  const sun   = new Date(mon);  sun.setDate(mon.getDate() + 6);
+  return { start: fmtDate(mon), end: fmtDate(sun) };
+}
+
+function monthHoursCls(h) {
+  if (h > 160) return 'h-darkred';
+  if (h > 150) return 'h-red';
+  if (h > 120) return 'h-orange';
+  return 'h-green';
+}
+
+function weekHoursCls(h) {
+  if (h > 48) return 'h-red';
+  if (h > 40) return 'h-orange';
+  return 'h-green';
+}
+
+/* ══════════════════════════════════════════
+   Week Grid
+══════════════════════════════════════════ */
+function renderWeekGrid() {
+  const emps  = getFilteredEmps();
+  const days  = buildDays(periodStart, PERIOD_DAYS);
+  const today = fmtDate(new Date());
+  const { start: wStart, end: wEnd } = getCurrentWeekRange();
+
+  const lookup = {};
+  allSchedules.forEach(s => {
+    if (!lookup[s.employee_id]) lookup[s.employee_id] = {};
+    lookup[s.employee_id][s.work_date] = s;
+  });
+
+  // Header
+  document.getElementById('sched-thead').innerHTML = `<tr>
+    <th class="emp-col" style="text-align:left">員工</th>
+    <th class="hours-hd-col">本月工時</th>
+    <th class="hours-hd-col">本週工時</th>
+    ${days.map(d => {
+      const isToday   = fmtDate(d) === today;
+      const dow       = ['日','一','二','三','四','五','六'][d.getDay()];
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      return `<th class="${isToday ? 'today-col' : ''}" style="${isWeekend ? 'color:var(--red)' : ''}">
+        <div>${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}</div>
+        <div style="font-size:10px;font-weight:400">週${dow}</div>
+      </th>`;
+    }).join('')}
+  </tr>`;
+
+  // Body
+  const tbody = document.getElementById('sched-tbody');
+  if (!emps.length) {
+    tbody.innerHTML = `<tr><td colspan="${days.length+3}" style="text-align:center;padding:32px;color:var(--text-dim);font-size:13px">暫無員工資料</td></tr>`;
+    document.getElementById('sched-tfoot').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = emps.map(emp => {
+    const mH = Math.round(calcEmpMonthHours(emp.id));
+    const wH = Math.round(calcEmpWeekHours(emp.id, wStart, wEnd));
+    const mText = mH > 160 ? `${mH}h ⚠️ / 160h` : `${mH}h / 160h`;
+    const wText = wH > 48  ? `${wH}h ⚠️ / 48h`  : `${wH}h / 48h`;
+
+    const cells = days.map(d => {
+      const dateStr   = fmtDate(d);
+      const sched     = lookup[emp.id]?.[dateStr];
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      if (sched) {
+        const color   = sched.shift_color || '#5B8DEF';
+        const timeStr = (!sched.is_off && (sched.shift_start || sched.shift_end))
+          ? `${sched.shift_start||''}–${sched.shift_end||''}` : '';
+        return `<td class="shift-cell" data-emp="${emp.id}" data-date="${dateStr}" style="background:${color}18">
+          <div class="shift-pill" style="background:${color}22;color:${color}">
+            <span class="sp-name">${esc(sched.shift_name)}</span>
+            ${timeStr ? `<span class="sp-time">${timeStr}</span>` : ''}
+          </div>
+        </td>`;
+      } else {
+        return `<td class="shift-cell empty${isWeekend?' weekend':''}" data-emp="${emp.id}" data-date="${dateStr}">
+          <span class="shift-empty-hint">＋</span>
+        </td>`;
+      }
+    }).join('');
+
+    return `<tr>
+      <td class="emp-col">
+        <div class="emp-cell-wrap">
+          <div class="emp-av-sm">${esc(emp.avatar || emp.name[0])}</div>
+          <div><div class="emp-nm">${esc(emp.name)}</div><div class="emp-dept">${esc(emp.dept)}</div></div>
+        </div>
+      </td>
+      <td class="hours-cell ${monthHoursCls(mH)}">${mText}</td>
+      <td class="hours-cell ${weekHoursCls(wH)}">${wText}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  // Stats footer — per-day totals
+  const tfoot = document.getElementById('sched-tfoot');
+  const dayTotals = days.map(d => {
+    const dateStr = fmtDate(d);
+    const total   = Math.round(emps.reduce((sum, emp) => sum + getSchedHours(lookup[emp.id]?.[dateStr]), 0));
+    return `<td class="stat-cell ${total > 0 ? 'ok' : ''}">${total > 0 ? total + 'h' : '—'}</td>`;
+  }).join('');
+
+  tfoot.innerHTML = `<tr class="stats-row-sched">
+    <td class="emp-col" style="padding:6px 12px!important;font-size:11px;color:var(--text-dim)">本期工時</td>
+    <td class="stat-cell"></td>
+    <td class="stat-cell"></td>
+    ${dayTotals}
+  </tr>`;
+}
+
+/* ══════════════════════════════════════════
+   Calendar view
+══════════════════════════════════════════ */
+function renderCalendar() {
+  const days   = buildDays(periodStart, PERIOD_DAYS);
+  const today  = fmtDate(new Date());
+  const byDate = {};
+  allSchedules.forEach(s => {
+    if (!byDate[s.work_date]) byDate[s.work_date] = [];
+    byDate[s.work_date].push(s);
+  });
+
+  const firstDow = periodStart.getDay();
+  const calDays  = [...Array(firstDow).fill(null), ...days];
+  while (calDays.length % 7 !== 0) calDays.push(null);
+
+  const DOW_NAMES = ['日','一','二','三','四','五','六'];
+  document.getElementById('cal-grid').innerHTML =
+    DOW_NAMES.map(n => `<div class="cal-day-hd">週${n}</div>`).join('') +
+    calDays.map(d => {
+      if (!d) return `<div class="cal-day other-month"></div>`;
+      const dateStr = fmtDate(d);
+      const isToday = dateStr === today;
+      const scheds  = byDate[dateStr] || [];
+      const chips   = scheds.slice(0,4).map(s =>
+        `<span class="cal-chip" style="background:${s.shift_color||'#5B8DEF'}">${esc(s.emp_name||'?')}</span>`
+      ).join('');
+      const more = scheds.length > 4 ? `<div class="cal-more">+${scheds.length-4} 人</div>` : '';
+      return `<div class="cal-day ${isToday?'today':''}" onclick="openDayModal('${dateStr}')">
+        <div class="cal-date">${d.getDate()}</div>
+        <div class="cal-chips">${chips}${more}</div>
+      </div>`;
+    }).join('');
+}
+
+/* ══════════════════════════════════════════
+   Cell event delegation
+══════════════════════════════════════════ */
+function onCellClick(e) {
+  // Only fires when NOT dragging
+  if (dragStarted) return;
+  const td = e.target.closest('td.shift-cell');
+  if (!td) return;
+  if (quickMode) return; // quick mode uses mousedown/mouseup
+  openShiftModal(td.dataset.emp, td.dataset.date);
+}
+
+function onCellMousedown(e) {
+  const td = e.target.closest('td.shift-cell');
+  if (!td || !quickMode || e.button !== 0) return;
+  e.preventDefault();
+  dragStarted = false;
+  dragCells.clear();
+  addDragCell(td);
+}
+
+function onCellMouseover(e) {
+  if (!(e.buttons & 1) || !quickMode) return; // left button must be held
+  const td = e.target.closest('td.shift-cell');
+  if (!td) return;
+  const key = td.dataset.emp + '|' + td.dataset.date;
+  if (!dragCells.has(key)) {
+    dragStarted = true; // moved to second cell = real drag
+    addDragCell(td);
+  }
+}
+
+async function onDocMouseup(e) {
+  if (!quickMode || dragCells.size === 0) return;
+  // Remove visual feedback
+  dragCells.forEach(({td}) => {
+    td.classList.remove('drag-over');
+    td.style.background = '';
+  });
+  const cells = [...dragCells.values()];
+  dragCells.clear();
+
+  if (dragStarted) {
+    // Multi-cell drag → batch fill
+    await batchQuickFill(cells);
+    dragStarted = false;
+  } else {
+    // Single cell click in quick mode
+    await quickFillSingle(cells[0].empId, cells[0].dateStr);
+  }
+}
+
+function addDragCell(td) {
+  const key     = td.dataset.emp + '|' + td.dataset.date;
+  const empId   = td.dataset.emp;
+  const dateStr = td.dataset.date;
+  dragCells.set(key, { empId, dateStr, td });
+  td.classList.add('drag-over');
+}
+
+/* ══════════════════════════════════════════
+   Quick Mode
+══════════════════════════════════════════ */
+function toggleQuickMode() {
+  if (quickMode) exitQuickMode();
+  else enterQuickMode();
+}
+
+function enterQuickMode() {
+  quickMode = true;
+  // Default to first shift type
+  quickShiftId = allShiftTypes[0]?.id || null;
+  document.getElementById('quick-toolbar').style.display = '';
+  document.getElementById('quick-toggle-btn').style.background = 'var(--accent)';
+  document.getElementById('quick-toggle-btn').style.color = '#fff';
+  document.getElementById('sched-table').classList.add('quick-active');
+  buildQuickToolbar();
+  applyQuickColor();
+}
+
+function exitQuickMode() {
+  quickMode = false;
+  quickShiftId = null;
+  dragCells.clear();
+  dragStarted = false;
+  document.getElementById('quick-toolbar').style.display = 'none';
+  document.getElementById('quick-toggle-btn').style.background = '';
+  document.getElementById('quick-toggle-btn').style.color = '';
+  document.getElementById('sched-table').classList.remove('quick-active');
+}
+
+function setQuickShift(id) {
+  quickShiftId   = id;
+  quickStartTime = null;
+  quickEndTime   = null;
+  closeAllDropdowns();
+  applyQuickColor();
+  updateQuickButtons();
+}
+
+function setQuickClear() {
+  quickShiftId   = null;
+  quickStartTime = null;
+  quickEndTime   = null;
+  closeAllDropdowns();
+  applyQuickColor();
+  updateQuickButtons();
+}
+
+function buildQuickToolbar() {
+  const btns = document.getElementById('qt-btns');
+  btns.innerHTML = allShiftTypes.map(st => {
+    if (st.is_flexible) {
+      // Evening/flexible shift → dropdown button
+      return `<div class="qt-evening-wrap" id="wrap-${esc(st.id)}">
+        <button class="qt-shift-btn qt-evening-btn" data-id="${esc(st.id)}"
+            style="background:${st.color}"
+            onclick="toggleEveningDropdown('${esc(st.id)}',event)">
+          ${esc(st.name)} ▾
+        </button>
+        <button class="qt-gear-btn" style="background:${st.color}cc"
+            onclick="openEslotModal(event)" title="管理晚班時段">⚙️</button>
+        <div class="qt-evening-dropdown" id="qt-dd-${esc(st.id)}"></div>
+      </div>`;
+    }
+    const timeStr = st.is_off ? '休假' :
+      (st.start_time && st.end_time ? `${st.start_time}–${st.end_time}` : '');
+    return `<button class="qt-shift-btn" data-id="${esc(st.id)}"
+        style="background:${st.color}"
+        onclick="setQuickShift('${esc(st.id)}')"
+        title="${esc(timeStr)}">
+      ${esc(st.name)}
+    </button>`;
+  }).join('');
+  updateQuickButtons();
+}
+
+function updateQuickButtons() {
+  // Update normal shift buttons
+  document.querySelectorAll('#qt-btns .qt-shift-btn:not(.qt-evening-btn)').forEach(b => {
+    b.classList.toggle('active', b.dataset.id === quickShiftId && !quickStartTime);
+  });
+  // Update evening buttons
+  document.querySelectorAll('#qt-btns .qt-evening-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.id === quickShiftId && !!quickStartTime);
+  });
+  document.getElementById('qt-clear-btn').classList.toggle('active', quickShiftId === null);
+}
+
+function applyQuickColor() {
+  const st    = quickShiftId ? allShiftTypes.find(x => x.id === quickShiftId) : null;
+  const color = st ? st.color : 'rgba(180,180,180,1)';
+  const light = st ? st.color + '22' : 'rgba(180,180,180,.15)';
+  const root  = document.getElementById('sched-table');
+  root.style.setProperty('--qcolor', color);
+  root.style.setProperty('--qcolor-light', light);
+}
+
+/* ── Single cell click in quick mode ── */
+async function quickFillSingle(empId, dateStr) {
+  const existing = allSchedules.find(s => s.employee_id === empId && s.work_date === dateStr);
+  const isSame = existing && quickShiftId &&
+    existing.shift_type_id === quickShiftId &&
+    existing.shift_start === (quickStartTime || null);
+
+  if (isSame) {
+    // Same shift+time → clear to off-type
+    const offType = allShiftTypes.find(st => st.is_off);
+    if (offType) await doSaveShift(empId, dateStr, offType.id, null, null, '');
+    else toast('無法清除：找不到休假班別', 'error');
+  } else if (quickShiftId === null) {
+    const offType = allShiftTypes.find(st => st.is_off);
+    if (offType) await doSaveShift(empId, dateStr, offType.id, null, null, '');
+  } else {
+    await doSaveShift(empId, dateStr, quickShiftId, quickStartTime, quickEndTime, '');
+  }
+}
+
+/* ── Batch fill for drag ── */
+async function batchQuickFill(cells) {
+  if (!cells.length) return;
+  const shiftId = quickShiftId || allShiftTypes.find(st => st.is_off)?.id;
+  if (!shiftId) { toast('找不到班別', 'error'); return; }
+
+  let ok = 0, fail = 0;
+  await Promise.all(cells.map(({empId, dateStr}) => {
+    const emp = allEmployees.find(e => e.id === empId);
+    return api('/api/schedules', {
+      method: 'POST',
+      body: JSON.stringify({
+        employee_id:   empId,
+        work_date:     dateStr,
+        shift_type_id: shiftId,
+        start_time:    quickStartTime || null,
+        end_time:      quickEndTime   || null,
+        dept:          emp?.dept || '',
+        created_by:    window.currentUser?.id || null,
+      }),
+    }).then(() => ok++).catch(() => fail++);
+  }));
+
+  if (fail > 0) toast(`已填入 ${ok} 筆，失敗 ${fail} 筆`, 'error');
+  else toast(`✅ 已填入 ${ok} 筆`, 'success');
+  await loadSchedules();
+}
+
+/* ══════════════════════════════════════════
+   Shift Modal (normal mode)
+══════════════════════════════════════════ */
+function openShiftModal(empId, dateStr) {
+  const emp   = allEmployees.find(e => e.id === empId);
+  const sched = allSchedules.find(s => s.employee_id === empId && s.work_date === dateStr);
+  shiftCtx = { empId, date: dateStr, shiftId: sched?.shift_type_id || null };
+
+  const d   = new Date(dateStr + 'T00:00:00');
+  const dow = ['日','一','二','三','四','五','六'][d.getDay()];
+  document.getElementById('shift-modal-title').textContent =
+    `${esc(emp?.name || empId)} — ${dateStr}（週${dow}）`;
+
+  // Hours warning
+  const mH     = Math.round(calcEmpMonthHours(empId));
+  const warnEl = document.getElementById('shift-hours-warn');
+  if (mH >= 140) {
+    const left = 160 - mH;
+    if (mH > 160) {
+      warnEl.style.background = 'rgba(248,113,113,.12)';
+      warnEl.style.borderColor = 'rgba(248,113,113,.35)';
+      warnEl.style.color = 'var(--red)';
+      warnEl.textContent = `⚠️ ${emp?.name} 本月已排 ${mH}h，已超過160小時上限！`;
+    } else {
+      warnEl.style.background = 'rgba(251,146,60,.1)';
+      warnEl.style.borderColor = 'rgba(251,146,60,.3)';
+      warnEl.style.color = 'var(--orange)';
+      warnEl.textContent = `⚠️ 注意：${emp?.name} 本月已排 ${mH}h，再排 ${left}h 將超過160小時上限`;
+    }
+    warnEl.style.display = '';
+  } else {
+    warnEl.style.display = 'none';
+  }
+
+  const btns = document.getElementById('shift-type-btns');
+  btns.innerHTML = allShiftTypes.map(st => {
+    const selected = shiftCtx.shiftId === st.id ? ' selected' : '';
+    const timeStr  = st.is_flexible ? '彈性時間' : st.is_off ? '休假' :
+      (st.start_time && st.end_time ? `${st.start_time}–${st.end_time}` : '');
+    return `<button class="shift-type-btn${selected}" data-id="${st.id}"
+        style="border-left:4px solid ${st.color}"
+        onclick="selectShiftType('${st.id}',${st.is_flexible})">
+      <div style="display:flex;align-items:center">
+        <span class="shift-type-dot" style="background:${st.color}"></span>
+        <span class="st-name">${esc(st.name)}</span>
+      </div>
+      ${timeStr ? `<div class="st-time">${timeStr}</div>` : ''}
+    </button>`;
+  }).join('');
+
+  document.getElementById('sf-start').value = sched?.shift_start || '';
+  document.getElementById('sf-end').value   = sched?.shift_end   || '';
+  document.getElementById('sf-note').value  = sched?.note        || '';
+
+  const curSt = allShiftTypes.find(st => st.id === shiftCtx.shiftId);
+  document.getElementById('flex-time-row').style.display = curSt?.is_flexible ? '' : 'none';
+  document.getElementById('sf-clear-btn').style.display  = sched ? '' : 'none';
+
+  document.getElementById('shift-modal').classList.add('open');
+}
+
+function openDayModal(dateStr) {
+  const emps      = getFilteredEmps();
+  const scheduled = new Set(allSchedules.filter(s => s.work_date === dateStr).map(s => s.employee_id));
+  const first     = emps.find(e => !scheduled.has(e.id)) || emps[0];
+  if (first) openShiftModal(first.id, dateStr);
+}
+
+function selectShiftType(id, isFlexible) {
+  shiftCtx.shiftId = id;
+  document.querySelectorAll('.shift-type-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.id === id);
+  });
+  document.getElementById('flex-time-row').style.display = isFlexible ? '' : 'none';
+}
+
+async function saveShift() {
+  if (!shiftCtx.shiftId) { toast('請選擇班別', 'error'); return; }
+  await doSaveShift(
+    shiftCtx.empId, shiftCtx.date, shiftCtx.shiftId,
+    document.getElementById('sf-start').value || null,
+    document.getElementById('sf-end').value   || null,
+    document.getElementById('sf-note').value  || '',
+  );
+  closeModal('shift-modal');
+}
+
+async function doSaveShift(empId, dateStr, shiftTypeId, startTime, endTime, note) {
+  const emp = allEmployees.find(e => e.id === empId);
+  try {
+    await api('/api/schedules', {
+      method: 'POST',
+      body: JSON.stringify({
+        employee_id:   empId,
+        work_date:     dateStr,
+        shift_type_id: shiftTypeId,
+        start_time:    startTime,
+        end_time:      endTime,
+        note:          note || '',
+        dept:          emp?.dept || '',
+        created_by:    window.currentUser?.id || null,
+      }),
+    });
+    await loadSchedules();
+  } catch(e) { toast('儲存失敗：' + e.message, 'error'); throw e; }
+}
+
+async function clearShift() {
+  if (!confirm('確定要清除此排班？')) return;
+  const offType = allShiftTypes.find(st => st.is_off);
+  if (offType) {
+    shiftCtx.shiftId = offType.id;
+    await saveShift();
+  } else {
+    closeModal('shift-modal');
+  }
+}
+
+/* ══════════════════════════════════════════
+   Evening Slot Management
+══════════════════════════════════════════ */
+function loadEveningSlots() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    eveningSlots = raw ? JSON.parse(raw) : null;
+  } catch(e) { eveningSlots = null; }
+  if (!eveningSlots || !eveningSlots.length) {
+    eveningSlots = DEFAULT_EVENING_SLOTS.map(s => ({ ...s }));
+    saveEveningSlots();
+  }
+}
+
+function saveEveningSlots() {
+  localStorage.setItem(LS_KEY, JSON.stringify(eveningSlots));
+}
+
+/* ── Dropdown ── */
+function toggleEveningDropdown(shiftId, e) {
+  e.stopPropagation();
+  const dd = document.getElementById('qt-dd-' + shiftId);
+  if (!dd) return;
+  const wasOpen = dd.classList.contains('open');
+  closeAllDropdowns();
+  if (!wasOpen) {
+    renderEveningDropdown(shiftId);
+    dd.classList.add('open');
+  }
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('.qt-evening-dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+function renderEveningDropdown(shiftId) {
+  const dd = document.getElementById('qt-dd-' + shiftId);
+  if (!dd) return;
+  const st = allShiftTypes.find(x => x.id === shiftId);
+  const color = st?.color || '#7B6CF6';
+
+  const slotItems = eveningSlots.map(slot => {
+    const isActive = quickShiftId === shiftId &&
+      quickStartTime === slot.start && quickEndTime === slot.end;
+    return `<div class="qt-dd-item ${isActive ? 'slot-active' : ''}"
+        onclick="selectEveningSlot('${esc(shiftId)}','${esc(slot.start)}','${esc(slot.end)}','${esc(slot.id)}')">
+      <span>${esc(slot.name)}</span>
+      <span class="qt-dd-time">${esc(slot.start)}–${esc(slot.end)}</span>
+    </div>`;
+  }).join('');
+
+  dd.innerHTML = `
+    ${slotItems}
+    <div class="qt-dd-sep"></div>
+    <div class="qt-dd-custom">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">＋ 自訂時間</div>
+      <div class="qt-dd-custom-row">
+        <input type="time" id="qt-custom-start-${esc(shiftId)}" value="19:00">
+        <span style="font-size:11px;color:var(--text-dim)">–</span>
+        <input type="time" id="qt-custom-end-${esc(shiftId)}"   value="22:00">
+        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;white-space:nowrap"
+            onclick="applyCustomTime('${esc(shiftId)}')">套用</button>
+      </div>
+    </div>
+    <div class="qt-dd-sep"></div>
+    <div class="qt-dd-footer" onclick="openEslotModal(event)">⚙️ 管理時段</div>`;
+}
+
+function selectEveningSlot(shiftId, start, end, slotId) {
+  quickShiftId   = shiftId;
+  quickStartTime = start;
+  quickEndTime   = end;
+  closeAllDropdowns();
+  applyQuickColor();
+  updateQuickButtons();
+  // Show selected info on button
+  const btn = document.querySelector(`#qt-btns .qt-evening-btn[data-id="${shiftId}"]`);
+  if (btn) {
+    const st = allShiftTypes.find(x => x.id === shiftId);
+    const slot = eveningSlots.find(s => s.id === slotId);
+    btn.textContent = `${st?.name || '晚班'} ${start}–${end} ▾`;
+  }
+}
+
+function applyCustomTime(shiftId) {
+  const s = document.getElementById(`qt-custom-start-${shiftId}`)?.value;
+  const e = document.getElementById(`qt-custom-end-${shiftId}`)?.value;
+  if (!s || !e) { toast('請輸入開始和結束時間', 'error'); return; }
+  quickShiftId   = shiftId;
+  quickStartTime = s;
+  quickEndTime   = e;
+  closeAllDropdowns();
+  applyQuickColor();
+  updateQuickButtons();
+  const btn = document.querySelector(`#qt-btns .qt-evening-btn[data-id="${shiftId}"]`);
+  if (btn) {
+    const st = allShiftTypes.find(x => x.id === shiftId);
+    btn.textContent = `${st?.name || '晚班'} ${s}–${e} ▾`;
+  }
+}
+
+/* ── Slot management modal ── */
+function openEslotModal(e) {
+  if (e) e.stopPropagation();
+  closeAllDropdowns();
+  renderEslotList();
+  document.getElementById('eslot-new-name').value  = '';
+  document.getElementById('eslot-new-start').value = '19:00';
+  document.getElementById('eslot-new-end').value   = '22:00';
+  document.getElementById('eslot-modal').classList.add('open');
+}
+
+function renderEslotList() {
+  const list = document.getElementById('eslot-list');
+  if (!eveningSlots.length) {
+    list.innerHTML = '<div style="font-size:13px;color:var(--text-dim);padding:8px 0">尚無時段，請新增</div>';
+    return;
+  }
+  list.innerHTML = eveningSlots.map((slot, i) => `
+    <div class="eslot-item">
+      <div class="eslot-name">${esc(slot.name)}</div>
+      <div class="eslot-time">${esc(slot.start)} – ${esc(slot.end)}</div>
+      <button class="eslot-del" onclick="deleteEveningSlot(${i})" title="刪除">×</button>
+    </div>`).join('');
+}
+
+function addEveningSlot() {
+  const start = document.getElementById('eslot-new-start').value;
+  const end   = document.getElementById('eslot-new-end').value;
+  if (!start || !end) { toast('請填寫開始和結束時間', 'error'); return; }
+  const rawName = document.getElementById('eslot-new-name').value.trim();
+  const name    = rawName || `晚班 ${start}-${end}`;
+  eveningSlots.push({ id: 'slot-' + Date.now(), name, start, end });
+  saveEveningSlots();
+  renderEslotList();
+  document.getElementById('eslot-new-name').value = '';
+  toast('✅ 時段已新增', 'success');
+}
+
+function deleteEveningSlot(idx) {
+  eveningSlots.splice(idx, 1);
+  saveEveningSlots();
+  renderEslotList();
+}
+
+function submitPeriod() { toast('班表已提交審核', 'success'); }
+
+/* ══════════════════════════════════════════
+   Excel Export
+══════════════════════════════════════════ */
+function exportExcel() {
+  const emps  = getFilteredEmps();
+  const days  = buildDays(periodStart, PERIOD_DAYS);
+  const dept  = document.getElementById('dept-sel').value || '全部';
+
+  const lookup = {};
+  allSchedules.forEach(s => {
+    if (!lookup[s.employee_id]) lookup[s.employee_id] = {};
+    lookup[s.employee_id][s.work_date] = s;
+  });
+
+  // Header row
+  const header = ['員工編號', '姓名', ...days.map(d =>
+    `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`)];
+
+  // Data rows
+  const rows = emps.map(emp => {
+    const dateCols = days.map(d => {
+      const s = lookup[emp.id]?.[fmtDate(d)];
+      if (!s) return '';
+      let val = s.shift_name || '';
+      if (!s.is_off && s.shift_start && s.shift_end) {
+        val += ` ${s.shift_start}-${s.shift_end}`;
+      }
+      return val;
+    });
+    return [emp.emp_no || '', emp.name, ...dateCols];
+  });
+
+  // Shift types reference sheet
+  const refHeader = ['班別名稱', '類型', '開始時間', '結束時間', '說明'];
+  const refRows   = allShiftTypes.map(st => [
+    st.name,
+    st.is_off ? '休假' : st.is_flexible ? '彈性' : '固定',
+    st.start_time || '',
+    st.end_time   || '',
+    `填入格式：${st.name}${!st.is_off && !st.is_flexible && st.start_time ? ` 或 ${st.name} ${st.start_time}-${st.end_time}` : ''}`,
+  ]);
+
+  const wb  = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  const ws2 = XLSX.utils.aoa_to_sheet([refHeader, ...refRows]);
+
+  // Column widths
+  ws1['!cols'] = [{ wch:12 }, { wch:8 }, ...days.map(() => ({ wch:14 }))];
+  ws2['!cols'] = [{ wch:12 }, { wch:8 }, { wch:10 }, { wch:10 }, { wch:36 }];
+
+  XLSX.utils.book_append_sheet(wb, ws1, '班表');
+  XLSX.utils.book_append_sheet(wb, ws2, '班別說明');
+
+  const startStr = fmtDate(periodStart).replace(/-/g,'');
+  XLSX.writeFile(wb, `班表_${dept}_${startStr}.xlsx`);
+  toast('📤 Excel 已下載', 'success');
+}
+
+/* ══════════════════════════════════════════
+   Template Download
+══════════════════════════════════════════ */
+function downloadTemplate() {
+  const emps  = getFilteredEmps();
+  const days  = buildDays(periodStart, PERIOD_DAYS);
+
+  const header = ['員工編號', '姓名', ...days.map(d =>
+    `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`)];
+
+  const rows = emps.map(emp => [emp.emp_no || '', emp.name, ...days.map(() => '')]);
+
+  const refHeader = ['班別名稱', '類型', '開始時間', '結束時間', '填寫說明'];
+  const refRows   = allShiftTypes.map(st => [
+    st.name,
+    st.is_off ? '休假' : st.is_flexible ? '彈性' : '固定',
+    st.start_time || '',
+    st.end_time   || '',
+    st.is_off ? `填「${st.name}」`
+    : st.is_flexible ? `填「${st.name} HH:MM-HH:MM」（含自訂時間）或直接填「${st.name}」`
+    : `填「${st.name}」或「${st.name} ${st.start_time||'?'}-${st.end_time||'?'}」`,
+  ]);
+
+  const wb  = XLSX.utils.book_new();
+  const ws1 = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  const ws2 = XLSX.utils.aoa_to_sheet([refHeader, ...refRows]);
+
+  ws1['!cols'] = [{ wch:12 }, { wch:8 }, ...days.map(() => ({ wch:14 }))];
+  ws2['!cols'] = [{ wch:12 }, { wch:8 }, { wch:10 }, { wch:10 }, { wch:44 }];
+
+  XLSX.utils.book_append_sheet(wb, ws1, '班表');
+  XLSX.utils.book_append_sheet(wb, ws2, '班別說明');
+
+  const startStr = fmtDate(periodStart).replace(/-/g,'');
+  XLSX.writeFile(wb, `班表範本_${startStr}.xlsx`);
+  toast('📄 範本已下載', 'success');
+}
+
+/* ══════════════════════════════════════════
+   Excel Import
+══════════════════════════════════════════ */
+function openImportModal() {
+  importRows = [];
+  document.getElementById('import-preview').style.display  = 'none';
+  document.getElementById('confirm-import-btn').style.display = 'none';
+  document.getElementById('upload-filename').textContent   = '拖拉 .xlsx 到這裡，或點擊選擇';
+  document.getElementById('upload-zone').classList.remove('drag-on');
+  document.getElementById('xlsx-file').value = '';
+  document.getElementById('import-modal').classList.add('open');
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-zone').classList.remove('drag-on');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) handleFileSelect(file);
+}
+
+function handleFileSelect(file) {
+  if (!file) return;
+  document.getElementById('upload-filename').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = e => parseExcel(new Uint8Array(e.target.result));
+  reader.readAsArrayBuffer(file);
+}
+
+function parseExcel(buffer) {
+  let wb;
+  try { wb = XLSX.read(buffer, { type:'array', cellDates:true }); }
+  catch(e) { toast('Excel 解析失敗：' + e.message, 'error'); return; }
+
+  // Read first sheet named "班表" or first sheet
+  const sheetName = wb.SheetNames.includes('班表') ? '班表' : wb.SheetNames[0];
+  const ws   = wb.Sheets[sheetName];
+  const aoa  = XLSX.utils.sheet_to_json(ws, { header:1, raw:false });
+
+  if (!aoa || aoa.length < 2) { toast('範本格式不正確：需要至少2行', 'error'); return; }
+
+  const headerRow = aoa[0];
+  // Date columns start from index 2
+  const dateCols = []; // [{colIdx, dateStr}]
+  for (let c = 2; c < headerRow.length; c++) {
+    const raw = headerRow[c];
+    if (!raw) continue;
+    // Parse "2026/04/13" or "2026-04-13" or Excel date string
+    const m = String(raw).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (m) {
+      const dateStr = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+      dateCols.push({ colIdx: c, dateStr });
+    }
+  }
+
+  if (!dateCols.length) { toast('找不到日期欄位（格式：2026/04/13）', 'error'); return; }
+
+  // Build emp lookup by emp_no
+  const empByNo = {};
+  allEmployees.forEach(e => { if (e.emp_no) empByNo[e.emp_no.trim()] = e; });
+
+  // Build shift lookup by name (case-insensitive, trimmed)
+  const shiftByName = {};
+  allShiftTypes.forEach(st => { shiftByName[st.name.trim().toLowerCase()] = st; });
+
+  importRows = [];
+
+  for (let r = 1; r < aoa.length; r++) {
+    const row    = aoa[r];
+    const empNo  = String(row[0] || '').trim();
+    if (!empNo) continue;
+
+    const emp = empByNo[empNo];
+    if (!emp) {
+      // Error row: emp not found
+      importRows.push({ _err: `找不到員工編號「${empNo}」`, _empNo: empNo, _name: row[1] || '', cells:[] });
+      continue;
+    }
+
+    const cells = [];
+    for (const { colIdx, dateStr } of dateCols) {
+      const raw = String(row[colIdx] || '').trim();
+      if (!raw) continue; // skip empty
+
+      // Parse shift name (with optional time)
+      // Format: "晚班 18:00-02:00" or "早班"
+      const timeMatch = raw.match(/^(.+?)\s+(\d{2}:\d{2})-(\d{2}:\d{2})$/);
+      let shiftName, startTime = null, endTime = null;
+      if (timeMatch) {
+        shiftName = timeMatch[1].trim();
+        startTime = timeMatch[2];
+        endTime   = timeMatch[3];
+      } else {
+        shiftName = raw;
+      }
+
+      const st = shiftByName[shiftName.toLowerCase()];
+      if (!st) {
+        // Fuzzy match: find shift whose name contains this text
+        const fuzzy = allShiftTypes.find(x =>
+          x.name.toLowerCase().includes(shiftName.toLowerCase()) ||
+          shiftName.toLowerCase().includes(x.name.toLowerCase())
+        );
+        cells.push({ dateStr, raw, shiftTypeId: fuzzy?.id || null,
+          startTime, endTime, status: fuzzy ? 'warn' : 'err',
+          msg: fuzzy ? `模糊匹配「${fuzzy.name}」` : `找不到班別「${shiftName}」` });
+      } else {
+        cells.push({ dateStr, raw, shiftTypeId: st.id, startTime, endTime, status:'ok', msg:'' });
+      }
+    }
+
+    if (cells.length > 0 || !row.slice(2).some(Boolean)) {
+      importRows.push({ empId: emp.id, empNo, empName: emp.name, cells });
+    }
+  }
+
+  renderImportPreview();
+}
+
+function renderImportPreview() {
+  const preview = document.getElementById('import-preview');
+  const tbl     = document.getElementById('preview-table');
+
+  if (!importRows.length) {
+    toast('Excel 中找不到有效資料', 'error');
+    return;
+  }
+
+  // Collect all unique dates
+  const allDates = [...new Set(
+    importRows.flatMap(r => (r.cells||[]).map(c => c.dateStr))
+  )].sort();
+
+  let ok = 0, warn = 0, err = 0, total = 0;
+
+  const headerCells = ['員工編號','姓名',...allDates.map(d => d.slice(5))].map(h =>
+    `<th>${h}</th>`).join('');
+
+  const bodyRows = importRows.map(r => {
+    if (r._err) {
+      err++;
+      return `<tr class="preview-row-err">
+        <td>${esc(r._empNo)}</td>
+        <td>${esc(r._name)}</td>
+        <td colspan="${allDates.length}" class="preview-cell-err">${esc(r._err)}</td>
+      </tr>`;
+    }
+    const rowClass = r.cells.some(c => c.status==='err') ? 'preview-row-err'
+                   : r.cells.some(c => c.status==='warn') ? 'preview-row-warn' : 'preview-row-ok';
+    const dateTds = allDates.map(d => {
+      const cell = r.cells.find(c => c.dateStr === d);
+      if (!cell) return '<td></td>';
+      total++;
+      if (cell.status==='ok')   { ok++;   return `<td class="preview-cell-ok">${esc(cell.raw)}</td>`; }
+      if (cell.status==='warn') { warn++;  return `<td class="preview-cell-warn" title="${esc(cell.msg)}">${esc(cell.raw)}</td>`; }
+      err++;
+      return `<td class="preview-cell-err" title="${esc(cell.msg)}">${esc(cell.raw)}</td>`;
+    }).join('');
+
+    return `<tr class="${rowClass}">
+      <td>${esc(r.empNo)}</td>
+      <td>${esc(r.empName)}</td>
+      ${dateTds}
+    </tr>`;
+  }).join('');
+
+  tbl.innerHTML = `<thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody>`;
+  preview.style.display = '';
+
+  const canImport = ok > 0 || warn > 0;
+  document.getElementById('confirm-import-btn').style.display = canImport ? '' : 'none';
+  document.getElementById('import-summary').textContent =
+    `共 ${total} 筆：正常 ${ok}、警告 ${warn}（仍會匯入）、錯誤 ${err}（略過）`;
+}
+
+async function confirmImport() {
+  const btn = document.getElementById('confirm-import-btn');
+  btn.disabled = true;
+  btn.textContent = '匯入中…';
+
+  let saved = 0, failed = 0;
+  const tasks = [];
+
+  for (const row of importRows) {
+    if (!row.empId || !row.cells) continue;
+    for (const cell of row.cells) {
+      if (!cell.shiftTypeId) continue; // skip error cells
+      const emp = allEmployees.find(e => e.id === row.empId);
+      tasks.push(
+        api('/api/schedules', {
+          method: 'POST',
+          body: JSON.stringify({
+            employee_id:   row.empId,
+            work_date:     cell.dateStr,
+            shift_type_id: cell.shiftTypeId,
+            start_time:    cell.startTime || null,
+            end_time:      cell.endTime   || null,
+            dept:          emp?.dept || '',
+            created_by:    window.currentUser?.id || null,
+          }),
+        }).then(() => saved++).catch(() => failed++)
+      );
+    }
+  }
+
+  await Promise.all(tasks);
+
+  btn.disabled = false;
+  btn.textContent = '✅ 確認匯入';
+  closeModal('import-modal');
+
+  if (failed > 0) toast(`匯入完成：${saved} 筆成功，${failed} 筆失敗`, 'error');
+  else toast(`✅ 已匯入 ${saved} 筆排班`, 'success');
+
+  await loadSchedules();
+}
+
+/* ══════════════════════════════════════════
+   Helpers
+══════════════════════════════════════════ */
+function buildDays(start, count) {
+  const days = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    days.push(d);
+  }
+  return days;
+}
+
+function fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+</script>
+
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>
