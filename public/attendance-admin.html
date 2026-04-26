@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>出勤管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .att-tbl{width:100%;border-collapse:collapse}
+  .att-tbl th, .att-tbl td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:left;font-size:13px;vertical-align:middle}
+  .att-tbl th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15)}
+  .att-tbl tr.anomaly{background:rgba(168,85,247,.06)}
+  .att-tbl tr.absent{background:rgba(248,113,113,.06)}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-normal{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-late{background:rgba(251,191,36,.15);color:#FBBF24}
+  .p-early_leave{background:rgba(248,113,113,.12);color:#F87171}
+  .p-absent{background:rgba(248,113,113,.2);color:#F87171}
+  .p-leave{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .p-holiday{background:rgba(74,222,128,.1);color:#4ADE80}
+  .anomaly-flag{display:inline-block;padding:2px 6px;border-radius:3px;background:rgba(168,85,247,.15);color:#A855F7;font-size:10px;font-family:'DM Mono',monospace;margin-left:4px}
+  .section-h{font-size:14px;font-weight:600;color:var(--text-dim);margin:18px 0 10px;display:flex;align-items:center;gap:8px}
+  .count-badge{padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.08);font-size:11px;font-family:'DM Mono',monospace}
+  .filter-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+</style>
+</head>
+<body data-page="attendance-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">出勤管理</div>
+        <div class="page-sub">檢視打卡紀錄、處理異常、修改 / 刪除</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="filter-bar">
+        <select class="form-select" id="f-month" onchange="load()" style="width:140px"></select>
+        <input type="text" class="form-input" id="f-emp" placeholder="員工 ID / 名稱 篩選" oninput="render()" style="flex:1;max-width:240px">
+        <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+      </div>
+
+      <div class="section-h">⚠ 異常 <span class="count-badge" id="cnt-anomaly">0</span></div>
+      <div class="table-wrap">
+        <table class="att-tbl">
+          <thead><tr><th>日期</th><th>員工</th><th>段</th><th>上班</th><th>下班</th><th>狀態</th><th>備註</th><th>操作</th></tr></thead>
+          <tbody id="tbody-anomaly"></tbody>
+        </table>
+      </div>
+
+      <div class="section-h">全部 <span class="count-badge" id="cnt-all">0</span></div>
+      <div class="table-wrap">
+        <table class="att-tbl">
+          <thead><tr><th>日期</th><th>員工</th><th>段</th><th>上班</th><th>下班</th><th>狀態</th><th>備註</th><th>操作</th></tr></thead>
+          <tbody id="tbody-all"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 編輯抽屜 -->
+<div class="modal-bg" id="edit-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title" id="modal-title">編輯打卡紀錄</div>
+    <input type="hidden" id="f-id">
+
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px" id="modal-meta"></div>
+
+    <div class="form-row">
+      <label class="form-label">上班時間 (clock_in)</label>
+      <input type="datetime-local" class="form-input" id="f-clock-in">
+    </div>
+    <div class="form-row">
+      <label class="form-label">下班時間 (clock_out)</label>
+      <input type="datetime-local" class="form-input" id="f-clock-out">
+    </div>
+    <div class="form-row">
+      <label class="form-label">狀態</label>
+      <select class="form-select" id="f-status">
+        <option value="normal">normal</option>
+        <option value="late">late</option>
+        <option value="early_leave">early_leave</option>
+        <option value="absent">absent</option>
+        <option value="leave">leave</option>
+        <option value="holiday">holiday</option>
+      </select>
+    </div>
+    <div class="form-row" style="display:flex;gap:14px;align-items:center">
+      <label style="display:flex;gap:6px;align-items:center">
+        <input type="checkbox" id="f-anomaly"> <span>標記為異常</span>
+      </label>
+    </div>
+    <div class="form-row">
+      <label class="form-label">異常備註</label>
+      <input type="text" class="form-input" id="f-anomaly-note" placeholder="例:打卡機故障;有同事證明在崗">
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" onclick="deleteAtt()">刪除</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveAtt()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmtIsoLocal(iso){ if(!iso) return '—'; const d = new Date(iso); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+function isoToLocalInput(iso){
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function localInputToIso(s){
+  if (!s) return null;
+  return new Date(s).toISOString();
+}
+
+let allRows = [];
+let empMap = {};
+
+function buildMonthOptions() {
+  const sel = document.getElementById('f-month');
+  const d = new Date();
+  const opts = [];
+  for (let i = 0; i < 6; i++) {
+    const y = d.getFullYear(), m = d.getMonth()+1;
+    const v = `${y}-${String(m).padStart(2,'0')}`;
+    opts.push(`<option value="${v}"${i===0?' selected':''}>${v}</option>`);
+    d.setMonth(d.getMonth()-1);
+  }
+  sel.innerHTML = opts.join('');
+}
+
+async function load(retries = 0) {
+  if (!window.api || !window.currentUser) {
+    if (retries < 25) return setTimeout(()=>load(retries+1), 200);
+    return;
+  }
+
+  const u = window.currentUser;
+  const allowed = u && ['hr', 'admin'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  const month = document.getElementById('f-month').value;
+  const [y, m] = month.split('-');
+  const start = `${y}-${m}-01`;
+  const lastDay = new Date(parseInt(y), parseInt(m), 0).getDate();
+  const end = `${y}-${m}-${String(lastDay).padStart(2,'0')}`;
+
+  try {
+    const rows = await api(`/api/attendance?all=true&start=${start}&end=${end}`);
+    allRows = rows || [];
+    empMap = {};
+    for (const r of allRows) {
+      if (r.employees) empMap[r.employee_id] = r.employees;
+    }
+    render();
+  } catch(e) {
+    toast('載入失敗:'+e.message, 'error');
+  }
+}
+
+function render() {
+  const filter = document.getElementById('f-emp').value.trim().toLowerCase();
+  const rows = allRows.filter(r => {
+    if (!filter) return true;
+    const emp = empMap[r.employee_id];
+    return r.employee_id.toLowerCase().includes(filter) ||
+           (emp?.name || '').toLowerCase().includes(filter);
+  });
+
+  const anomalies = rows.filter(r => r.is_anomaly || r.status === 'absent');
+  const all = rows;
+
+  document.getElementById('cnt-anomaly').textContent = anomalies.length;
+  document.getElementById('cnt-all').textContent = all.length;
+  document.getElementById('tbody-anomaly').innerHTML = renderRows(anomalies);
+  document.getElementById('tbody-all').innerHTML     = renderRows(all);
+}
+
+function renderRows(rows) {
+  if (!rows.length) return `<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:20px">無資料</td></tr>`;
+  return rows.map(r => {
+    const emp = empMap[r.employee_id] || {};
+    const cls = r.is_anomaly ? 'anomaly' : (r.status === 'absent' ? 'absent' : '');
+    return `
+      <tr class="${cls}">
+        <td style="font-family:'DM Mono',monospace">${escHtml(r.work_date)}</td>
+        <td>${escHtml(emp.name || r.employee_id)} <span style="color:var(--text-dim);font-size:11px">${escHtml(r.employee_id)}</span></td>
+        <td style="font-family:'DM Mono',monospace">${r.segment_no || 1}</td>
+        <td>${fmtIsoLocal(r.clock_in)}</td>
+        <td>${fmtIsoLocal(r.clock_out)}</td>
+        <td>
+          <span class="pill p-${escHtml(r.status||'normal')}">${escHtml(r.status||'normal')}</span>
+          ${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}
+        </td>
+        <td style="font-size:12px;color:var(--text-dim)">${escHtml(r.anomaly_note||r.note||'')}</td>
+        <td>
+          <button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(r.id)}')">編輯</button>
+          ${!r.is_anomaly && r.status === 'absent' ? `<button class="btn btn-ghost btn-sm" onclick="markAnomaly('${escHtml(r.id)}', true)">標異常</button>` : ''}
+          ${r.is_anomaly ? `<button class="btn btn-ghost btn-sm" onclick="markAnomaly('${escHtml(r.id)}', false)">取消異常</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openEdit(id) {
+  const r = allRows.find(x => x.id === id);
+  if (!r) return;
+  const emp = empMap[r.employee_id] || {};
+  document.getElementById('f-id').value = r.id;
+  document.getElementById('modal-title').textContent = `編輯 — ${emp.name||r.employee_id} ${r.work_date}`;
+  document.getElementById('modal-meta').textContent = `id=${r.id}, segment=${r.segment_no||1}`;
+  document.getElementById('f-clock-in').value  = isoToLocalInput(r.clock_in);
+  document.getElementById('f-clock-out').value = isoToLocalInput(r.clock_out);
+  document.getElementById('f-status').value    = r.status || 'normal';
+  document.getElementById('f-anomaly').checked = !!r.is_anomaly;
+  document.getElementById('f-anomaly-note').value = r.anomaly_note || '';
+  document.getElementById('edit-modal').classList.add('open');
+}
+function closeModal(){ document.getElementById('edit-modal').classList.remove('open'); }
+
+async function saveAtt() {
+  const id = document.getElementById('f-id').value;
+  const payload = {
+    clock_in:    localInputToIso(document.getElementById('f-clock-in').value),
+    clock_out:   localInputToIso(document.getElementById('f-clock-out').value),
+    status:      document.getElementById('f-status').value,
+    is_anomaly:  document.getElementById('f-anomaly').checked,
+    anomaly_note: document.getElementById('f-anomaly-note').value || null,
+  };
+  try {
+    await api(`/api/attendance/${encodeURIComponent(id)}`, { method:'PUT', body: JSON.stringify(payload) });
+    toast('已儲存');
+    closeModal();
+    await load();
+  } catch(e) { toast('儲存失敗:'+e.message, 'error'); }
+}
+
+async function deleteAtt() {
+  const id = document.getElementById('f-id').value;
+  if (!confirm('確定刪除此筆打卡紀錄?')) return;
+  try {
+    await api(`/api/attendance/${encodeURIComponent(id)}`, { method:'DELETE' });
+    toast('已刪除');
+    closeModal();
+    await load();
+  } catch(e) { toast('刪除失敗:'+e.message, 'error'); }
+}
+
+async function markAnomaly(id, flag) {
+  const note = flag ? prompt('異常備註(選填)') : null;
+  try {
+    await api('/api/attendance/anomaly', { method:'POST', body: JSON.stringify({
+      attendance_id: id, is_anomaly: flag, anomaly_note: note,
+    })});
+    toast(flag ? '已標記異常' : '已取消異常');
+    await load();
+  } catch(e) { toast('失敗:'+e.message, 'error'); }
+}
+
+// Init
+buildMonthOptions();
+load();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>
