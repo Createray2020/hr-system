@@ -1,7 +1,7 @@
 -- =====================================================
 -- supabase_attendance_v2_batch_c.sql
 -- 出勤核心系統 v2.0 - Batch C：salary_records 大改（高風險）
--- 對應設計文件：docs/attendance-system-design-v1.md §4.6.1 + §8.3
+-- 對應設計文件：docs/attendance-system-design-v1.md §4.6.1 + §8.3 (commit 8721a2f)
 -- 執行時機：Batch A、Batch B 都驗收完才跑
 -- 回滾方式：困難（GENERATED column 改動不易無痛回滾）— 見 README §回滾
 -- =====================================================
@@ -9,6 +9,12 @@
 -- ⚠ 重要：本檔分八步驟。直接 \i 執行會跑前 6 步 + 寫 backup table。
 --   步驟 7（比對驗證 SELECT）與步驟 8（DROP _salary_backup）以註解形式包起來，
 --   Ray 上 prod 時自行解註解後手動執行。
+--
+-- 反向 FK 區塊內容不變：型別由 column 決定，column 在 Batch A/B 已對齊
+-- （overtime_requests.applied_to_salary_record_id = TEXT、
+--   attendance_penalty_records.salary_record_id = TEXT、
+--   leave_requests.source_overtime_request_id = BIGINT、
+--   comp_time_balance.source_overtime_request_id = BIGINT）
 -- =====================================================
 
 

@@ -1,7 +1,7 @@
 -- =====================================================
 -- supabase_attendance_v2_batch_a.sql
 -- 出勤核心系統 v2.0 - Batch A：純新增表（零風險）
--- 對應設計文件：docs/attendance-system-design-v1.md §4
+-- 對應設計文件：docs/attendance-system-design-v1.md §4 (commit 8721a2f)
 -- 執行時機：在跑 Batch B 之前
 -- 回滾方式：DROP TABLE 即可（見 README）
 -- =====================================================
@@ -123,13 +123,14 @@ CREATE INDEX idx_comp_time_balance_expiring
 
 
 -- ========== leave_balance_logs ==========
+-- 注意：leave_request_id 為 TEXT（leave_requests.id 是 TEXT PRIMARY KEY）
 CREATE TABLE leave_balance_logs (
   id              BIGSERIAL PRIMARY KEY,
   employee_id     TEXT NOT NULL REFERENCES employees(id),
   balance_type    TEXT NOT NULL CHECK (balance_type IN ('annual', 'comp')),
   annual_record_id BIGINT REFERENCES annual_leave_records(id),
   comp_record_id   BIGINT REFERENCES comp_time_balance(id),
-  leave_request_id BIGINT REFERENCES leave_requests(id),
+  leave_request_id TEXT REFERENCES leave_requests(id),
   change_type     TEXT NOT NULL CHECK (change_type IN (
                     'grant',
                     'use',
@@ -149,6 +150,8 @@ CREATE INDEX idx_leave_balance_logs_employee
 
 
 -- ========== overtime_requests ==========
+-- 注意：schedule_id / attendance_id / applied_to_salary_record_id 皆為 TEXT
+-- （schedules.id / attendance.id / salary_records.id 都是 TEXT PRIMARY KEY）
 CREATE TABLE overtime_requests (
   id              BIGSERIAL PRIMARY KEY,
   employee_id     TEXT NOT NULL REFERENCES employees(id),
@@ -158,8 +161,8 @@ CREATE TABLE overtime_requests (
   end_at          TIMESTAMPTZ NOT NULL,
   hours           NUMERIC(5,2) NOT NULL,
 
-  schedule_id     BIGINT REFERENCES schedules(id),
-  attendance_id   BIGINT REFERENCES attendance(id),
+  schedule_id     TEXT REFERENCES schedules(id),
+  attendance_id   TEXT REFERENCES attendance(id),
 
   request_kind    TEXT NOT NULL CHECK (request_kind IN (
                     'pre_approval',
@@ -201,7 +204,7 @@ CREATE TABLE overtime_requests (
   reject_reason       TEXT,
 
   comp_balance_id     BIGINT REFERENCES comp_time_balance(id),
-  applied_to_salary_record_id BIGINT,
+  applied_to_salary_record_id TEXT,
 
   applies_to_year     INT NOT NULL,
   applies_to_month    INT NOT NULL CHECK (applies_to_month BETWEEN 1 AND 12),
@@ -347,11 +350,12 @@ VALUES
 
 
 -- ========== attendance_penalty_records ==========
--- 注意：salary_record_id 暫不加 FK，等 Batch C salary_records 改完後補
+-- 注意：attendance_id / salary_record_id 為 TEXT
+-- salary_record_id 暫不加 FK，等 Batch C salary_records 改完後補
 CREATE TABLE attendance_penalty_records (
   id              BIGSERIAL PRIMARY KEY,
   employee_id     TEXT NOT NULL REFERENCES employees(id),
-  attendance_id   BIGINT REFERENCES attendance(id),
+  attendance_id   TEXT REFERENCES attendance(id),
 
   penalty_rule_id BIGINT REFERENCES attendance_penalties(id),
 
@@ -364,7 +368,7 @@ CREATE TABLE attendance_penalty_records (
   applies_to_year  INT NOT NULL,
   applies_to_month INT NOT NULL CHECK (applies_to_month BETWEEN 1 AND 12),
 
-  salary_record_id BIGINT,
+  salary_record_id TEXT,
 
   status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
                     'pending',
@@ -414,9 +418,10 @@ INSERT INTO system_overtime_settings (id) VALUES (1)
 
 
 -- ========== schedule_change_logs ==========
+-- 注意：schedule_id 為 TEXT（schedules.id 是 TEXT PRIMARY KEY）
 CREATE TABLE schedule_change_logs (
   id              BIGSERIAL PRIMARY KEY,
-  schedule_id     BIGINT REFERENCES schedules(id) ON DELETE SET NULL,
+  schedule_id     TEXT REFERENCES schedules(id) ON DELETE SET NULL,
   employee_id     TEXT NOT NULL REFERENCES employees(id),
   change_type     TEXT NOT NULL CHECK (change_type IN (
                     'employee_draft',
@@ -443,18 +448,19 @@ CREATE INDEX idx_schedule_change_logs_late_change
 
 
 -- ========== attendance_monthly_summary VIEW ==========
+-- 注意：用 a.work_date（既有 attendance 欄位名）；anomaly_days 改用 is_anomaly 旗標
 CREATE OR REPLACE VIEW attendance_monthly_summary AS
 SELECT
   e.id AS employee_id,
   e.name,
-  EXTRACT(YEAR FROM a.date)::INT AS year,
-  EXTRACT(MONTH FROM a.date)::INT AS month,
+  EXTRACT(YEAR FROM a.work_date)::INT AS year,
+  EXTRACT(MONTH FROM a.work_date)::INT AS month,
 
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'normal') AS normal_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'late') AS late_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'early_leave') AS early_leave_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'absent') AS absent_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'anomaly') AS anomaly_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'normal') AS normal_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'late') AS late_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'early_leave') AS early_leave_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'absent') AS absent_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.is_anomaly = true) AS anomaly_days,
 
   COALESCE(SUM(a.work_hours), 0) AS total_work_hours,
   COALESCE(SUM(a.overtime_hours), 0) AS total_overtime_hours,
@@ -463,4 +469,4 @@ SELECT
 
 FROM employees e
 LEFT JOIN attendance a ON a.employee_id = e.id
-GROUP BY e.id, e.name, EXTRACT(YEAR FROM a.date), EXTRACT(MONTH FROM a.date);
+GROUP BY e.id, e.name, EXTRACT(YEAR FROM a.work_date), EXTRACT(MONTH FROM a.work_date);
