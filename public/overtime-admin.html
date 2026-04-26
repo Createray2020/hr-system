@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>加班管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .tabs{display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .tab{padding:10px 16px;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent}
+  .tab.active{color:#7FBBFF;border-bottom-color:#5B8DEF}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-pending{background:rgba(251,191,36,.15);color:#FBBF24}
+  .p-pending_ceo{background:rgba(168,85,247,.15);color:#A855F7}
+  .p-approved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-rejected{background:rgba(248,113,113,.12);color:#F87171}
+  .p-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .num{font-family:'DM Mono',monospace}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:left;vertical-align:middle}
+  th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15)}
+  .scope-pill{padding:2px 8px;border-radius:3px;font-size:11px;font-family:'DM Mono',monospace}
+  .sp-company{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .sp-employee{background:rgba(74,222,128,.15);color:#4ADE80}
+</style>
+</head>
+<body data-page="overtime-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">加班管理</div>
+        <div class="page-sub">上限設定 + 申請總覽</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="tabs">
+        <div class="tab active" id="t-limits"   onclick="switchTab('limits')">上限設定</div>
+        <div class="tab"        id="t-requests" onclick="switchTab('requests')">申請總覽</div>
+      </div>
+
+      <!-- 上限設定 -->
+      <div id="pane-limits">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+          <button class="btn btn-primary" onclick="openLimit(null)">＋ 新增上限</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>類型</th><th>員工</th><th>日</th><th>週</th><th>月</th><th>年</th><th>月最高</th><th>生效期間</th><th>操作</th></tr></thead>
+            <tbody id="tbody-limits"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 申請總覽 -->
+      <div id="pane-requests" style="display:none">
+        <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center">
+          <select class="form-select" id="f-month" onchange="loadRequests()" style="width:140px"></select>
+          <select class="form-select" id="f-status" onchange="renderRequests()" style="width:160px">
+            <option value="">全部狀態</option>
+            <option value="pending">pending</option>
+            <option value="pending_ceo">pending_ceo</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+            <option value="cancelled">cancelled</option>
+          </select>
+          <input type="text" class="form-input" id="f-search" placeholder="搜尋員工" oninput="renderRequests()" style="flex:1;max-width:240px">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>日期</th><th>員工</th><th>時數</th><th>類別</th><th>補償</th><th>狀態</th><th>金額</th><th>主管</th><th>CEO</th></tr></thead>
+            <tbody id="tbody-requests"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 新增 / 編輯上限 -->
+<div class="modal-bg" id="limit-modal">
+  <div class="modal" style="max-width:560px;width:95vw">
+    <div class="modal-title" id="lim-title">新增加班上限</div>
+    <input type="hidden" id="l-id">
+    <div class="form-row">
+      <label class="form-label">適用範圍 *</label>
+      <select class="form-select" id="l-scope" onchange="onScopeChange()">
+        <option value="company">全公司預設</option>
+        <option value="employee">特定員工</option>
+      </select>
+    </div>
+    <div class="form-row" id="l-emp-row" style="display:none">
+      <label class="form-label">員工 ID *</label>
+      <input type="text" class="form-input" id="l-emp">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row"><label class="form-label">日上限 (h)</label><input type="number" class="form-input" id="l-d" step="0.5" min="0"></div>
+      <div class="form-row"><label class="form-label">週上限 (h)</label><input type="number" class="form-input" id="l-w" step="0.5" min="0"></div>
+      <div class="form-row"><label class="form-label">月上限 (h)</label><input type="number" class="form-input" id="l-m" step="0.5" min="0"></div>
+      <div class="form-row"><label class="form-label">年上限 (h)</label><input type="number" class="form-input" id="l-y" step="0.5" min="0"></div>
+      <div class="form-row" style="grid-column:1/3"><label class="form-label">月最高(hard cap)(h)</label><input type="number" class="form-input" id="l-hc" step="0.5" min="0" placeholder="超過此值系統直接擋"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+      <div class="form-row"><label class="form-label">生效起 *</label><input type="date" class="form-input" id="l-from"></div>
+      <div class="form-row"><label class="form-label">生效迄(可空)</label><input type="date" class="form-input" id="l-to"></div>
+    </div>
+    <div class="form-row"><label class="form-label">備註</label><input type="text" class="form-input" id="l-note"></div>
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="l-del" onclick="deleteLimit()" style="display:none">刪除</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeLimit()">取消</button>
+        <button class="btn btn-primary" onclick="saveLimit()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg,type='success'){let w=document.getElementById('toast-wrap');if(!w){w=document.createElement('div');w.id='toast-wrap';w.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px';document.body.appendChild(w);}const el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;w.appendChild(el);setTimeout(()=>el.remove(),3500);}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+const COMP_LABEL = { comp_leave:'補休', overtime_pay:'加班費', undecided:'待決定' };
+
+let allLimits = [], allRequests = [], empMap = {};
+
+function buildMonthOptions(){
+  const sel = document.getElementById('f-month');
+  const d = new Date(); const out = [];
+  for (let i = 0; i < 6; i++) {
+    const v = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    out.push(`<option value="${v}"${i===0?' selected':''}>${v}</option>`);
+    d.setMonth(d.getMonth()-1);
+  }
+  sel.innerHTML = out.join('');
+}
+
+function switchTab(name){
+  for (const t of ['limits','requests']) {
+    document.getElementById('t-'+t).classList.toggle('active', t===name);
+    document.getElementById('pane-'+t).style.display = t===name ? '' : 'none';
+  }
+  if (name === 'requests' && !allRequests.length) loadRequests();
+}
+
+async function load(retries=0){
+  if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  await loadLimits();
+}
+
+async function loadLimits(){
+  try {
+    const r = await api('/api/overtime-limits');
+    allLimits = r.limits || [];
+    renderLimits();
+  } catch(e){ toast('上限載入失敗:'+e.message,'error'); }
+}
+
+function renderLimits(){
+  const tbody = document.getElementById('tbody-limits');
+  if (!allLimits.length) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-dim)">尚未設定上限</td></tr>`; return; }
+  tbody.innerHTML = allLimits.map(l => `
+    <tr>
+      <td><span class="scope-pill sp-${escHtml(l.scope)}">${escHtml(l.scope)}</span></td>
+      <td>${escHtml(l.employee_id || '—')}</td>
+      <td class="num">${l.daily_limit_hours ?? '—'}</td>
+      <td class="num">${l.weekly_limit_hours ?? '—'}</td>
+      <td class="num">${l.monthly_limit_hours ?? '—'}</td>
+      <td class="num">${l.yearly_limit_hours ?? '—'}</td>
+      <td class="num" style="color:#F87171">${l.monthly_hard_cap_hours ?? '—'}</td>
+      <td class="num" style="font-size:11px">${escHtml(l.effective_from)} ~<br>${escHtml(l.effective_to || '')}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openLimit(${l.id})">編輯</button></td>
+    </tr>
+  `).join('');
+}
+
+async function loadRequests(){
+  const month = document.getElementById('f-month').value;
+  const [y, m] = month.split('-');
+  try {
+    const r = await api(`/api/overtime-requests?year=${y}&month=${parseInt(m)}`);
+    allRequests = r.requests || [];
+    if (window._supabase && allRequests.length) {
+      const ids = [...new Set(allRequests.map(x=>x.employee_id))];
+      const { data } = await window._supabase.from('employees').select('id, name, dept').in('id', ids);
+      empMap = {};
+      for (const e of (data||[])) empMap[e.id] = e;
+    }
+    renderRequests();
+  } catch(e){ toast('申請載入失敗:'+e.message,'error'); }
+}
+
+function renderRequests(){
+  const status = document.getElementById('f-status').value;
+  const q = document.getElementById('f-search').value.trim().toLowerCase();
+  const rows = allRequests.filter(r => {
+    if (status && r.status !== status) return false;
+    if (q) {
+      const emp = empMap[r.employee_id] || {};
+      const txt = `${r.employee_id} ${emp.name||''}`.toLowerCase();
+      if (!txt.includes(q)) return false;
+    }
+    return true;
+  });
+  const tbody = document.getElementById('tbody-requests');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-dim)">無申請</td></tr>`; return; }
+  tbody.innerHTML = rows.map(r => {
+    const emp = empMap[r.employee_id] || {};
+    return `
+      <tr>
+        <td class="num">${escHtml(r.overtime_date)}</td>
+        <td>${escHtml(emp.name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></td>
+        <td class="num">${r.hours}h</td>
+        <td>${escHtml(r.request_kind)}</td>
+        <td>${escHtml(COMP_LABEL[r.compensation_type]||r.compensation_type)}</td>
+        <td><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span>${r.is_over_limit ? ' <span style="color:#A855F7;font-size:10px">超限</span>' : ''}</td>
+        <td class="num">${r.estimated_pay != null ? '$'+r.estimated_pay : '—'}</td>
+        <td style="font-size:11px">${escHtml(r.manager_decision || '—')}</td>
+        <td style="font-size:11px">${escHtml(r.ceo_decision || '—')}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openLimit(id){
+  const cur = id ? allLimits.find(l => l.id === id) : null;
+  document.getElementById('lim-title').textContent = cur ? '編輯上限' : '新增上限';
+  document.getElementById('l-id').value = cur?.id || '';
+  document.getElementById('l-scope').value = cur?.scope || 'company';
+  document.getElementById('l-emp').value = cur?.employee_id || '';
+  document.getElementById('l-d').value = cur?.daily_limit_hours ?? '';
+  document.getElementById('l-w').value = cur?.weekly_limit_hours ?? '';
+  document.getElementById('l-m').value = cur?.monthly_limit_hours ?? '';
+  document.getElementById('l-y').value = cur?.yearly_limit_hours ?? '';
+  document.getElementById('l-hc').value = cur?.monthly_hard_cap_hours ?? '';
+  document.getElementById('l-from').value = cur?.effective_from || new Date().toISOString().slice(0,10);
+  document.getElementById('l-to').value = cur?.effective_to || '';
+  document.getElementById('l-note').value = cur?.note || '';
+  document.getElementById('l-del').style.display = cur ? '' : 'none';
+  onScopeChange();
+  document.getElementById('limit-modal').classList.add('open');
+}
+function closeLimit(){ document.getElementById('limit-modal').classList.remove('open'); }
+function onScopeChange(){
+  const scope = document.getElementById('l-scope').value;
+  document.getElementById('l-emp-row').style.display = scope === 'employee' ? '' : 'none';
+}
+
+async function saveLimit(){
+  const id = document.getElementById('l-id').value;
+  const scope = document.getElementById('l-scope').value;
+  const emp = document.getElementById('l-emp').value.trim();
+  if (scope === 'employee' && !emp) { toast('請填員工 ID','error'); return; }
+
+  const body = {
+    scope,
+    employee_id: scope === 'employee' ? emp : null,
+    daily_limit_hours:    asNum('l-d'),
+    weekly_limit_hours:   asNum('l-w'),
+    monthly_limit_hours:  asNum('l-m'),
+    yearly_limit_hours:   asNum('l-y'),
+    monthly_hard_cap_hours: asNum('l-hc'),
+    effective_from: document.getElementById('l-from').value,
+    effective_to:   document.getElementById('l-to').value || null,
+    note:           document.getElementById('l-note').value || null,
+  };
+  try {
+    if (id) {
+      const { scope: _s, employee_id: _e, ...patch } = body;
+      await api(`/api/overtime-limits/${id}`, { method:'PUT', body: JSON.stringify(patch) });
+    } else {
+      await api('/api/overtime-limits', { method:'POST', body: JSON.stringify(body) });
+    }
+    toast('已儲存');
+    closeLimit();
+    await loadLimits();
+  } catch(e){ toast('儲存失敗:'+e.message,'error'); }
+}
+function asNum(id){ const v=document.getElementById(id).value; return v===''?null:parseFloat(v); }
+
+async function deleteLimit(){
+  const id = document.getElementById('l-id').value;
+  if (!id || !confirm('確定刪除此上限?')) return;
+  try {
+    await api(`/api/overtime-limits/${id}`, { method:'DELETE' });
+    toast('已刪除');
+    closeLimit();
+    await loadLimits();
+  } catch(e){ toast('刪除失敗:'+e.message,'error'); }
+}
+
+buildMonthOptions();
+load();
+</script>
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

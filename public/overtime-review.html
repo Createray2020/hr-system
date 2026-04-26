@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>加班審核 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-pending{background:rgba(251,191,36,.15);color:#FBBF24}
+  .p-pending_ceo{background:rgba(168,85,247,.15);color:#A855F7}
+  .p-approved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-rejected{background:rgba(248,113,113,.12);color:#F87171}
+  .ov-row{display:grid;grid-template-columns:130px 90px 70px 90px 110px 110px;gap:10px;padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);align-items:center;font-size:13px}
+  .ov-row.head{font-weight:600;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,.15)}
+  .num{font-family:'DM Mono',monospace}
+  .over-limit-warn{background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.4);color:#A855F7;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px}
+  .section-h{font-size:14px;font-weight:600;color:var(--text-dim);margin:18px 0 10px;display:flex;align-items:center;gap:8px}
+  .badge{padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.08);font-size:11px;font-family:'DM Mono',monospace}
+</style>
+</head>
+<body data-page="overtime-review">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">加班審核</div>
+        <div class="page-sub">主管 / CEO 審核加班申請</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面</div>
+    </div>
+
+    <div id="main-content">
+      <div class="section-h">待我審核(主管)<span class="badge" id="cnt-mgr">0</span></div>
+      <div class="table-wrap">
+        <div class="ov-row head"><div>日期</div><div>員工</div><div>時數</div><div>補償</div><div>狀態</div><div>操作</div></div>
+        <div id="list-mgr"></div>
+      </div>
+
+      <div class="section-h">待 CEO 審核(超時案件)<span class="badge" id="cnt-ceo">0</span></div>
+      <div class="table-wrap">
+        <div class="ov-row head"><div>日期</div><div>員工</div><div>時數</div><div>補償</div><div>狀態</div><div>操作</div></div>
+        <div id="list-ceo"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 詳細審核 modal -->
+<div class="modal-bg" id="review-modal">
+  <div class="modal" style="max-width:560px;width:95vw">
+    <div class="modal-title" id="m-title">審核加班申請</div>
+    <div id="m-body" style="font-size:13px;margin-bottom:10px"></div>
+
+    <div id="m-over-warn" class="over-limit-warn" style="display:none">
+      ⚠ 此申請超出一般上限(<span id="m-over-dims"></span>),核准後會送 CEO 二次審核
+    </div>
+
+    <div class="form-row" id="m-comp-row" style="display:none">
+      <label class="form-label">補償方式 *(申請時 undecided,審核時必須指定)</label>
+      <select class="form-select" id="m-comp">
+        <option value="comp_leave">補休</option>
+        <option value="overtime_pay">加班費</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">備註 / 駁回原因</label>
+      <input type="text" class="form-input" id="m-note">
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn btn-ghost" onclick="closeReview()">取消</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-danger" onclick="doReview('rejected')">駁回</button>
+        <button class="btn btn-primary" onclick="doReview('approved')">核准</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg,type='success'){let w=document.getElementById('toast-wrap');if(!w){w=document.createElement('div');w.id='toast-wrap';w.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px';document.body.appendChild(w);}const el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;w.appendChild(el);setTimeout(()=>el.remove(),3500);}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+const COMP_LABEL = { comp_leave:'補休', overtime_pay:'加班費', undecided:'待決定' };
+
+let mgrPending = [], ceoPending = [], current = null, currentTier = null;
+let empMap = {};
+
+async function load(retries=0){
+  if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
+  const u = window.currentUser;
+  const allowed = u && (u.is_manager === true || ['hr','admin','ceo'].includes(u.role));
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  try {
+    // 主管:看下屬 pending
+    if (u.is_manager === true) {
+      const r1 = await api(`/api/overtime-requests?scope=subordinates&status=pending`);
+      mgrPending = r1.requests || [];
+    } else if (['hr','admin'].includes(u.role)) {
+      const r1 = await api(`/api/overtime-requests?status=pending`);
+      mgrPending = r1.requests || [];
+    } else mgrPending = [];
+
+    // CEO / admin / hr:看 pending_ceo
+    if (['ceo','admin','hr'].includes(u.role)) {
+      const r2 = await api(`/api/overtime-requests?status=pending_ceo`);
+      ceoPending = r2.requests || [];
+    } else ceoPending = [];
+
+    await loadEmpMap();
+    render();
+  } catch(e){ toast('載入失敗:'+e.message,'error'); }
+}
+
+async function loadEmpMap(){
+  if (!window._supabase) return;
+  const ids = [...new Set([...mgrPending, ...ceoPending].map(r=>r.employee_id))];
+  if (!ids.length) return;
+  const { data } = await window._supabase.from('employees').select('id, name, dept').in('id', ids);
+  empMap = {};
+  for (const e of (data||[])) empMap[e.id] = e;
+}
+
+function render(){
+  document.getElementById('cnt-mgr').textContent = mgrPending.length;
+  document.getElementById('cnt-ceo').textContent = ceoPending.length;
+  document.getElementById('list-mgr').innerHTML = renderList(mgrPending, 'manager');
+  document.getElementById('list-ceo').innerHTML = renderList(ceoPending, 'ceo');
+}
+
+function renderList(rows, tier) {
+  if (!rows.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim);font-size:13px">無待審核</div>`;
+  return rows.map(r => {
+    const emp = empMap[r.employee_id] || {};
+    return `
+      <div class="ov-row">
+        <div class="num">${escHtml(r.overtime_date)}</div>
+        <div>${escHtml(emp.name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></div>
+        <div class="num">${r.hours}h</div>
+        <div>${escHtml(COMP_LABEL[r.compensation_type]||r.compensation_type)}</div>
+        <div><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span>${r.is_over_limit ? ' <span style="color:#A855F7;font-size:10px">超限</span>' : ''}</div>
+        <div><button class="btn btn-primary btn-sm" onclick="openReview(${r.id}, '${tier}')">審核</button></div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openReview(id, tier){
+  current = [...mgrPending, ...ceoPending].find(r => r.id === id);
+  if (!current) return;
+  currentTier = tier;
+  const emp = empMap[current.employee_id] || {};
+
+  document.getElementById('m-title').textContent = `${tier === 'ceo' ? 'CEO' : '主管'}審核 — ${emp.name||current.employee_id}`;
+  document.getElementById('m-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:80px 1fr;gap:6px 12px">
+      <div style="color:var(--text-dim)">日期</div><div>${escHtml(current.overtime_date)}</div>
+      <div style="color:var(--text-dim)">時段</div><div class="num">${escHtml(current.start_at?.slice(11,16)||'')} ~ ${escHtml(current.end_at?.slice(11,16)||'')}</div>
+      <div style="color:var(--text-dim)">時數</div><div class="num">${current.hours}h</div>
+      <div style="color:var(--text-dim)">類別</div><div>${escHtml(current.request_kind)}</div>
+      <div style="color:var(--text-dim)">補償</div><div>${escHtml(COMP_LABEL[current.compensation_type]||current.compensation_type)}</div>
+      <div style="color:var(--text-dim)">理由</div><div>${escHtml(current.reason||'')}</div>
+      <div style="color:var(--text-dim)">預計加班費</div><div class="num">${current.estimated_pay != null ? '$'+current.estimated_pay : '—'}</div>
+      <div style="color:var(--text-dim)">凍結倍率</div><div class="num">${current.pay_multiplier || '—'}</div>
+    </div>
+  `;
+
+  const overWarn = document.getElementById('m-over-warn');
+  if (current.is_over_limit && tier === 'manager') {
+    overWarn.style.display = '';
+    document.getElementById('m-over-dims').textContent = (current.over_limit_dimensions || []).join(', ');
+  } else {
+    overWarn.style.display = 'none';
+  }
+
+  // undecided → 必填補償
+  const compRow = document.getElementById('m-comp-row');
+  if (current.compensation_type === 'undecided') {
+    compRow.style.display = '';
+    document.getElementById('m-comp').value = 'comp_leave';
+  } else {
+    compRow.style.display = 'none';
+  }
+
+  document.getElementById('m-note').value = '';
+  document.getElementById('review-modal').classList.add('open');
+}
+
+function closeReview(){ document.getElementById('review-modal').classList.remove('open'); }
+
+async function doReview(decision){
+  const note = document.getElementById('m-note').value.trim();
+  if (decision === 'rejected' && !note) { toast('駁回需填原因','error'); return; }
+
+  const body = { decision, note: note || null };
+  if (current.compensation_type === 'undecided' && decision === 'approved') {
+    body.compensation_type = document.getElementById('m-comp').value;
+  }
+
+  const endpoint = currentTier === 'ceo'
+    ? `/api/overtime-requests/${current.id}/ceo-review`
+    : `/api/overtime-requests/${current.id}/manager-review`;
+
+  try{
+    const r = await api(endpoint, { method:'POST', body: JSON.stringify(body) });
+    if (r.comp_balance) {
+      toast(`已核准。補休 ${current.hours}h 已加入餘額`);
+    } else {
+      toast(decision === 'approved' ? '已核准' : '已駁回');
+    }
+    closeReview();
+    await load();
+  } catch(e){
+    toast('審核失敗:'+e.message,'error');
+  }
+}
+
+load();
+</script>
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

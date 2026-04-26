@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>加班申請 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .form-card{background:rgba(255,255,255,.03);border:0.5px solid rgba(255,255,255,.08);border-radius:10px;padding:18px;margin-bottom:18px}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-pending{background:rgba(251,191,36,.15);color:#FBBF24}
+  .p-pending_ceo{background:rgba(168,85,247,.15);color:#A855F7}
+  .p-approved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-rejected{background:rgba(248,113,113,.12);color:#F87171}
+  .p-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .ov-row{display:grid;grid-template-columns:90px 70px 70px 1fr 90px 100px 70px;gap:10px;padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);align-items:center;font-size:13px}
+  .ov-row.head{font-weight:600;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,.15)}
+  .check-info{padding:10px 14px;border-radius:8px;font-size:13px;margin-top:8px}
+  .check-ok{background:rgba(74,222,128,.08);color:#4ADE80;border:1px solid rgba(74,222,128,.3)}
+  .check-warn{background:rgba(251,191,36,.08);color:#FBBF24;border:1px solid rgba(251,191,36,.4)}
+  .check-error{background:rgba(248,113,113,.08);color:#F87171;border:1px solid rgba(248,113,113,.4)}
+  .num{font-family:'DM Mono',monospace}
+</style>
+</head>
+<body data-page="overtime">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">加班申請</div>
+        <div class="page-sub">提送加班 / 查申請進度 / 撤回 pending</div>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div style="display:grid;grid-template-columns:140px 1fr 1fr 100px;gap:12px">
+        <div class="form-row"><label class="form-label">日期</label><input type="date" class="form-input" id="f-date" oninput="updateEstimate()"></div>
+        <div class="form-row"><label class="form-label">開始時間</label><input type="time" class="form-input" id="f-start" oninput="updateEstimate()"></div>
+        <div class="form-row"><label class="form-label">結束時間</label><input type="time" class="form-input" id="f-end" oninput="updateEstimate()"></div>
+        <div class="form-row"><label class="form-label">時數(自動)</label><input type="text" class="form-input num" id="f-hours" readonly></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+        <div class="form-row">
+          <label class="form-label">申請類別</label>
+          <select class="form-select" id="f-kind">
+            <option value="pre_approval">事前申請 (pre_approval)</option>
+            <option value="post_approval">事後補申請 (post_approval)</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">補償方式</label>
+          <select class="form-select" id="f-comp">
+            <option value="undecided">待決定(由公司審核時指定)</option>
+            <option value="comp_leave">補休</option>
+            <option value="overtime_pay">加班費</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row" style="margin-top:8px">
+        <label class="form-label">理由 *</label>
+        <input type="text" class="form-input" id="f-reason" placeholder="例:處理急件 / 月底結算">
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:6px">提示:最終補償方式由公司審核時決定。</div>
+      <div id="check-hint" class="check-info" style="display:none"></div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button class="btn btn-primary" onclick="submitRequest()">送出申請</button>
+      </div>
+    </div>
+
+    <div style="font-size:14px;color:var(--text-dim);margin-bottom:8px">我的申請</div>
+    <div class="table-wrap">
+      <div class="ov-row head">
+        <div>日期</div><div>時數</div><div>類別</div><div>補償 / 狀態</div><div>主管</div><div>CEO</div><div>操作</div>
+      </div>
+      <div id="list"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toast(msg, type='success'){let w=document.getElementById('toast-wrap');if(!w){w=document.createElement('div');w.id='toast-wrap';w.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px';document.body.appendChild(w);}const el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;w.appendChild(el);setTimeout(()=>el.remove(),3500);}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+const COMP_LABEL = { comp_leave:'補休', overtime_pay:'加班費', undecided:'待決定' };
+const KIND_LABEL = { pre_approval:'事前', post_approval:'事後' };
+
+let myRequests = [];
+
+function todayStr(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function load(retries=0){
+  if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
+  // 預填日期
+  document.getElementById('f-date').value = todayStr();
+  document.getElementById('f-date').setAttribute('min', todayStr().slice(0,7) + '-01');
+  document.getElementById('f-date').setAttribute('max', new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().slice(0,10));
+  await loadList();
+}
+
+async function loadList(){
+  try{
+    const r = await api(`/api/overtime-requests?employee_id=${currentUser.id}`);
+    myRequests = r.requests || [];
+    render();
+  } catch(e){ toast('載入失敗:'+e.message,'error'); }
+}
+
+function render(){
+  const wrap = document.getElementById('list');
+  if (!myRequests.length) { wrap.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-dim);font-size:13px">尚無加班申請</div>`; return; }
+  wrap.innerHTML = myRequests.map(r => {
+    const canCancel = r.status === 'pending';
+    return `
+      <div class="ov-row">
+        <div class="num">${escHtml(r.overtime_date)}</div>
+        <div class="num">${r.hours}h</div>
+        <div>${escHtml(KIND_LABEL[r.request_kind]||r.request_kind)}</div>
+        <div>
+          <div>${escHtml(COMP_LABEL[r.compensation_type]||r.compensation_type)}</div>
+          <div><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span>${r.is_over_limit ? ' <span style="color:#FBBF24;font-size:10px">超限</span>' : ''}</div>
+        </div>
+        <div style="font-size:11px">${r.manager_decision ? escHtml(r.manager_decision) : '—'}</div>
+        <div style="font-size:11px">${r.ceo_decision ? escHtml(r.ceo_decision) : '—'}</div>
+        <div>${canCancel ? `<button class="btn btn-ghost btn-sm" onclick="cancelOne(${r.id})">撤回</button>` : ''}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateEstimate(){
+  const date = document.getElementById('f-date').value;
+  const start = document.getElementById('f-start').value;
+  const end   = document.getElementById('f-end').value;
+  const hint  = document.getElementById('check-hint');
+  if (!date || !start || !end) { document.getElementById('f-hours').value=''; hint.style.display='none'; return; }
+  const sm = parseHm(start), em = parseHm(end);
+  if (sm == null || em == null || em <= sm) {
+    document.getElementById('f-hours').value = '';
+    hint.className = 'check-info check-error';
+    hint.textContent = '結束時間需晚於開始時間';
+    hint.style.display = '';
+    return;
+  }
+  const h = Math.round(((em - sm) / 60) * 2) / 2;
+  document.getElementById('f-hours').value = h.toFixed(1);
+
+  // 跨月檢查
+  const today = todayStr();
+  if (date.slice(0,7) !== today.slice(0,7)) {
+    hint.className = 'check-info check-error';
+    hint.textContent = '不能跨月申請(本批次規則)。日期必須在當月。';
+    hint.style.display = '';
+    return;
+  }
+  hint.style.display = 'none';
+}
+
+function parseHm(s){const m=String(s).match(/^(\d{1,2}):(\d{2})/);if(!m)return null;return parseInt(m[1])*60+parseInt(m[2]);}
+
+async function submitRequest(){
+  const date  = document.getElementById('f-date').value;
+  const start = document.getElementById('f-start').value;
+  const end   = document.getElementById('f-end').value;
+  const hours = parseFloat(document.getElementById('f-hours').value);
+  const kind  = document.getElementById('f-kind').value;
+  const comp  = document.getElementById('f-comp').value;
+  const reason= document.getElementById('f-reason').value.trim();
+
+  if (!date||!start||!end||!Number.isFinite(hours)||hours<=0){toast('時間不對','error');return;}
+  if (!reason){toast('請填理由','error');return;}
+
+  const startIso = `${date}T${start}:00+08:00`;
+  const endIso   = `${date}T${end}:00+08:00`;
+
+  try{
+    const r = await api('/api/overtime-requests',{method:'POST',body:JSON.stringify({
+      overtime_date: date, start_at: startIso, end_at: endIso,
+      hours, request_kind: kind, compensation_type: comp, reason,
+    })});
+    toast('已送出加班申請');
+    document.getElementById('f-reason').value = '';
+    if (r.limitResult?.is_over_limit) {
+      toast('已記錄為超時申請,需 CEO 核准', 'warn');
+    }
+    await loadList();
+  }catch(e){
+    if(e.message?.includes('EXCEEDS_HARD_CAP')) toast('超出最高上限,無法申請','error');
+    else if(e.message?.includes('CROSS_MONTH'))  toast('不能跨月申請','error');
+    else toast('申請失敗:'+e.message,'error');
+  }
+}
+
+async function cancelOne(id){
+  if(!confirm('確定撤回此申請?')) return;
+  try{
+    await api(`/api/overtime-requests/${id}/cancel`,{method:'POST',body:'{}'});
+    toast('已撤回');
+    await loadList();
+  }catch(e){toast('撤回失敗:'+e.message,'error');}
+}
+
+load();
+</script>
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

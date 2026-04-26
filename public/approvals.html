@@ -239,12 +239,7 @@ const FORM_SCHEMA = {
     {id:'amount',label:'金額（NT$）',type:'number',required:true},
     {id:'description',label:'費用說明',type:'textarea',required:true},
   ],
-  overtime:[
-    {id:'overtime_date',label:'加班日期',type:'date',required:true},
-    {id:'start_time',label:'開始時間',type:'time',required:true},
-    {id:'end_time',label:'結束時間',type:'time',required:true},
-    {id:'reason',label:'加班原因',type:'textarea',required:true},
-  ],
+  // overtime / overtime_pay 已移除:加班申請改走 /overtime.html(Batch 7)
   punch_correction:[
     {id:'correction_date',label:'日期',type:'date',required:true},
     {id:'correction_type',label:'補打卡類型',type:'select',options:['上班打卡','下班打卡'],required:true},
@@ -315,11 +310,6 @@ const FORM_SCHEMA = {
     {id:'purpose',label:'預付款用途',type:'textarea',required:true},
     {id:'amount',label:'金額（NT$）',type:'number',required:true},
     {id:'use_date',label:'預計使用日期（選填）',type:'date',required:false},
-  ],
-  overtime_pay:[
-    {id:'overtime_date',label:'加班日期',type:'date',required:true},
-    {id:'overtime_hours',label:'加班時數',type:'number',required:true},
-    {id:'calculated_amount',label:'計算金額（NT$，選填）',type:'number',required:false},
   ],
   official_document:[
     {id:'subject',label:'公文主旨',type:'text',required:true},
@@ -545,46 +535,12 @@ function selectType(requestType) {
     html += `<div class="form-row"><label class="form-label">${f.label}${req}</label>${input}</div>`;
   });
 
-  // 加班申請：補償方式選擇區塊
-  if (requestType === 'overtime') {
-    html += `<div class="form-row">
-      <label class="form-label">加班補償方式 *</label>
-      <div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px">
-          <input type="radio" name="overtime-compensation" value="compensatory_leave" checked onchange="onCompensationChange(this)">
-          <span>🗓️ 補休</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px">
-          <input type="radio" name="overtime-compensation" value="overtime_pay" onchange="onCompensationChange(this)">
-          <span>💰 加班費</span>
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px">
-          <input type="radio" name="overtime-compensation" value="undecided" onchange="onCompensationChange(this)">
-          <span>⏳ 待決定</span>
-        </label>
-      </div>
-    </div>
-    <div id="compensatory-leave-section" style="display:none">
-      <div class="form-row">
-        <label class="form-label">預計補休日期（選填）</label>
-        <input type="date" class="form-input" id="comp-leave-date">
-      </div>
-    </div>
-    <div id="overtime-pay-section" style="display:none">
-      <div class="form-row">
-        <label class="form-label">預計加班費</label>
-        <div style="background:var(--surface2);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--text-dim)">
-          依勞基法計算：平日前 2 小時 × 1.34 倍、後 2 小時 × 1.67 倍
-          <div id="overtime-pay-preview" style="margin-top:6px;font-size:14px;font-weight:500;color:var(--text)"></div>
-        </div>
-      </div>
-    </div>`;
-  }
+  // 注意:加班申請(overtime / overtime_pay)已移除自此頁,
+  // 改走 /overtime.html(Batch 7,接通 overtime_requests + 兩段式上限 + comp_time_balance)。
 
   html += `<div class="form-row"><label class="form-label">備注（選填）</label><textarea class="form-input" id="ff-note" rows="2" placeholder="補充說明…"></textarea></div>`;
 
   document.getElementById('form-body').innerHTML = html;
-  if (requestType === 'overtime') initOvertimeListeners();
   document.getElementById('new-form-modal').classList.add('open');
 }
 
@@ -599,32 +555,6 @@ async function submitRequest() {
   }
   const form_data = {};
   fields.forEach(f => { const el = document.getElementById('ff-'+f.id); if (el) form_data[f.id] = el.value; });
-
-  // 加班申請：收集補償方式額外欄位
-  if (currentConfig.request_type === 'overtime') {
-    const compType = document.querySelector('input[name="overtime-compensation"]:checked')?.value || 'undecided';
-    form_data.compensation_type = compType;
-    if (compType === 'compensatory_leave') {
-      form_data.comp_leave_date = document.getElementById('comp-leave-date')?.value || '';
-    }
-    if (compType === 'overtime_pay') {
-      const start = document.getElementById('ff-start_time')?.value;
-      const end   = document.getElementById('ff-end_time')?.value;
-      if (start && end) {
-        const toMins = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
-        let mins = toMins(end) - toMins(start);
-        if (mins < 0) mins += 24 * 60;
-        const hours = mins / 60;
-        const emp = window.currentUser;
-        const monthly = (parseFloat(emp?.base_salary)||30000) + (parseFloat(emp?.grade_allowance)||0);
-        const hourly  = monthly / 240;
-        const pay = hours <= 2
-          ? hours * hourly * 1.34
-          : (2 * hourly * 1.34) + ((hours - 2) * hourly * 1.67);
-        form_data.estimated_pay = Math.round(pay);
-      }
-    }
-  }
 
   const note = document.getElementById('ff-note')?.value || '';
   try {
@@ -849,45 +779,6 @@ async function saveConfig(configId) {
     document.getElementById('cfsbtn-'+configId).style.display = 'none';
     toast('✅ 流程設定已儲存', 'success');
   } catch(e) { toast('儲存失敗：'+e.message, 'error'); }
-}
-
-/* ── Overtime compensation ───────────────────────────────────────────────── */
-function initOvertimeListeners() {
-  ['ff-start_time','ff-end_time'].forEach(id => {
-    document.getElementById(id)?.addEventListener('change', () => {
-      if (document.querySelector('input[name="overtime-compensation"]:checked')?.value === 'overtime_pay') {
-        calculateOvertimePay();
-      }
-    });
-  });
-}
-
-function onCompensationChange(radio) {
-  document.getElementById('compensatory-leave-section').style.display =
-    radio.value === 'compensatory_leave' ? '' : 'none';
-  document.getElementById('overtime-pay-section').style.display =
-    radio.value === 'overtime_pay' ? '' : 'none';
-  if (radio.value === 'overtime_pay') calculateOvertimePay();
-}
-
-function calculateOvertimePay() {
-  const start   = document.getElementById('ff-start_time')?.value;
-  const end     = document.getElementById('ff-end_time')?.value;
-  const preview = document.getElementById('overtime-pay-preview');
-  if (!preview) return;
-  if (!start || !end) { preview.textContent = '請先填寫加班起訖時間'; return; }
-  const toMins = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
-  let mins = toMins(end) - toMins(start);
-  if (mins < 0) mins += 24 * 60;
-  const hours   = mins / 60;
-  const emp     = window.currentUser;
-  const monthly = (parseFloat(emp?.base_salary)||30000) + (parseFloat(emp?.grade_allowance)||0);
-  const hourly  = monthly / 240;
-  const pay     = hours <= 2
-    ? hours * hourly * 1.34
-    : (2 * hourly * 1.34) + ((hours - 2) * hourly * 1.67);
-  preview.textContent =
-    `預估加班費：$${Math.round(pay).toLocaleString()}（${hours.toFixed(1)} 小時 · 時薪 $${Math.round(hourly).toLocaleString()}）`;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
