@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>補休管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+  .sum-card{background:rgba(255,255,255,.03);border:0.5px solid rgba(255,255,255,.08);border-radius:10px;padding:14px}
+  .sum-card.warn{border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.06)}
+  .sum-card.act{border-color:rgba(168,85,247,.4);background:rgba(168,85,247,.06)}
+  .sum-label{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace}
+  .sum-num{font-size:28px;font-weight:700;font-family:'DM Mono',monospace;margin-top:4px}
+  .ct-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .ct-tbl th, .ct-tbl td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:left;vertical-align:middle}
+  .ct-tbl th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15)}
+  .ct-tbl tr.warn{background:rgba(248,113,113,.06)}
+  .ct-tbl tr.action{background:rgba(168,85,247,.06)}
+  .num{font-family:'DM Mono',monospace}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-active{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-fully_used{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .p-expired_paid{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .p-expired_void{background:rgba(248,113,113,.12);color:#F87171}
+  .section-h{font-size:14px;font-weight:600;color:var(--text-dim);margin:18px 0 10px;display:flex;gap:8px;align-items:center}
+  .count-badge{padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.08);font-size:11px;font-family:'DM Mono',monospace}
+  .empty-st{padding:30px;text-align:center;color:var(--text-dim);font-size:13px}
+</style>
+</head>
+<body data-page="comp-time-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">補休管理</div>
+        <div class="page-sub">員工補休餘額 / 即將失效 / 已失效待處理</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="summary-grid">
+        <div class="sum-card"><div class="sum-label">員工總數</div><div class="sum-num" id="s-emp">—</div></div>
+        <div class="sum-card warn"><div class="sum-label">30 天內到期</div><div class="sum-num" id="s-warn" style="color:#F87171">—</div></div>
+        <div class="sum-card act"><div class="sum-label">已失效待處理</div><div class="sum-num" id="s-action" style="color:#A855F7">—</div></div>
+      </div>
+
+      <div class="section-h">員工補休餘額 <span class="count-badge" id="cnt-emp">0</span></div>
+      <div class="table-wrap">
+        <table class="ct-tbl">
+          <thead><tr><th>員工</th><th>部門</th><th>總餘額</th><th>記錄數</th><th>最近到期</th></tr></thead>
+          <tbody id="tbody-emp"></tbody>
+        </table>
+      </div>
+
+      <div class="section-h">⚠ 30 天內到期 <span class="count-badge" id="cnt-warn">0</span></div>
+      <div class="table-wrap">
+        <table class="ct-tbl">
+          <thead><tr><th>員工</th><th>失效日</th><th>剩餘小時</th><th>取得日</th></tr></thead>
+          <tbody id="tbody-warn"></tbody>
+        </table>
+      </div>
+
+      <div class="section-h">已失效待處理(manual_review 模式 / payout 未填) <span class="count-badge" id="cnt-action">0</span></div>
+      <div class="table-wrap">
+        <table class="ct-tbl">
+          <thead><tr><th>員工</th><th>失效日</th><th>狀態</th><th>金額</th><th>處理時間</th></tr></thead>
+          <tbody id="tbody-action"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmtDate(s){ if(!s) return '—'; return String(s).slice(0,10); }
+function daysUntil(dateStr){
+  if (!dateStr) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(dateStr + 'T00:00:00'); d.setHours(0,0,0,0);
+  return Math.ceil((d - today) / 86400000);
+}
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+let allEmps = [];
+let actionRecords = []; // expired_paid 但 expiry_payout_amount IS NULL
+
+async function load(retries = 0) {
+  if (!window.api || !window.currentUser) {
+    if (retries < 25) return setTimeout(()=>load(retries+1), 200);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr', 'admin'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  try {
+    // 1. 拿全部員工的 active records
+    const r = await api('/api/comp-time');
+    allEmps = r.employees || [];
+
+    // 2. 用 supabase client 撈 expired_paid 但金額 NULL 的記錄(待 HR 處理)
+    if (window._supabase) {
+      const { data } = await window._supabase
+        .from('comp_time_balance').select('*')
+        .eq('status', 'expired_paid').is('expiry_payout_amount', null)
+        .order('expires_at', { ascending: false });
+      actionRecords = data || [];
+    }
+
+    render();
+  } catch(e) { toast('載入失敗:'+e.message, 'error'); }
+}
+
+function render() {
+  // Summary
+  document.getElementById('s-emp').textContent = allEmps.length;
+  let warnCount = 0;
+  for (const e of allEmps) {
+    for (const r of e.records) {
+      const d = daysUntil(r.expires_at);
+      if (d != null && d >= 0 && d <= 30) warnCount += 1;
+    }
+  }
+  document.getElementById('s-warn').textContent = warnCount;
+  document.getElementById('s-action').textContent = actionRecords.length;
+
+  // Employees
+  const tbEmp = document.getElementById('tbody-emp');
+  document.getElementById('cnt-emp').textContent = allEmps.length;
+  if (!allEmps.length) {
+    tbEmp.innerHTML = `<tr><td colspan="5"><div class="empty-st">尚無員工有補休餘額</div></td></tr>`;
+  } else {
+    tbEmp.innerHTML = allEmps.map(e => {
+      const earliest = e.records[0]?.expires_at;
+      const d = daysUntil(earliest);
+      const warn = d != null && d >= 0 && d <= 30;
+      return `
+        <tr class="${warn ? 'warn' : ''}">
+          <td>${escHtml(e.emp_name||e.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(e.employee_id)}</div></td>
+          <td>${escHtml(e.dept||'')}</td>
+          <td class="num" style="color:#4ADE80;font-weight:600">${e.total_remaining}h</td>
+          <td class="num">${e.records.length} 筆</td>
+          <td class="num">${escHtml(fmtDate(earliest))}${warn ? ` <span style="color:#F87171">(${d}天)</span>` : ''}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Warning list (30 days)
+  const warnRows = [];
+  for (const e of allEmps) {
+    for (const r of e.records) {
+      const d = daysUntil(r.expires_at);
+      if (d != null && d >= 0 && d <= 30 && r.remaining_hours > 0) {
+        warnRows.push({ ...r, emp_name: e.emp_name, employee_id: e.employee_id, days: d });
+      }
+    }
+  }
+  warnRows.sort((a, b) => a.days - b.days);
+  const tbWarn = document.getElementById('tbody-warn');
+  document.getElementById('cnt-warn').textContent = warnRows.length;
+  if (!warnRows.length) {
+    tbWarn.innerHTML = `<tr><td colspan="4"><div class="empty-st">無 30 天內到期的補休</div></td></tr>`;
+  } else {
+    tbWarn.innerHTML = warnRows.map(r => `
+      <tr class="warn">
+        <td>${escHtml(r.emp_name || r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></td>
+        <td class="num">${escHtml(fmtDate(r.expires_at))} <span style="color:#F87171">(${r.days}天)</span></td>
+        <td class="num" style="color:#F87171">${r.remaining_hours}h</td>
+        <td class="num">${escHtml(fmtDate(r.earned_at))}</td>
+      </tr>
+    `).join('');
+  }
+
+  // Action list
+  const tbAct = document.getElementById('tbody-action');
+  document.getElementById('cnt-action').textContent = actionRecords.length;
+  if (!actionRecords.length) {
+    tbAct.innerHTML = `<tr><td colspan="5"><div class="empty-st">無待處理失效記錄</div></td></tr>`;
+  } else {
+    tbAct.innerHTML = actionRecords.map(r => `
+      <tr class="action">
+        <td>${escHtml(r.employee_id)}</td>
+        <td class="num">${escHtml(fmtDate(r.expires_at))}</td>
+        <td><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+        <td class="num">${r.expiry_payout_amount != null ? '$' + r.expiry_payout_amount : '—'}</td>
+        <td class="num" style="font-size:11px">${escHtml(fmtDate(r.expiry_processed_at))}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+load();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

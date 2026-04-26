@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>我的補休 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .total-card{background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.3);border-radius:12px;padding:24px;margin-bottom:18px;text-align:center}
+  .total-num{font-size:42px;font-weight:700;font-family:'DM Mono',monospace;color:#7FBBFF}
+  .total-label{color:var(--text-dim);font-size:12px;margin-top:4px}
+  .ct-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .ct-tbl th, .ct-tbl td{padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:left;vertical-align:middle}
+  .ct-tbl th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15)}
+  .ct-tbl tr.warn{background:rgba(248,113,113,.08)}
+  .num{font-family:'DM Mono',monospace}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-active{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-fully_used{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .warn-tag{background:rgba(248,113,113,.15);color:#F87171;padding:2px 6px;border-radius:3px;font-size:10px;margin-left:6px;font-family:'DM Mono',monospace}
+  .empty-st{padding:40px;text-align:center;color:var(--text-dim);font-size:13px}
+</style>
+</head>
+<body data-page="comp-time">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">我的補休</div>
+        <div class="page-sub">補休餘額 / 失效預警</div>
+      </div>
+    </div>
+
+    <div class="total-card">
+      <div class="total-num" id="total-h">—</div>
+      <div class="total-label">小時(可用補休)</div>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-dim)" id="total-sub">—</div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="ct-tbl">
+        <thead><tr>
+          <th>取得日</th><th>失效日</th><th>取得時數</th><th>已用</th><th>剩餘</th><th>狀態</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script>
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmtDate(s){ if(!s) return '—'; return String(s).slice(0,10); }
+function fmtTs(s){
+  if(!s) return '—';
+  const d = new Date(s);
+  return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+}
+function daysUntil(dateStr){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(dateStr + 'T00:00:00'); d.setHours(0,0,0,0);
+  return Math.ceil((d - today) / 86400000);
+}
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+async function load(retries = 0) {
+  if (!window.api || !window.currentUser) {
+    if (retries < 25) return setTimeout(()=>load(retries+1), 200);
+    return;
+  }
+  try {
+    const r = await api(`/api/comp-time?employee_id=${currentUser.id}`);
+    render(r.balance || { total_remaining: 0, records: [] });
+  } catch(e) { toast('載入失敗:'+e.message, 'error'); }
+}
+
+function render(balance) {
+  document.getElementById('total-h').textContent = balance.total_remaining || 0;
+  if (balance.records.length === 0) {
+    document.getElementById('total-sub').textContent = '目前無補休餘額';
+  } else {
+    const earliest = balance.records[0]?.expires_at;
+    document.getElementById('total-sub').textContent = `最近一筆 ${fmtDate(earliest)} 失效`;
+  }
+
+  const tbody = document.getElementById('tbody');
+  if (!balance.records.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-st">無補休紀錄。補休由加班批准產生(Batch 7 上線)。</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = balance.records.map(r => {
+    const days = daysUntil(r.expires_at);
+    const warn = days >= 0 && days <= 30;
+    const warnTag = warn ? `<span class="warn-tag">⚠ ${days} 天後失效</span>` : '';
+    return `
+      <tr class="${warn ? 'warn' : ''}">
+        <td class="num">${escHtml(fmtTs(r.earned_at))}</td>
+        <td class="num">${escHtml(fmtDate(r.expires_at))} ${warnTag}</td>
+        <td class="num">${r.earned_hours}h</td>
+        <td class="num">${r.used_hours}h</td>
+        <td class="num" style="color:#4ADE80">${r.remaining_hours}h</td>
+        <td><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+load();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

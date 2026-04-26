@@ -151,9 +151,12 @@ describe('submitLeaveRequest', () => {
     expect(repo.findActiveAnnualRecord).not.toHaveBeenCalled();
   });
 
-  it('comp(Batch 6 才扣)→ 本批 no-op,直接建 pending', async () => {
+  it('comp + 餘額足夠 → 建 pending', async () => {
     const repo = makeRepo({
       findSchedulesInRange: vi.fn(async () => [dayShift()]),
+      findActiveCompBalances: vi.fn(async () => [
+        { id: 1, earned_hours: 10, used_hours: 0, expires_at: '2026-12-31', earned_at: '2026-01-01T00:00:00Z' },
+      ]),
     });
     const r = await submitLeaveRequest(repo, {
       employee_id: 'E001', leave_type: 'comp',
@@ -162,6 +165,22 @@ describe('submitLeaveRequest', () => {
     });
     expect(r.ok).toBe(true);
     expect(r.request.leave_type).toBe('comp');
+  });
+
+  it('comp + 餘額不足 → INSUFFICIENT_COMP_BALANCE', async () => {
+    const repo = makeRepo({
+      findSchedulesInRange: vi.fn(async () => [dayShift()]),
+      findActiveCompBalances: vi.fn(async () => [
+        { id: 1, earned_hours: 4, used_hours: 0, expires_at: '2026-12-31', earned_at: '2026-01-01T00:00:00Z' },
+      ]),
+    });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'comp',
+      start_at: '2026-04-27T09:00:00+08:00',
+      end_at:   '2026-04-27T18:00:00+08:00',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('INSUFFICIENT_COMP_BALANCE');
   });
 
   it('未知 leave_type → throw', async () => {
@@ -196,7 +215,7 @@ describe('approveLeaveRequest', () => {
     expect(patch.finalized_hours).toBe(8);
   });
 
-  it('comp:no-op(Batch 6 才扣),仍 update 成 approved', async () => {
+  it('comp:扣 comp_time_balance(FIFO),不扣 annual', async () => {
     const req = {
       id: 'L2', employee_id: 'E001', leave_type: 'comp',
       start_at: '2026-04-27T09:00:00+08:00', end_at: '2026-04-27T18:00:00+08:00',
@@ -205,11 +224,45 @@ describe('approveLeaveRequest', () => {
     const repo = makeRepo({
       findLeaveRequestById: vi.fn(async () => req),
       findSchedulesInRange: vi.fn(async () => [dayShift()]),
+      findActiveCompBalances: vi.fn(async () => [
+        { id: 1, earned_hours: 10, used_hours: 0, expires_at: '2026-12-31', earned_at: '2026-01-01T00:00:00Z' },
+      ]),
+      lockAndIncrementCompUsedHours: vi.fn(async () => ({ ok: true, record: { id: 1 } })),
     });
     const r = await approveLeaveRequest(repo, { request_id: 'L2', approved_by: 'M001' });
     expect(r.ok).toBe(true);
-    expect(repo.lockAndIncrementUsedDays).not.toHaveBeenCalled();
+    expect(repo.lockAndIncrementUsedDays).not.toHaveBeenCalled(); // 不扣 annual
+    expect(repo.lockAndIncrementCompUsedHours).toHaveBeenCalledWith({
+      comp_id: 1, delta_hours: 8, allow_negative: false,
+    });
     expect(repo.updateLeaveRequest.mock.calls[0][1].status).toBe('approved');
+  });
+
+  it('comp:跨多筆 FIFO 扣餘額(8h 跨兩筆 5+5)', async () => {
+    const req = {
+      id: 'L3', employee_id: 'E001', leave_type: 'comp',
+      start_at: '2026-04-27T09:00:00+08:00', end_at: '2026-04-27T18:00:00+08:00',
+      hours: 8, finalized_hours: null, status: 'pending',
+    };
+    const repo = makeRepo({
+      findLeaveRequestById: vi.fn(async () => req),
+      findSchedulesInRange: vi.fn(async () => [dayShift()]),
+      findActiveCompBalances: vi.fn(async () => [
+        { id: 10, earned_hours: 5, used_hours: 0, expires_at: '2026-06-30', earned_at: '2025-06-30T00:00:00Z' },
+        { id: 11, earned_hours: 5, used_hours: 0, expires_at: '2026-12-31', earned_at: '2025-12-31T00:00:00Z' },
+      ]),
+      lockAndIncrementCompUsedHours: vi.fn(async () => ({ ok: true })),
+    });
+    const r = await approveLeaveRequest(repo, { request_id: 'L3', approved_by: 'M001' });
+    expect(r.ok).toBe(true);
+    // 第一筆扣 5h(全扣完),第二筆扣 3h
+    expect(repo.lockAndIncrementCompUsedHours).toHaveBeenCalledTimes(2);
+    expect(repo.lockAndIncrementCompUsedHours.mock.calls[0][0]).toEqual({
+      comp_id: 10, delta_hours: 5, allow_negative: false,
+    });
+    expect(repo.lockAndIncrementCompUsedHours.mock.calls[1][0]).toEqual({
+      comp_id: 11, delta_hours: 3, allow_negative: false,
+    });
   });
 
   it('NOT_FOUND → 拒絕', async () => {
