@@ -241,16 +241,21 @@ ALTER TABLE attendance ADD COLUMN IF NOT EXISTS
 ALTER TABLE attendance ADD COLUMN IF NOT EXISTS
   holiday_id BIGINT REFERENCES holidays(id);
 
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS
+  is_anomaly BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE attendance ADD COLUMN IF NOT EXISTS
+  anomaly_note TEXT;
+
 ALTER TABLE attendance DROP CONSTRAINT IF EXISTS attendance_status_check;
 ALTER TABLE attendance ADD CONSTRAINT attendance_status_check
-  CHECK (status IN ('normal','late','early_leave','absent','leave','holiday','anomaly'));
+  CHECK (status IN ('normal','late','early_leave','absent','leave','holiday'));
 ```
 
 **設計理由：**
 - schedule_id FK 是核心：每筆打卡必須對應一筆排班，沒排班 → 無法打卡（API 層擋）
 - late_minutes/early_leave_minutes 把實際分鐘數存起來，後續算扣款用
 - is_holiday_work + holiday_id 連動 holidays 表，薪資計算時查倍率
-- anomaly status 對應「排了班沒打卡 + 異常標示」
+- is_anomaly 旗標獨立於 status：員工真的沒來 = status='absent'（會扣日薪）；有來但有問題（打卡機壞、忘記打卡有證據等）= is_anomaly=true 等 HR 介入。同一筆 attendance 可同時是 absent + is_anomaly=true（先判曠職、待 HR 查證）
 
 ---
 
@@ -822,6 +827,10 @@ ALTER TABLE leave_requests
   ADD CONSTRAINT fk_leave_requests_overtime
   FOREIGN KEY (source_overtime_request_id) REFERENCES overtime_requests(id);
 
+ALTER TABLE comp_time_balance
+  ADD CONSTRAINT fk_comp_time_balance_overtime
+  FOREIGN KEY (source_overtime_request_id) REFERENCES overtime_requests(id);
+
 -- 重建 gross_salary / net_salary 為新公式 GENERATED column
 -- 注意：實際執行時要先 backfill 才能 DROP/RECREATE
 ALTER TABLE salary_records DROP COLUMN gross_salary;
@@ -861,6 +870,7 @@ ALTER TABLE salary_records ADD COLUMN net_salary NUMERIC(12,2)
 - daily_wage_snapshot 凍結：曠職扣薪要用「該月當時的日薪」算，月中加薪不溯及
 - attendance_bonus_* 三欄拆開：base（員工檔設定）→ deduction_rate（扣除比例）→ actual（最終給的），HR 看薪資單可看到計算過程
 - FK 反向接回去：penalty_records、overtime_requests、leave_requests 都連到 salary_records，形成完整勾稽
+- comp_time_balance.source_overtime_request_id 的 FK 在這裡才補：comp_time_balance 在 §4.3 建立時 overtime_requests 還沒存在，等 §4.6 才能補 FK
 
 #### 4.6.2 system_overtime_settings（新建）
 
@@ -974,6 +984,8 @@ INSERT INTO system_overtime_settings (id) VALUES (1)
 | 每月 26 日 09:00 | 排班送出提醒（下月份 status='draft' 的員工） | api/cron-schedule-reminder.js | lib/schedule/reminder.js |
 
 **架構說明：** 每個 cron 都遵循「API 進入點 = thin wrapper、業務邏輯 = lib/ 純函式」的設計，跟 approvals_v2 同款。lib/ 純函式可單獨單元測試。
+
+**late_change 通知不走 cron：** schedule_change_logs 中 change_type='late_change' 的紀錄（工作日當天的排班調整）由 schedule API 即時觸發推播給 HR + CEO，而非靠 cron sweep。schema 上的 notification_sent 旗標 + partial index 仍保留，供未來查報表 / 補發通知用。
 
 ---
 
