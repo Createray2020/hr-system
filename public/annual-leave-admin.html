@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>特休管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .annual-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .annual-tbl th, .annual-tbl td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:left;vertical-align:middle}
+  .annual-tbl th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15)}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-active{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-paid_out{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .p-expired{background:rgba(248,113,113,.12);color:#F87171}
+  .p-rolled_over{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .num{font-family:'DM Mono',monospace}
+</style>
+</head>
+<body data-page="annual-leave-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">特休管理</div>
+        <div class="page-sub">員工特休餘額 / 結算 / 手動調整</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="filter-bar" style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <select class="form-select" id="f-status" onchange="render()" style="width:140px">
+          <option value="active" selected>active</option>
+          <option value="paid_out">paid_out</option>
+          <option value="expired">expired</option>
+          <option value="rolled_over">rolled_over</option>
+          <option value="">全部</option>
+        </select>
+        <input type="text" class="form-input" id="f-search" placeholder="搜尋員工" oninput="render()" style="flex:1;max-width:240px">
+        <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="annual-tbl">
+          <thead><tr>
+            <th>員工</th><th>週期</th><th>年資</th><th>法定</th><th>實給</th>
+            <th>已用</th><th>剩餘</th><th>狀態</th><th>結算金額</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 編輯抽屜 -->
+<div class="modal-bg" id="edit-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title" id="modal-title">編輯特休記錄</div>
+    <div id="modal-meta" style="font-size:12px;color:var(--text-dim);margin-bottom:14px"></div>
+
+    <div class="form-row">
+      <label class="form-label">實給天數 (granted_days)</label>
+      <input type="number" class="form-input" id="f-granted" step="0.5" min="0">
+    </div>
+    <div class="form-row">
+      <label class="form-label">備註</label>
+      <input type="text" class="form-input" id="f-note">
+    </div>
+
+    <div class="form-row" style="background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:10px;margin-top:10px">
+      <label style="display:flex;align-items:center;gap:6px;color:#F87171">
+        <input type="checkbox" id="f-settle"> <span>結算為 paid_out(離職 / 週期到期)</span>
+      </label>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">⚠ 結算金額暫填 0(TODO Batch 9 由 lib/salary/settlement.js 計算實際金額)</div>
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveRec()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+let allRecs = [];
+let currentRec = null;
+
+async function load(retries = 0) {
+  if (!window.api || !window.currentUser) {
+    if (retries < 25) return setTimeout(()=>load(retries+1), 200);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr', 'admin'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  try {
+    const r = await api('/api/annual-leaves');
+    allRecs = r.records || [];
+    render();
+  } catch(e) { toast('載入失敗:'+e.message, 'error'); }
+}
+
+function render() {
+  const status = document.getElementById('f-status').value;
+  const q = document.getElementById('f-search').value.trim().toLowerCase();
+
+  const rows = allRecs.filter(r => {
+    if (status && r.status !== status) return false;
+    if (q) {
+      const txt = `${r.emp_name||''} ${r.employee_id||''}`.toLowerCase();
+      if (!txt.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const tbody = document.getElementById('tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-dim);padding:20px">無資料</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const remaining = (Number(r.granted_days) - Number(r.used_days)).toFixed(1);
+    return `
+      <tr>
+        <td>${escHtml(r.emp_name || r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></td>
+        <td class="num">${escHtml(r.period_start)} ~<br>${escHtml(r.period_end)}</td>
+        <td class="num">${Number(r.seniority_years).toFixed(1)}y</td>
+        <td class="num">${r.legal_days}</td>
+        <td class="num">${r.granted_days}</td>
+        <td class="num">${r.used_days}</td>
+        <td class="num" style="color:#4ADE80">${remaining}</td>
+        <td><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+        <td class="num">${r.settlement_amount != null ? '$' + r.settlement_amount : '—'}</td>
+        <td>
+          ${r.status === 'active' ? `<button class="btn btn-ghost btn-sm" onclick="openEdit(${r.id})">編輯</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openEdit(id) {
+  currentRec = allRecs.find(r => r.id === id);
+  if (!currentRec) return;
+  document.getElementById('modal-title').textContent = `編輯 — ${currentRec.emp_name || currentRec.employee_id}`;
+  document.getElementById('modal-meta').textContent = `週期 ${currentRec.period_start} ~ ${currentRec.period_end} (${currentRec.seniority_years}年資)`;
+  document.getElementById('f-granted').value = currentRec.granted_days;
+  document.getElementById('f-note').value = currentRec.note || '';
+  document.getElementById('f-settle').checked = false;
+  document.getElementById('edit-modal').classList.add('open');
+}
+function closeModal(){ document.getElementById('edit-modal').classList.remove('open'); }
+
+async function saveRec() {
+  const granted = parseFloat(document.getElementById('f-granted').value);
+  const note    = document.getElementById('f-note').value;
+  const settle  = document.getElementById('f-settle').checked;
+
+  if (settle) {
+    if (!confirm('確認結算此筆?\n金額暫填 0(Batch 9 才算實際金額)。剩餘天數會寫 settle log。')) return;
+    try {
+      await api(`/api/annual-leaves/${currentRec.id}`, { method:'PUT', body: JSON.stringify({ settle: true, note })});
+      toast('已結算');
+      closeModal();
+      await load();
+    } catch(e) { toast('結算失敗:'+e.message, 'error'); }
+    return;
+  }
+
+  if (!Number.isFinite(granted) || granted < 0) {
+    toast('請填合法的實給天數', 'error'); return;
+  }
+  if (granted < Number(currentRec.used_days)) {
+    toast(`實給不可小於已用 ${currentRec.used_days} 天`, 'error'); return;
+  }
+  try {
+    await api(`/api/annual-leaves/${currentRec.id}`, { method:'PUT', body: JSON.stringify({ granted_days: granted, note })});
+    toast('已儲存');
+    closeModal();
+    await load();
+  } catch(e) { toast('儲存失敗:'+e.message, 'error'); }
+}
+
+load();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

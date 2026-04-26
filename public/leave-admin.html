@@ -1,0 +1,252 @@
+<!-- 本檔為新建（規範 §7.1 寫「重做」實為筆誤；既有 leave.html 已包含 HR 審核邏輯，本批拆分為員工頁 leave.html + HR 頁 leave-admin.html 兩檔） -->
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>請假審核 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .p-pending{background:rgba(251,191,36,.15);color:#FBBF24}
+  .p-approved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .p-rejected{background:rgba(248,113,113,.12);color:#F87171}
+  .p-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .l-row{display:grid;grid-template-columns:140px 80px 1fr 70px 70px 130px;gap:10px;padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);align-items:center;font-size:13px}
+  .l-row.head{font-weight:600;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,.15)}
+  .filter-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .live-recalc{background:rgba(91,141,239,.1);border:1px solid rgba(91,141,239,.4);color:#7FBBFF;padding:8px 12px;border-radius:6px;font-size:13px;margin:10px 0}
+</style>
+</head>
+<body data-page="leave-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">請假審核</div>
+        <div class="page-sub">主管 / HR 審核員工假單</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面</div>
+    </div>
+
+    <div id="main-content">
+      <div class="filter-bar">
+        <select class="form-select" id="f-status" onchange="render()" style="width:140px">
+          <option value="pending" selected>待審 (pending)</option>
+          <option value="approved">已核准</option>
+          <option value="rejected">已退回</option>
+          <option value="cancelled">已撤回</option>
+          <option value="">全部</option>
+        </select>
+        <select class="form-select" id="f-type" onchange="render()" style="width:140px">
+          <option value="">全部類型</option>
+          <option value="annual">特休</option>
+          <option value="sick">病假</option>
+          <option value="personal">事假</option>
+          <option value="comp">補休</option>
+          <option value="maternity">產假</option>
+          <option value="funeral">喪假</option>
+          <option value="marriage">婚假</option>
+          <option value="public">公假</option>
+        </select>
+        <input type="text" class="form-input" id="f-search" placeholder="搜尋員工姓名 / ID" oninput="render()" style="flex:1;max-width:240px">
+        <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+      </div>
+
+      <div class="table-wrap">
+        <div class="l-row head">
+          <div>申請人</div><div>類型</div><div>時間</div><div>申請時數</div><div>狀態</div><div>操作</div>
+        </div>
+        <div id="list"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 詳細抽屜 -->
+<div class="modal-bg" id="detail-modal">
+  <div class="modal" style="max-width:560px;width:95vw">
+    <div class="modal-title" id="modal-title">假單詳情</div>
+    <div id="modal-body" style="font-size:13px"></div>
+
+    <div class="form-row" id="reject-row" style="display:none;margin-top:10px">
+      <label class="form-label">退回原因 (必填)</label>
+      <input type="text" class="form-input" id="f-reject-reason" placeholder="例:時間衝突已有 X 員工請假">
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal()">關閉</button>
+      <div style="display:flex;gap:8px" id="action-buttons"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmtDt(iso){ if(!iso) return '—'; const d=new Date(iso); const pad=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+
+const TYPE_NAME = { annual:'特休', sick:'病假', personal:'事假', maternity:'產假', funeral:'喪假', marriage:'婚假', comp:'補休', public:'公假' };
+
+let allLeaves = [];
+let empMap = {};
+let currentLeave = null;
+
+async function load(retries = 0) {
+  if (!window.api || !window.currentUser) {
+    if (retries < 25) return setTimeout(()=>load(retries+1), 200);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && (u.is_manager === true || ['hr', 'admin'].includes(u.role));
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  try {
+    // 用 legacy endpoint 拿全部假單(回的 row 已含 emp 資料)
+    const rows = await api('/api/leaves');
+    allLeaves = rows || [];
+    empMap = {};
+    for (const l of allLeaves) {
+      if (l.emp_name) empMap[l.employee_id] = { name: l.emp_name, dept: l.dept };
+    }
+    render();
+  } catch(e) { toast('載入失敗:'+e.message, 'error'); }
+}
+
+function render() {
+  const status = document.getElementById('f-status').value;
+  const type   = document.getElementById('f-type').value;
+  const q      = document.getElementById('f-search').value.trim().toLowerCase();
+
+  const rows = allLeaves.filter(l => {
+    if (status && l.status !== status) return false;
+    if (type && l.leave_type !== type) return false;
+    if (q) {
+      const txt = `${l.emp_name||''} ${l.employee_id||''}`.toLowerCase();
+      if (!txt.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const wrap = document.getElementById('list');
+  if (!rows.length) {
+    wrap.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-dim);font-size:13px">無假單</div>`;
+    return;
+  }
+  wrap.innerHTML = rows.map(l => {
+    const tName = TYPE_NAME[l.leave_type] || l.leave_type;
+    const hours = l.finalized_hours ?? l.hours ?? (l.days ? l.days * 8 : '—');
+    return `
+      <div class="l-row">
+        <div>${escHtml(l.emp_name || l.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(l.dept||'')}</div></div>
+        <div>${escHtml(tName)}</div>
+        <div style="font-size:12px">${fmtDt(l.start_at || (l.start_date+'T00:00:00+08:00'))} ~ ${fmtDt(l.end_at || (l.end_date+'T00:00:00+08:00'))}</div>
+        <div style="font-family:'DM Mono',monospace">${hours}h</div>
+        <div><span class="pill p-${escHtml(l.status)}">${escHtml(l.status)}</span></div>
+        <div><button class="btn btn-ghost btn-sm" onclick="openDetail('${escHtml(l.id)}')">查看 / 審核</button></div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function openDetail(id) {
+  currentLeave = allLeaves.find(l => l.id === id);
+  if (!currentLeave) return;
+  const l = currentLeave;
+  const tName = TYPE_NAME[l.leave_type] || l.leave_type;
+  const hours = l.finalized_hours ?? l.hours ?? '—';
+
+  document.getElementById('modal-title').textContent = `${l.emp_name || l.employee_id} 的 ${tName} 申請`;
+  document.getElementById('modal-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:100px 1fr;gap:6px 12px;margin-bottom:12px">
+      <div style="color:var(--text-dim)">類型</div><div>${escHtml(tName)}</div>
+      <div style="color:var(--text-dim)">時間</div><div>${fmtDt(l.start_at || (l.start_date+'T00:00:00+08:00'))} ~ ${fmtDt(l.end_at || (l.end_date+'T00:00:00+08:00'))}</div>
+      <div style="color:var(--text-dim)">申請時數</div><div style="font-family:'DM Mono',monospace">${hours}h</div>
+      <div style="color:var(--text-dim)">狀態</div><div><span class="pill p-${escHtml(l.status)}">${escHtml(l.status)}</span></div>
+      <div style="color:var(--text-dim)">理由</div><div>${escHtml(l.reason || '—')}</div>
+    </div>
+    ${l.status === 'pending' ? `
+      <div class="live-recalc" id="live-recalc">
+        ℹ 核准時會依當下排班即時重算時數,可能 ≠ 申請時的時數(${hours}h)。
+      </div>` : ''}
+  `;
+
+  document.getElementById('reject-row').style.display = 'none';
+  const buttons = document.getElementById('action-buttons');
+  if (l.status === 'pending') {
+    buttons.innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="onReject()">退回</button>
+      <button class="btn btn-primary" onclick="onApprove()">核准</button>
+    `;
+  } else {
+    buttons.innerHTML = '';
+  }
+
+  document.getElementById('detail-modal').classList.add('open');
+}
+function closeModal(){ document.getElementById('detail-modal').classList.remove('open'); }
+
+async function onApprove() {
+  if (!confirm(`核准 ${currentLeave.emp_name || currentLeave.employee_id} 的 ${TYPE_NAME[currentLeave.leave_type]} 申請?`)) return;
+  try {
+    const r = await api(`/api/leaves/${encodeURIComponent(currentLeave.id)}`, {
+      method: 'PUT', body: JSON.stringify({ decision: 'approve' }),
+    });
+    if (r && r.ok === false) { toast('核准失敗:'+(r.reason||'unknown'), 'error'); return; }
+    toast('已核准');
+    closeModal();
+    await load();
+  } catch(e) { toast('核准失敗:'+e.message, 'error'); }
+}
+
+function onReject() {
+  document.getElementById('reject-row').style.display = '';
+  const buttons = document.getElementById('action-buttons');
+  buttons.innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="closeModal()">取消</button>
+    <button class="btn btn-danger" onclick="confirmReject()">確認退回</button>
+  `;
+}
+
+async function confirmReject() {
+  const reason = document.getElementById('f-reject-reason').value.trim();
+  if (!reason) { toast('請填退回原因','error'); return; }
+  try {
+    const r = await api(`/api/leaves/${encodeURIComponent(currentLeave.id)}`, {
+      method: 'PUT', body: JSON.stringify({ decision: 'reject', reject_reason: reason }),
+    });
+    if (r && r.ok === false) { toast('退回失敗:'+(r.reason||'unknown'), 'error'); return; }
+    toast('已退回');
+    closeModal();
+    await load();
+  } catch(e) { toast('退回失敗:'+e.message, 'error'); }
+}
+
+load();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>
