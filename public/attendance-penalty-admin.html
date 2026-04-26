@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>出勤獎懲管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .tabs{display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .tab{padding:10px 16px;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent}
+  .tab.active{color:#7FBBFF;border-bottom-color:#5B8DEF}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:left;vertical-align:middle}
+  th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15)}
+  .num{font-family:'DM Mono',monospace}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .t-late{background:rgba(251,191,36,.15);color:#FBBF24}
+  .t-early_leave{background:rgba(248,113,113,.12);color:#F87171}
+  .t-absent{background:rgba(248,113,113,.2);color:#F87171}
+  .t-other{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .s-pending{background:rgba(251,191,36,.15);color:#FBBF24}
+  .s-applied{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .s-waived{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .group-h{font-size:13px;font-weight:600;color:var(--text-dim);margin:14px 0 6px;padding:6px 10px;background:rgba(255,255,255,.04);border-radius:5px}
+  .badge{padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.08);font-size:11px;font-family:'DM Mono',monospace}
+  .inactive-row{opacity:.5}
+</style>
+</head>
+<body data-page="attendance-penalty-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">出勤獎懲管理</div>
+        <div class="page-sub">遲到 / 早退 / 曠職規則設定 + 懲處紀錄</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="tabs">
+        <div class="tab active" id="t-rules"   onclick="switchTab('rules')">規則設定</div>
+        <div class="tab"        id="t-records" onclick="switchTab('records')">懲處紀錄</div>
+      </div>
+
+      <!-- Tab 1:規則設定 -->
+      <div id="pane-rules">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+          <button class="btn btn-primary" onclick="openRule(null)">＋ 新增規則</button>
+        </div>
+        <div id="rules-by-group"></div>
+      </div>
+
+      <!-- Tab 2:懲處紀錄 -->
+      <div id="pane-records" style="display:none">
+        <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+          <select class="form-select" id="r-month" onchange="loadRecords()" style="width:140px"></select>
+          <select class="form-select" id="r-status" onchange="renderRecords()" style="width:140px">
+            <option value="">全部狀態</option>
+            <option value="pending">pending</option>
+            <option value="applied">applied</option>
+            <option value="waived">waived</option>
+          </select>
+          <input type="text" class="form-input" id="r-search" placeholder="搜尋員工" oninput="renderRecords()" style="flex:1;max-width:240px">
+          <button class="btn btn-ghost" onclick="loadRecords()">↻ 重新載入</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>員工</th><th>觸發</th><th>分鐘</th><th>類型</th><th>金額</th><th>月份</th><th>狀態</th><th>操作</th>
+            </tr></thead>
+            <tbody id="tbody-records"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 規則 modal -->
+<div class="modal-bg" id="rule-modal">
+  <div class="modal" style="max-width:600px;width:95vw">
+    <div class="modal-title" id="rule-title">新增規則</div>
+    <input type="hidden" id="r-id">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">觸發類型 *</label>
+        <select class="form-select" id="r-trigger">
+          <option value="late">遲到 (late)</option>
+          <option value="early_leave">早退 (early_leave)</option>
+          <option value="absent">曠職 (absent)</option>
+          <option value="other">其他 (other)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">名稱 *</label>
+        <input type="text" class="form-input" id="r-label" placeholder="例:遲到 1-5 分鐘">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">分鐘下限</label>
+        <input type="number" class="form-input num" id="r-min" min="0" value="0">
+      </div>
+      <div class="form-row">
+        <label class="form-label">分鐘上限(空=無)</label>
+        <input type="number" class="form-input num" id="r-max" min="0">
+      </div>
+      <div class="form-row">
+        <label class="form-label">月累計門檻(空=無)</label>
+        <input type="number" class="form-input num" id="r-monthly" min="1">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">扣罰類型 *</label>
+        <select class="form-select" id="r-ptype">
+          <option value="deduct_money_per_min">每分鐘扣金額</option>
+          <option value="deduct_money">扣固定金額</option>
+          <option value="deduct_attendance_bonus">扣全勤獎金(整筆)</option>
+          <option value="deduct_attendance_bonus_pct">扣全勤獎金(%)</option>
+          <option value="warning">警告(0)</option>
+          <option value="custom">自訂</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">金額 / 比例</label>
+        <input type="number" class="form-input num" id="r-amount" step="0.01" value="0">
+      </div>
+      <div class="form-row">
+        <label class="form-label">單筆上限</label>
+        <input type="number" class="form-input num" id="r-cap" step="0.01">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">生效起 *</label>
+        <input type="date" class="form-input" id="r-from">
+      </div>
+      <div class="form-row">
+        <label class="form-label">生效迄(可空)</label>
+        <input type="date" class="form-input" id="r-to">
+      </div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">說明</label>
+      <input type="text" class="form-input" id="r-desc">
+    </div>
+    <div class="form-row">
+      <label style="display:flex;gap:6px;align-items:center">
+        <input type="checkbox" id="r-active" checked>
+        <span>啟用</span>
+      </label>
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="r-del" onclick="deleteRule()" style="display:none">刪除</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeRule()">取消</button>
+        <button class="btn btn-primary" onclick="saveRule()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 豁免 modal -->
+<div class="modal-bg" id="waive-modal">
+  <div class="modal" style="max-width:480px;width:95vw">
+    <div class="modal-title">豁免懲處紀錄</div>
+    <div id="waive-meta" style="font-size:12px;color:var(--text-dim);margin-bottom:14px"></div>
+    <div class="form-row">
+      <label class="form-label">豁免原因 *</label>
+      <input type="text" class="form-input" id="waive-reason" placeholder="例:打卡機故障已查證">
+    </div>
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn btn-ghost" onclick="closeWaive()">取消</button>
+      <button class="btn btn-primary" onclick="confirmWaive()">確認豁免</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg,type='success'){let w=document.getElementById('toast-wrap');if(!w){w=document.createElement('div');w.id='toast-wrap';w.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px';document.body.appendChild(w);}const el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;w.appendChild(el);setTimeout(()=>el.remove(),3500);}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+const TRIGGER_LABEL = { late:'遲到', early_leave:'早退', absent:'曠職', other:'其他' };
+const PTYPE_LABEL = {
+  deduct_money_per_min:'每分鐘扣',
+  deduct_money:'扣固定',
+  deduct_attendance_bonus:'扣全勤(整筆)',
+  deduct_attendance_bonus_pct:'扣全勤 %',
+  warning:'警告', custom:'自訂',
+};
+
+let allRules = [], allRecords = [], currentRule = null, currentRecord = null;
+
+function buildMonthOptions(){
+  const sel = document.getElementById('r-month');
+  const d = new Date(); const out = [];
+  for (let i = 0; i < 6; i++) {
+    const v = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    out.push(`<option value="${v}"${i===0?' selected':''}>${v}</option>`);
+    d.setMonth(d.getMonth()-1);
+  }
+  sel.innerHTML = out.join('');
+}
+
+function switchTab(name){
+  for (const t of ['rules','records']) {
+    document.getElementById('t-'+t).classList.toggle('active', t===name);
+    document.getElementById('pane-'+t).style.display = t===name ? '' : 'none';
+  }
+  if (name === 'records' && !allRecords.length) loadRecords();
+}
+
+async function load(retries=0){
+  if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  await loadRules();
+}
+
+async function loadRules(){
+  try {
+    const r = await api('/api/attendance-penalties');
+    allRules = r.rules || [];
+    renderRules();
+  } catch(e){ toast('載入規則失敗:'+e.message,'error'); }
+}
+
+function renderRules(){
+  const wrap = document.getElementById('rules-by-group');
+  if (!allRules.length) { wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-dim);font-size:13px">尚未設定規則</div>`; return; }
+
+  const groups = {};
+  for (const r of allRules) {
+    (groups[r.trigger_type] = groups[r.trigger_type] || []).push(r);
+  }
+
+  let html = '';
+  for (const trigger of ['late', 'early_leave', 'absent', 'other']) {
+    const rules = groups[trigger];
+    if (!rules || !rules.length) continue;
+    html += `
+      <div class="group-h">
+        <span class="pill t-${trigger}">${TRIGGER_LABEL[trigger]}</span>
+        <span class="badge">${rules.length} 條</span>
+      </div>
+      <div class="table-wrap" style="margin-bottom:12px">
+        <table>
+          <thead><tr>
+            <th>名稱</th><th>分鐘區間</th><th>月累計</th><th>類型</th><th>金額</th><th>上限</th><th>啟用</th><th>生效</th><th>操作</th>
+          </tr></thead>
+          <tbody>
+            ${rules.map(r => `
+              <tr class="${!r.is_active ? 'inactive-row' : ''}">
+                <td>${escHtml(r.trigger_label)}</td>
+                <td class="num">${r.threshold_minutes_min}–${r.threshold_minutes_max ?? '∞'}</td>
+                <td class="num">${r.monthly_count_threshold ?? '—'}</td>
+                <td>${escHtml(PTYPE_LABEL[r.penalty_type]||r.penalty_type)}</td>
+                <td class="num">${r.penalty_amount ?? '—'}</td>
+                <td class="num">${r.penalty_cap ?? '—'}</td>
+                <td>${r.is_active ? '✓' : '✗'}</td>
+                <td class="num" style="font-size:11px">${escHtml(r.effective_from)}~<br>${escHtml(r.effective_to||'')}</td>
+                <td><button class="btn btn-ghost btn-sm" onclick="openRule(${r.id})">編輯</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+  wrap.innerHTML = html;
+}
+
+function openRule(id){
+  currentRule = id ? allRules.find(r => r.id === id) : null;
+  document.getElementById('rule-title').textContent = currentRule ? '編輯規則' : '新增規則';
+  document.getElementById('r-id').value = currentRule?.id || '';
+  document.getElementById('r-trigger').value = currentRule?.trigger_type || 'late';
+  document.getElementById('r-label').value   = currentRule?.trigger_label || '';
+  document.getElementById('r-min').value     = currentRule?.threshold_minutes_min ?? 0;
+  document.getElementById('r-max').value     = currentRule?.threshold_minutes_max ?? '';
+  document.getElementById('r-monthly').value = currentRule?.monthly_count_threshold ?? '';
+  document.getElementById('r-ptype').value   = currentRule?.penalty_type || 'deduct_money_per_min';
+  document.getElementById('r-amount').value  = currentRule?.penalty_amount ?? 0;
+  document.getElementById('r-cap').value     = currentRule?.penalty_cap ?? '';
+  document.getElementById('r-from').value    = currentRule?.effective_from || new Date().toISOString().slice(0,10);
+  document.getElementById('r-to').value      = currentRule?.effective_to || '';
+  document.getElementById('r-desc').value    = currentRule?.description || '';
+  document.getElementById('r-active').checked = currentRule ? currentRule.is_active !== false : true;
+  document.getElementById('r-del').style.display = currentRule ? '' : 'none';
+  document.getElementById('rule-modal').classList.add('open');
+}
+function closeRule(){ document.getElementById('rule-modal').classList.remove('open'); }
+
+async function saveRule(){
+  const id = document.getElementById('r-id').value;
+  const body = {
+    trigger_type: document.getElementById('r-trigger').value,
+    trigger_label: document.getElementById('r-label').value.trim(),
+    threshold_minutes_min: parseInt(document.getElementById('r-min').value) || 0,
+    threshold_minutes_max: document.getElementById('r-max').value === '' ? null : parseInt(document.getElementById('r-max').value),
+    monthly_count_threshold: document.getElementById('r-monthly').value === '' ? null : parseInt(document.getElementById('r-monthly').value),
+    penalty_type: document.getElementById('r-ptype').value,
+    penalty_amount: parseFloat(document.getElementById('r-amount').value) || 0,
+    penalty_cap: document.getElementById('r-cap').value === '' ? null : parseFloat(document.getElementById('r-cap').value),
+    effective_from: document.getElementById('r-from').value,
+    effective_to: document.getElementById('r-to').value || null,
+    description: document.getElementById('r-desc').value || null,
+    is_active: document.getElementById('r-active').checked,
+  };
+  if (!body.trigger_label) { toast('請填名稱','error'); return; }
+
+  try {
+    if (id) {
+      const { trigger_type:_t, ...patch } = body;
+      await api(`/api/attendance-penalties/${id}`, { method:'PUT', body: JSON.stringify(patch) });
+    } else {
+      await api('/api/attendance-penalties', { method:'POST', body: JSON.stringify(body) });
+    }
+    toast('已儲存');
+    closeRule();
+    await loadRules();
+  } catch(e){ toast('儲存失敗:'+e.message,'error'); }
+}
+
+async function deleteRule(){
+  const id = document.getElementById('r-id').value;
+  if (!id || !confirm('確定刪除此規則?(已產生的紀錄不受影響)')) return;
+  try {
+    await api(`/api/attendance-penalties/${id}`, { method:'DELETE' });
+    toast('已刪除');
+    closeRule();
+    await loadRules();
+  } catch(e){ toast('刪除失敗:'+e.message,'error'); }
+}
+
+async function loadRecords(){
+  const month = document.getElementById('r-month').value;
+  const [y, m] = month.split('-');
+  try {
+    const r = await api(`/api/attendance-penalty-records?year=${y}&month=${parseInt(m)}`);
+    allRecords = r.records || [];
+    renderRecords();
+  } catch(e){ toast('紀錄載入失敗:'+e.message,'error'); }
+}
+
+function renderRecords(){
+  const status = document.getElementById('r-status').value;
+  const q = document.getElementById('r-search').value.trim().toLowerCase();
+  const rows = allRecords.filter(r => {
+    if (status && r.status !== status) return false;
+    if (q) {
+      const txt = `${r.emp_name||''} ${r.employee_id||''}`.toLowerCase();
+      if (!txt.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const tbody = document.getElementById('tbody-records');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-dim)">無紀錄</td></tr>`; return; }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></td>
+      <td><span class="pill t-${escHtml(r.trigger_type)}">${escHtml(TRIGGER_LABEL[r.trigger_type]||r.trigger_type)}</span></td>
+      <td class="num">${r.trigger_minutes ?? '—'}</td>
+      <td>${escHtml(PTYPE_LABEL[r.penalty_type]||r.penalty_type)}</td>
+      <td class="num">${r.penalty_amount}</td>
+      <td class="num">${r.applies_to_year}/${String(r.applies_to_month).padStart(2,'0')}</td>
+      <td><span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+      <td>${r.status === 'pending' ? `<button class="btn btn-ghost btn-sm" onclick="openWaive(${r.id})">豁免</button>` : ''}</td>
+    </tr>
+  `).join('');
+}
+
+function openWaive(id){
+  currentRecord = allRecords.find(r => r.id === id);
+  if (!currentRecord) return;
+  document.getElementById('waive-meta').textContent = `${currentRecord.emp_name||currentRecord.employee_id} · ${TRIGGER_LABEL[currentRecord.trigger_type]} · ${currentRecord.penalty_amount}`;
+  document.getElementById('waive-reason').value = '';
+  document.getElementById('waive-modal').classList.add('open');
+}
+function closeWaive(){ document.getElementById('waive-modal').classList.remove('open'); }
+
+async function confirmWaive(){
+  const reason = document.getElementById('waive-reason').value.trim();
+  if (!reason) { toast('請填豁免原因','error'); return; }
+  try {
+    await api(`/api/attendance-penalty-records/${currentRecord.id}/waive`, {
+      method:'POST', body: JSON.stringify({ waive_reason: reason }),
+    });
+    toast('已豁免');
+    closeWaive();
+    await loadRecords();
+  } catch(e){ toast('豁免失敗:'+e.message,'error'); }
+}
+
+buildMonthOptions();
+load();
+</script>
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>
