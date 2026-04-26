@@ -123,9 +123,17 @@ ALTER TABLE employees ALTER COLUMN annual_leave_seniority_start SET NOT NULL;
 
 ```sql
 ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
-  period_year INT NOT NULL;
+  employee_id TEXT REFERENCES employees(id);
+
 ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
-  period_month INT NOT NULL CHECK (period_month BETWEEN 1 AND 12);
+  period_year INT;
+ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
+  period_month INT CHECK (period_month BETWEEN 1 AND 12);
+
+ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
+  period_start DATE;
+ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
+  period_end DATE;
 
 ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
   submitted_at TIMESTAMPTZ;
@@ -133,6 +141,26 @@ ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
   approved_at TIMESTAMPTZ;
 ALTER TABLE schedule_periods ADD COLUMN IF NOT EXISTS
   locked_at TIMESTAMPTZ;
+
+-- Backfill：既有 schedule_periods 用 dept 為單位、無 employee_id；
+-- 因 prod 此表為空（0 row）、本系統重新從員工為單位設計，
+-- 既有 dept 欄位保留為 legacy 不再使用。
+-- 若該表非空，Batch 10 上 prod 前 HR 必須先決定 legacy row 處理方式。
+
+-- 從 start_date / end_date 推 period_year / period_month / period_start / period_end
+UPDATE schedule_periods
+SET
+  period_year   = EXTRACT(YEAR FROM start_date)::INT,
+  period_month  = EXTRACT(MONTH FROM start_date)::INT,
+  period_start  = start_date,
+  period_end    = end_date
+WHERE period_year IS NULL AND start_date IS NOT NULL;
+
+-- backfill 完成後加 NOT NULL（以下需要 employee_id 也 backfill 完才能加，見 §8.2）
+-- ALTER TABLE schedule_periods ALTER COLUMN period_year SET NOT NULL;
+-- ALTER TABLE schedule_periods ALTER COLUMN period_month SET NOT NULL;
+-- ALTER TABLE schedule_periods ALTER COLUMN period_start SET NOT NULL;
+-- ALTER TABLE schedule_periods ALTER COLUMN period_end SET NOT NULL;
 
 ALTER TABLE schedule_periods ADD CONSTRAINT
   uq_schedule_periods_employee_month
@@ -151,12 +179,15 @@ ALTER TABLE schedule_periods ADD CONSTRAINT
 - 三個 timestamp 分別記錄狀態轉換時間，未來查報表很需要
 - UNIQUE 約束防止同一員工同月份產生兩筆週期
 - 狀態機放業務層不放 trigger（trigger 寫狀態機難測試）
+- 既有 schedule_periods 用 dept 為單位設計，本次重做改為員工為單位：每個員工每個月一筆 period。dept 欄位保留為 legacy（向後相容）
+- prod 既有 schedule_periods 為空，新增的 employee_id 等欄位 NULLABLE 加，backfill 後再 SET NOT NULL（同 §8.2 pattern）
+- period_year/month/period_start/end 採 NULLABLE 加 → backfill → SET NOT NULL pattern，即使 prod 此表為空也保留此 pattern，避免未來 dev rehearsal 環境有 seed data 時 fail
 
 #### 4.2.2 schedules（修改）
 
 ```sql
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS
-  period_id BIGINT REFERENCES schedule_periods(id);
+  period_id TEXT REFERENCES schedule_periods(id);
 
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS
   start_time TIME;
@@ -169,9 +200,16 @@ ALTER TABLE schedules ADD COLUMN IF NOT EXISTS
 ALTER TABLE schedules ADD COLUMN IF NOT EXISTS
   segment_no INT NOT NULL DEFAULT 1;
 
+-- 既有欄位型別升級：start_time/end_time 從 TEXT 改為 TIME
+-- 因為 IF NOT EXISTS 對既有 TEXT 欄位 skip，要明確 ALTER TYPE
+ALTER TABLE schedules ALTER COLUMN start_time TYPE TIME USING NULLIF(start_time, '')::TIME;
+ALTER TABLE schedules ALTER COLUMN end_time   TYPE TIME USING NULLIF(end_time,   '')::TIME;
+ALTER TABLE shift_types ALTER COLUMN start_time TYPE TIME USING NULLIF(start_time, '')::TIME;
+ALTER TABLE shift_types ALTER COLUMN end_time   TYPE TIME USING NULLIF(end_time,   '')::TIME;
+
 ALTER TABLE schedules DROP CONSTRAINT IF EXISTS uq_schedules_employee_date;
 ALTER TABLE schedules ADD CONSTRAINT uq_schedules_employee_date_segment
-  UNIQUE (employee_id, date, segment_no);
+  UNIQUE (employee_id, work_date, segment_no);
 ```
 
 **業務邏輯約束（程式層執行）：**
@@ -184,13 +222,14 @@ ALTER TABLE schedules ADD CONSTRAINT uq_schedules_employee_date_segment
 - crosses_midnight 旗標讓查詢/計算邏輯有依據
 - scheduled_work_minutes 預存避免每次查詢重算
 - segment_no 支援一天多段（實務罕見但保留調整空間）
+- start_time/end_time 從既有 TEXT 升級為 TIME：既有 schema 用 TEXT 存 "09:00"，但工時計算需要可以做時間運算的 TIME 型別。明確 ALTER TYPE 而非倚賴 ADD COLUMN IF NOT EXISTS
 
 #### 4.2.3 schedule_change_logs（新建）
 
 ```sql
 CREATE TABLE schedule_change_logs (
   id              BIGSERIAL PRIMARY KEY,
-  schedule_id     BIGINT REFERENCES schedules(id) ON DELETE SET NULL,
+  schedule_id     TEXT REFERENCES schedules(id) ON DELETE SET NULL,
   employee_id     TEXT NOT NULL REFERENCES employees(id),
   change_type     TEXT NOT NULL CHECK (change_type IN (
                     'employee_draft',
@@ -227,7 +266,7 @@ CREATE INDEX idx_schedule_change_logs_late_change
 
 ```sql
 ALTER TABLE attendance ADD COLUMN IF NOT EXISTS
-  schedule_id BIGINT REFERENCES schedules(id);
+  schedule_id TEXT REFERENCES schedules(id);
 
 ALTER TABLE attendance ADD COLUMN IF NOT EXISTS
   segment_no INT NOT NULL DEFAULT 1;
@@ -300,6 +339,12 @@ INSERT INTO leave_types (code, name_zh, is_paid, pay_rate, affects_attendance_bo
 #### 4.3.2 leave_requests（修改）
 
 ```sql
+-- 加 FK 前先確認 prod 沒有不在 leave_types.code 的舊值
+-- 若有，要先 backfill（將舊值映射到合法 code、或先 INSERT 對應 leave_types row）
+-- prod 當前 leave_requests 為空，無此疑慮；若未來有資料先做下列 sanity check：
+-- SELECT DISTINCT leave_type FROM leave_requests
+-- WHERE leave_type NOT IN (SELECT code FROM leave_types);
+
 ALTER TABLE leave_requests ADD CONSTRAINT
   fk_leave_requests_type FOREIGN KEY (leave_type)
   REFERENCES leave_types(code);
@@ -423,7 +468,7 @@ CREATE TABLE leave_balance_logs (
   balance_type    TEXT NOT NULL CHECK (balance_type IN ('annual', 'comp')),
   annual_record_id BIGINT REFERENCES annual_leave_records(id),
   comp_record_id   BIGINT REFERENCES comp_time_balance(id),
-  leave_request_id BIGINT REFERENCES leave_requests(id),
+  leave_request_id TEXT REFERENCES leave_requests(id),
   change_type     TEXT NOT NULL CHECK (change_type IN (
                     'grant',
                     'use',
@@ -465,8 +510,8 @@ CREATE TABLE overtime_requests (
   end_at          TIMESTAMPTZ NOT NULL,
   hours           NUMERIC(5,2) NOT NULL,
   
-  schedule_id     BIGINT REFERENCES schedules(id),
-  attendance_id   BIGINT REFERENCES attendance(id),
+  schedule_id     TEXT REFERENCES schedules(id),
+  attendance_id   TEXT REFERENCES attendance(id),
   
   request_kind    TEXT NOT NULL CHECK (request_kind IN (
                     'pre_approval',
@@ -508,7 +553,7 @@ CREATE TABLE overtime_requests (
   reject_reason       TEXT,
   
   comp_balance_id     BIGINT REFERENCES comp_time_balance(id),
-  applied_to_salary_record_id BIGINT,
+  applied_to_salary_record_id TEXT,
   
   applies_to_year     INT NOT NULL,
   applies_to_month    INT NOT NULL CHECK (applies_to_month BETWEEN 1 AND 12),
@@ -699,7 +744,7 @@ VALUES
 CREATE TABLE attendance_penalty_records (
   id              BIGSERIAL PRIMARY KEY,
   employee_id     TEXT NOT NULL REFERENCES employees(id),
-  attendance_id   BIGINT REFERENCES attendance(id),
+  attendance_id   TEXT REFERENCES attendance(id),
   
   penalty_rule_id BIGINT REFERENCES attendance_penalties(id),
   
@@ -712,7 +757,7 @@ CREATE TABLE attendance_penalty_records (
   applies_to_year  INT NOT NULL,
   applies_to_month INT NOT NULL CHECK (applies_to_month BETWEEN 1 AND 12),
   
-  salary_record_id BIGINT,
+  salary_record_id TEXT,
   
   status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
                     'pending',
@@ -749,23 +794,23 @@ CREATE OR REPLACE VIEW attendance_monthly_summary AS
 SELECT
   e.id AS employee_id,
   e.name,
-  EXTRACT(YEAR FROM a.date)::INT AS year,
-  EXTRACT(MONTH FROM a.date)::INT AS month,
-  
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'normal') AS normal_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'late') AS late_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'early_leave') AS early_leave_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'absent') AS absent_days,
-  COUNT(DISTINCT a.date) FILTER (WHERE a.status = 'anomaly') AS anomaly_days,
-  
+  EXTRACT(YEAR FROM a.work_date)::INT AS year,
+  EXTRACT(MONTH FROM a.work_date)::INT AS month,
+
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'normal') AS normal_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'late') AS late_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'early_leave') AS early_leave_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.status = 'absent') AS absent_days,
+  COUNT(DISTINCT a.work_date) FILTER (WHERE a.is_anomaly = true) AS anomaly_days,
+
   COALESCE(SUM(a.work_hours), 0) AS total_work_hours,
   COALESCE(SUM(a.overtime_hours), 0) AS total_overtime_hours,
   COALESCE(SUM(a.late_minutes), 0) AS total_late_minutes,
   COALESCE(SUM(a.early_leave_minutes), 0) AS total_early_leave_minutes
-  
+
 FROM employees e
 LEFT JOIN attendance a ON a.employee_id = e.id
-GROUP BY e.id, e.name, EXTRACT(YEAR FROM a.date), EXTRACT(MONTH FROM a.date);
+GROUP BY e.id, e.name, EXTRACT(YEAR FROM a.work_date), EXTRACT(MONTH FROM a.work_date);
 ```
 
 **設計理由：**
@@ -1088,22 +1133,24 @@ UPDATE employees SET annual_leave_seniority_start = hire_date
 WHERE annual_leave_seniority_start IS NULL;
 ALTER TABLE employees ALTER COLUMN annual_leave_seniority_start SET NOT NULL;
 
--- schedules.period_id：依 employee_id + date 找對應的 schedule_periods
+-- schedules.period_id：依 employee_id + work_date 找對應的 schedule_periods
 -- 步驟 1：先建立缺失的 schedule_periods（如果有 schedules 沒對應的週期）
-INSERT INTO schedule_periods (employee_id, period_year, period_month, period_start, period_end, status)
-SELECT DISTINCT 
+-- 注意：prod schedule_periods.id 是 TEXT NOT NULL PRIMARY KEY 沒 default，要明確產 id
+INSERT INTO schedule_periods (id, employee_id, period_year, period_month, period_start, period_end, status)
+SELECT DISTINCT
+  's_period_' || s.employee_id || '_' || EXTRACT(YEAR FROM s.work_date) || '_' || LPAD(EXTRACT(MONTH FROM s.work_date)::TEXT, 2, '0'),
   s.employee_id,
-  EXTRACT(YEAR FROM s.date)::INT,
-  EXTRACT(MONTH FROM s.date)::INT,
-  DATE_TRUNC('month', s.date)::DATE,
-  (DATE_TRUNC('month', s.date) + INTERVAL '1 month' - INTERVAL '1 day')::DATE,
+  EXTRACT(YEAR FROM s.work_date)::INT,
+  EXTRACT(MONTH FROM s.work_date)::INT,
+  DATE_TRUNC('month', s.work_date)::DATE,
+  (DATE_TRUNC('month', s.work_date) + INTERVAL '1 month' - INTERVAL '1 day')::DATE,
   'locked'
 FROM schedules s
 WHERE NOT EXISTS (
   SELECT 1 FROM schedule_periods p
   WHERE p.employee_id = s.employee_id
-    AND p.period_year = EXTRACT(YEAR FROM s.date)::INT
-    AND p.period_month = EXTRACT(MONTH FROM s.date)::INT
+    AND p.period_year = EXTRACT(YEAR FROM s.work_date)::INT
+    AND p.period_month = EXTRACT(MONTH FROM s.work_date)::INT
 )
 ON CONFLICT (employee_id, period_year, period_month) DO NOTHING;
 
@@ -1112,14 +1159,15 @@ UPDATE schedules s
 SET period_id = p.id
 FROM schedule_periods p
 WHERE p.employee_id = s.employee_id
-  AND p.period_year = EXTRACT(YEAR FROM s.date)::INT
-  AND p.period_month = EXTRACT(MONTH FROM s.date)::INT
+  AND p.period_year = EXTRACT(YEAR FROM s.work_date)::INT
+  AND p.period_month = EXTRACT(MONTH FROM s.work_date)::INT
   AND s.period_id IS NULL;
 
 -- schedules.segment_no = 1（既有資料都是單段）
 UPDATE schedules SET segment_no = 1 WHERE segment_no IS NULL;
 
 -- schedules.scheduled_work_minutes：依 shift_type 計算
+-- 既有 shift_types.start_time/end_time 在 §4.2.2 PATCH 1 已 ALTER 為 TIME，此時可正常做時間相減
 UPDATE schedules s
 SET scheduled_work_minutes = (
   EXTRACT(EPOCH FROM (st.end_time - st.start_time)) / 60 - st.break_minutes
@@ -1347,6 +1395,7 @@ Batch C (薪資改 GENERATED)
 | `supabase_extra_allowance.sql` 的 `extra_allowance` 欄位 | 保留，§4.6 `salary_records` 大改時一併納入 |
 | `supabase_approvals_v2.sql` (`approvals_v2_*`) | 平行系統，本設計不動。加班申請改走獨立的 `overtime_requests` 表（§4.4），不寄生在 approvals_v2 |
 | 舊 `approval_requests` 中的 `overtime` / `overtime_pay` request_type | 上線後停用；既有資料如何處理待 Ray 決定 |
+| `schedule_periods.dept` | Legacy 欄位：既有系統以 dept 為單位排班，本設計改為員工為單位（employee_id）。dept 保留向後相容，本系統不再使用 |
 
 ---
 
