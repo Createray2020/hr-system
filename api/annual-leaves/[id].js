@@ -45,7 +45,9 @@ export default async function handler(req, res) {
       return res.status(409).json({ error: 'only active record can be settled' });
     }
     const remainingDays = Math.max(0, Number(cur.granted_days) - Number(cur.used_days));
-    // TODO(Batch 9):settlement_amount 由 lib/salary/settlement.js 計算,目前暫填 0
+    // settlement_amount=0 為 placeholder:HR settle 當下不算金額,
+    // 由 Batch 9 的 lib/salary/calculator.js 月底跑時透過 lib/salary/settlement.js
+    // 找「status='paid_out' 且 settlement_amount IN (0, NULL)」的 records 算金額並 update。已接通。
     const settlementAmount = 0;
     const updated = await repo.updateAnnualRecord(recId, {
       status: 'paid_out',

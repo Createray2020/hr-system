@@ -209,27 +209,23 @@ export function makeLeaveRepo() {
       return data || null;
     },
 
-    // ─── salary 接口(comp expiry payout)─────
-    // Batch 9 才有 salary_records.comp_expiry_payout 欄位,本批先寫好接口、
-    // 失敗用 try/catch graceful skip。
+    // ─── 員工時薪(expiry-sweep auto_payout 算金額用)─────
     async findEmployeeHourlyRate(employee_id) {
-      // 粗估:salary_records.monthly_salary / monthly_work_hours_base
+      // 粗估:salary_records.base_salary / monthly_work_hours_base
       const { data: settings } = await supabase
         .from('system_overtime_settings').select('monthly_work_hours_base').eq('id', 1).maybeSingle();
       const base = Number(settings?.monthly_work_hours_base) || 240;
       const { data: sal } = await supabase
-        .from('salary_records').select('monthly_salary')
+        .from('salary_records').select('base_salary')
         .eq('employee_id', employee_id).order('year', { ascending: false })
         .order('month', { ascending: false }).limit(1).maybeSingle();
-      const monthly = Number(sal?.monthly_salary) || 0;
+      const monthly = Number(sal?.base_salary) || 0;
       return base > 0 ? monthly / base : 0;
     },
 
-    async applyToSalaryRecord({ employee_id, year, month, comp_expiry_payout, comp_balance_id }) {
-      // TODO(Batch 9):接通 salary_records.comp_expiry_payout
-      // 目前 schema 沒這欄位,直接 throw 讓呼叫端 graceful skip。
-      throw new Error('salary_records.comp_expiry_payout column pending Batch 9');
-    },
+    // 注意:Batch 6 原版有 applyToSalaryRecord method,Batch 9 重新設計後**移除**
+    //      (改由 lib/salary/calculator.js + lib/salary/settlement.js 月底跑時讀
+    //      comp_time_balance.expiry_payout_amount 加總到 salary_records.comp_expiry_payout)。
 
     // ─── 推播:補休失效預警(Batch 6 expiry-warning 用)──
     async notifyExpiryWarning({ employee_id, comp_id, expires_at, remaining_hours }) {

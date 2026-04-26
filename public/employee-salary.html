@@ -1,223 +1,154 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#5B8DEF">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="CHUWA HR">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
-<title>我的薪資</title>
+<title>我的薪資 — HR System</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font-size:14px;min-height:100vh;overflow-x:hidden}
-.mobile-app{max-width:430px;margin:0 auto;min-height:100vh;background:#0F1117;display:flex;flex-direction:column}
-.mobile-header{padding:52px 20px 16px}
-.page-title-lg{font-size:22px;font-weight:700}
-.scroll-content{flex:1;overflow-y:auto;padding:0 0 100px}
-
-/* ── 薪資卡片 ── */
-.sal-card{margin:0 16px 12px;border-radius:18px;overflow:hidden;border:0.5px solid rgba(255,255,255,.08)}
-.sal-card-header{padding:18px 18px 14px;background:rgba(255,255,255,.04);cursor:pointer;display:flex;align-items:center;justify-content:space-between}
-.sal-month{font-size:12px;color:rgba(255,255,255,.4);font-family:'DM Mono',monospace;margin-bottom:4px}
-.sal-net{font-size:28px;font-weight:700;font-family:'DM Mono',monospace;color:#7FBBFF}
-.sal-net-label{font-size:11px;color:rgba(255,255,255,.35);margin-top:2px}
-.sal-expand-icon{font-size:18px;color:rgba(255,255,255,.35);transition:transform .25s}
-.sal-card.open .sal-expand-icon{transform:rotate(180deg)}
-.sal-status{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;margin-top:6px;display:inline-block}
-.s-paid{background:rgba(74,222,128,.12);color:#4ADE80}
-.s-draft{background:rgba(122,133,160,.1);color:rgba(255,255,255,.4)}
-.s-confirmed{background:rgba(251,146,60,.12);color:#FB923C}
-
-/* ── 明細展開 ── */
-.sal-detail{display:none;background:#0F1117;border-top:0.5px solid rgba(255,255,255,.06);padding:0 18px 16px}
-.sal-card.open .sal-detail{display:block}
-.sal-section{padding:12px 0 0}
-.sal-section-title{font-size:10px;color:rgba(255,255,255,.3);font-family:'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase;margin-bottom:8px}
-.sal-line{display:flex;justify-content:space-between;padding:7px 0;border-bottom:0.5px solid rgba(255,255,255,.04);font-size:13px}
-.sal-line:last-child{border-bottom:none}
-.sal-key{color:rgba(255,255,255,.55)}
-.sal-val{font-family:'DM Mono',monospace;font-weight:600}
-.sal-val-pos{color:#4ADE80}.sal-val-neg{color:#F87171}
-.sal-divider{height:0.5px;background:rgba(255,255,255,.08);margin:10px 0}
-.sal-total-line{display:flex;justify-content:space-between;padding:10px 0 4px;font-size:15px;font-weight:700}
-.sal-total-key{color:#E8EAF0}
-.sal-total-val{font-family:'DM Mono',monospace;color:#7FBBFF;font-size:18px}
-
-/* ── 年度統計 ── */
-.year-card{margin:0 16px 12px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:16px;padding:16px}
-.year-card-label{font-size:11px;color:rgba(255,255,255,.35);font-family:'DM Mono',monospace;letter-spacing:.8px;text-transform:uppercase;margin-bottom:12px}
-.year-total{font-size:32px;font-weight:700;font-family:'DM Mono',monospace;color:#7FBBFF;margin-bottom:4px}
-.year-label{font-size:12px;color:rgba(255,255,255,.35)}
-.year-divider{height:0.5px;background:rgba(255,255,255,.08);margin:12px 0}
-.year-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.year-item{background:rgba(255,255,255,.03);border-radius:10px;padding:10px 12px}
-.year-item-label{font-size:10px;color:rgba(255,255,255,.35);margin-bottom:3px}
-.year-item-val{font-size:16px;font-weight:700;font-family:'DM Mono',monospace;color:#E8EAF0}
-
-.empty-state{text-align:center;padding:60px 20px;color:rgba(255,255,255,.3)}
-.empty-icon{font-size:40px;margin-bottom:10px}
-.loading-text{text-align:center;padding:40px;color:rgba(255,255,255,.3);font-size:13px}
-
-/* ── 底部導航 ── */
-.mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
-.mobile-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-decoration:none}
-.mobile-nav-item .nav-icon{font-size:22px;opacity:.35}
-.mobile-nav-item .nav-label{font-size:10px;color:rgba(255,255,255,.35)}
-.mobile-nav-item.active .nav-icon{opacity:1}
-.mobile-nav-item.active .nav-label{color:#5B8DEF}
+  .num{font-family:'DM Mono',monospace}
+  .slip{background:rgba(255,255,255,.03);border:0.5px solid rgba(255,255,255,.08);border-radius:12px;padding:18px;margin-bottom:18px}
+  .slip-h{font-size:14px;font-weight:600;color:var(--text-dim);margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+  .slip-row{display:grid;grid-template-columns:1fr 120px;gap:8px;padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,.04);font-size:13px;align-items:center}
+  .slip-row.head{font-weight:600;color:var(--text-dim);background:rgba(0,0,0,.1);padding:8px 10px;border-radius:6px;margin:8px 0 4px}
+  .slip-row .v{text-align:right;font-family:'DM Mono',monospace}
+  .slip-row.total{font-weight:700;color:#7FBBFF;font-size:15px;border-top:1px solid rgba(91,141,239,.4);margin-top:8px;padding-top:10px}
+  .pos{color:#4ADE80}
+  .neg{color:#F87171}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .s-draft{background:rgba(251,191,36,.15);color:#FBBF24}
+  .s-confirmed{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .s-paid{background:rgba(74,222,128,.15);color:#4ADE80}
+  details{margin-top:8px;font-size:12px;color:var(--text-dim)}
+  details summary{cursor:pointer;padding:6px 0;color:#7FBBFF}
+  details > div{padding:6px 0 0 12px}
 </style>
 </head>
-<body>
-<div class="mobile-app">
-  <div class="mobile-header">
-    <div class="page-title-lg">薪資</div>
-  </div>
+<body data-page="employee-salary">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">我的薪資</div>
+        <div class="page-sub">月度薪資單</div>
+      </div>
+      <div class="header-actions">
+        <select class="form-select" id="f-month" onchange="load()" style="width:140px"></select>
+      </div>
+    </div>
 
-  <div class="scroll-content" id="sal-list">
-    <div class="loading-text">載入中…</div>
-  </div>
-
-  <nav class="mobile-bottom-nav">
-    <a href="/employee-app.html" class="mobile-nav-item">
-      <span class="nav-icon">🏠</span><span class="nav-label">首頁</span>
-    </a>
-    <a href="/announcements.html" class="mobile-nav-item">
-      <span class="nav-icon">📢</span><span class="nav-label">公告</span>
-    </a>
-    <a href="/employee-leave.html" class="mobile-nav-item">
-      <span class="nav-icon">📋</span><span class="nav-label">請假</span>
-    </a>
-    <a href="/employee-salary.html" class="mobile-nav-item active">
-      <span class="nav-icon">💰</span><span class="nav-label">薪資</span>
-    </a>
-    <a href="/employee-profile.html" class="mobile-nav-item">
-      <span class="nav-icon">👤</span><span class="nav-label">我的</span>
-    </a>
-  </nav>
+    <div id="content"></div>
+  </main>
 </div>
 
 <script>
-const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
-const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmt$(n){ if(n==null) return '—'; return new Intl.NumberFormat('zh-TW',{maximumFractionDigits:0}).format(Number(n)); }
+function n0(v){ return v==null?0:Number(v); }
+function toast(msg){console.log(msg);}
 
-let currentUser = null, API = '';
-
-async function apiFetch(path, opts={}) {
-  const { data: { session } } = await _sb.auth.getSession();
-  const res = await fetch(API + path, {
-    headers:{'Content-Type':'application/json',...(session?{'Authorization':`Bearer ${session.access_token}`}:{})},
-    ...opts
-  });
-  if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
-  return res.json();
+function buildMonthOptions(){
+  const sel = document.getElementById('f-month');
+  const d = new Date(); const out = [];
+  for (let i = 0; i < 12; i++) {
+    const v = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    out.push(`<option value="${v}"${i===0?' selected':''}>${v}</option>`);
+    d.setMonth(d.getMonth()-1);
+  }
+  sel.innerHTML = out.join('');
 }
 
-function fmt(n) {
-  if (n === null || n === undefined) return '—';
-  return '$' + Number(n).toLocaleString();
+async function load(retries=0){
+  if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
+  const month = document.getElementById('f-month').value;
+  const [y, m] = month.split('-');
+  try {
+    const r = await api(`/api/salary?v=2&year=${y}&month=${parseInt(m)}&employee_id=${currentUser.id}`);
+    const rec = (r.records || [])[0];
+    render(rec);
+  } catch(e){
+    document.getElementById('content').innerHTML = `<div class="empty-state"><div class="icon">⚠</div><div>載入失敗:${escHtml(e.message)}</div></div>`;
+  }
 }
 
-function toggleCard(cardEl) {
-  cardEl.classList.toggle('open');
-}
-
-function renderSalary(rows) {
-  const wrap = document.getElementById('sal-list');
-  if (!rows.length) {
-    wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">💸</div><div>暫無薪資資料</div></div>`;
+function render(r){
+  const wrap = document.getElementById('content');
+  if (!r) {
+    wrap.innerHTML = `<div class="slip"><div class="slip-h">尚未產生</div><div style="color:var(--text-dim);font-size:13px;padding:20px;text-align:center">該月薪資尚未產生,請洽 HR</div></div>`;
     return;
   }
 
-  const statusMap = { draft:'待確認', confirmed:'已確認', paid:'已發放' };
-  const statusCls = { draft:'s-draft', confirmed:'s-confirmed', paid:'s-paid' };
+  const month = `${r.year}/${String(r.month).padStart(2,'0')}`;
+  const allowanceTotal = n0(r.allowance) + n0(r.extra_allowance);
+  const overtimeTotal  = n0(r.overtime_pay_auto) + n0(r.overtime_pay_manual);
 
-  let yearTotal = 0;
-  const cards = rows.slice(0, 6).map((r, i) => {
-    yearTotal += r.net_salary || 0;
-    const st = r.status || 'draft';
-    return `
-    <div class="sal-card${i===0?' open':''}" onclick="toggleCard(this)">
-      <div class="sal-card-header">
-        <div>
-          <div class="sal-month">${r.year}-${String(r.month).padStart(2,'0')} 月薪資</div>
-          <div class="sal-net">${fmt(r.net_salary)}</div>
-          <div class="sal-net-label">實發薪資</div>
-          <span class="sal-status ${statusCls[st]}">${statusMap[st]||st}</span>
-        </div>
-        <span class="sal-expand-icon">⌄</span>
+  wrap.innerHTML = `
+    <div class="slip">
+      <div class="slip-h">
+        <span>${month} 薪資單</span>
+        <span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span>
       </div>
-      <div class="sal-detail">
-        <div class="sal-section">
-          <div class="sal-section-title">收入項目</div>
-          <div class="sal-line"><span class="sal-key">本薪</span><span class="sal-val sal-val-pos">${fmt(r.base_salary)}</span></div>
-          <div class="sal-line"><span class="sal-key">全勤獎金</span><span class="sal-val sal-val-pos">${fmt(r.bonus)}</span></div>
-          <div class="sal-line"><span class="sal-key">加班費</span><span class="sal-val sal-val-pos">${fmt(r.overtime_pay)}</span></div>
-          <div class="sal-line"><span class="sal-key">津貼</span><span class="sal-val sal-val-pos">${fmt(r.allowance)}</span></div>
-          <div class="sal-line"><span class="sal-key">其他加給</span><span class="sal-val sal-val-pos">${fmt(r.extra_allowance)}</span></div>
-        </div>
-        <div class="sal-divider"></div>
-        <div class="sal-section">
-          <div class="sal-section-title">扣除項目</div>
-          <div class="sal-line"><span class="sal-key">勞保費</span><span class="sal-val sal-val-neg">-${fmt(r.labor_insurance)?.replace('$','')}</span></div>
-          <div class="sal-line"><span class="sal-key">健保費</span><span class="sal-val sal-val-neg">-${fmt(r.health_insurance)?.replace('$','')}</span></div>
-          <div class="sal-line"><span class="sal-key">所得稅</span><span class="sal-val sal-val-neg">-${fmt(r.tax)?.replace('$','')}</span></div>
-          <div class="sal-line"><span class="sal-key">缺勤扣款</span><span class="sal-val sal-val-neg">-${fmt(r.absence_deduction)?.replace('$','')}</span></div>
-        </div>
-        <div class="sal-divider"></div>
-        <div class="sal-total-line">
-          <span class="sal-total-key">實發薪資</span>
-          <span class="sal-total-val">${fmt(r.net_salary)}</span>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
 
-  // Year summary
-  const yearCard = `
-    <div class="year-card">
-      <div class="year-card-label">本年度統計</div>
-      <div class="year-total">${fmt(yearTotal)}</div>
-      <div class="year-label">累計實發薪資</div>
-      <div class="year-divider"></div>
-      <div class="year-grid">
-        <div class="year-item">
-          <div class="year-item-label">已發放月份</div>
-          <div class="year-item-val">${rows.filter(r=>r.status==='paid').length} 月</div>
-        </div>
-        <div class="year-item">
-          <div class="year-item-label">待確認</div>
-          <div class="year-item-val">${rows.filter(r=>r.status!=='paid').length} 月</div>
-        </div>
-      </div>
-    </div>`;
+      <div class="slip-row head"><div>收入項目</div><div class="v">金額</div></div>
+      <div class="slip-row"><div>底薪 (base_salary)</div><div class="v pos">+ ${fmt$(r.base_salary)}</div></div>
+      <div class="slip-row"><div>全勤獎金 (扣 ${(n0(r.attendance_bonus_deduction_rate)*100).toFixed(1)}% 後)</div><div class="v pos">+ ${fmt$(r.attendance_bonus_actual)}</div></div>
+      <div class="slip-row"><div>津貼 + 額外津貼</div><div class="v pos">+ ${fmt$(allowanceTotal)}</div></div>
+      <div class="slip-row"><div>加班費 (auto + manual)</div><div class="v pos">+ ${fmt$(overtimeTotal)}</div></div>
+      <div class="slip-row"><div>補休失效轉錢 (comp_expiry_payout)</div><div class="v pos">+ ${fmt$(r.comp_expiry_payout)}</div></div>
+      <div class="slip-row"><div>假日工作加給 (holiday_work_pay)</div><div class="v pos">+ ${fmt$(r.holiday_work_pay)}</div></div>
+      <div class="slip-row"><div>結算金額 (settlement_amount)</div><div class="v pos">+ ${fmt$(r.settlement_amount)}</div></div>
 
-  wrap.innerHTML = cards + yearCard;
+      <div class="slip-row total"><div>應發合計 (gross_salary)</div><div class="v">${fmt$(r.gross_salary)}</div></div>
+
+      <div class="slip-row head" style="margin-top:14px"><div>扣除項目</div><div class="v">金額</div></div>
+      <div class="slip-row"><div>曠職扣款 (${r.absence_days || 0} 天 × 日薪 ${fmt$(r.daily_wage_snapshot)})</div><div class="v neg">- ${fmt$(r.deduct_absence)}</div></div>
+      <div class="slip-row"><div>勞保自付</div><div class="v neg">- ${fmt$(r.deduct_labor_ins)}</div></div>
+      <div class="slip-row"><div>健保自付</div><div class="v neg">- ${fmt$(r.deduct_health_ins)}</div></div>
+      <div class="slip-row"><div>所得稅</div><div class="v neg">- ${fmt$(r.deduct_tax)}</div></div>
+      <div class="slip-row"><div>出勤懲處 (attendance_penalty_total)</div><div class="v neg">- ${fmt$(r.attendance_penalty_total)}</div></div>
+
+      <div class="slip-row total" style="color:#4ADE80"><div>實發合計 (net_salary)</div><div class="v">${fmt$(r.net_salary)}</div></div>
+
+      ${overtimeTotal > 0 ? `
+        <details>
+          <summary>加班費明細(auto:${fmt$(r.overtime_pay_auto)} / manual:${fmt$(r.overtime_pay_manual)})</summary>
+          <div>auto 部分由系統依該月 approved overtime_requests 加總(凍結 pay_multiplier);manual 部分由 HR 手動調整。${r.overtime_pay_note ? '<br>備註:' + escHtml(r.overtime_pay_note) : ''}</div>
+        </details>` : ''}
+
+      ${n0(r.comp_expiry_payout) > 0 ? `
+        <details>
+          <summary>補休失效轉錢明細(${fmt$(r.comp_expiry_payout)})</summary>
+          <div>由 cron(每天 01:00 expiry-sweep)在補休失效當下算金額(時薪 × 剩餘小時 × 1.34 倍率)。月底 calculator 加總到本欄。</div>
+        </details>` : ''}
+
+      ${n0(r.settlement_amount) > 0 ? `
+        <details>
+          <summary>特休結算明細(${fmt$(r.settlement_amount)})</summary>
+          <div>由特休週年滾動 cron 觸發 paid_out 後,月底 calculator 算 remaining_days × 日薪。${r.settlement_note ? '<br>備註:' + escHtml(r.settlement_note) : ''}</div>
+        </details>` : ''}
+
+      ${n0(r.attendance_penalty_total) > 0 ? `
+        <details>
+          <summary>出勤懲處明細(${fmt$(r.attendance_penalty_total)})</summary>
+          <div>由 attendance_penalty_records(現金扣款類)加總。已豁免的不計入。</div>
+        </details>` : ''}
+    </div>
+  `;
 }
 
-(async () => {
-  API = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'http://localhost:3000' : '';
-  const { data: { session } } = await _sb.auth.getSession();
-  if (!session) { window.location.href = '/login.html'; return; }
-  try { currentUser = await apiFetch('/api/employees/me'); }
-  catch(e) { window.location.href = '/login.html'; return; }
-
-  try {
-    // Fetch all salary records for this employee (sorted newest first by API default)
-    const rows = await apiFetch(`/api/salary?employee_id=${currentUser.id}`);
-    rows.sort((a, b) => (b.year*100+b.month) - (a.year*100+a.month));
-    renderSalary(rows);
-  } catch(e) {
-    document.getElementById('sal-list').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div>載入失敗</div></div>`;
-  }
-})();
+buildMonthOptions();
+load();
 </script>
-
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
 <script src="/js/pwa.js"></script>
 <script>PWA.init();</script>
 </body>

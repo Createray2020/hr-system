@@ -63,27 +63,17 @@ describe('runCompExpirySweep — auto_payout', () => {
     expect(log.hours_delta).toBe(-4);
   });
 
-  it('呼叫 applyToSalaryRecord(雖然 Batch 9 才接通,本批仍 try call)', async () => {
+  it('Batch 9 重新設計:不再呼叫 applyToSalaryRecord(改由 calculator 月底讀)', async () => {
     const repo = makeSweepRepo({
       findExpiringCompBalances: vi.fn(async () => [cb()]),
     });
     await runCompExpirySweep(repo, '2026-04-26');
-    expect(repo.applyToSalaryRecord).toHaveBeenCalled();
-    const arg = repo.applyToSalaryRecord.mock.calls[0][0];
-    expect(arg.employee_id).toBe('E001');
-    expect(arg.year).toBe(2026);
-    expect(arg.month).toBe(4);
-    expect(typeof arg.comp_expiry_payout).toBe('number');
-  });
-
-  it('applyToSalaryRecord 失敗:graceful skip(不影響整體流程)', async () => {
-    const repo = makeSweepRepo({
-      findExpiringCompBalances: vi.fn(async () => [cb()]),
-      applyToSalaryRecord: vi.fn(async () => { throw new Error('comp_expiry_payout column not found'); }),
-    });
-    const r = await runCompExpirySweep(repo, '2026-04-26');
-    expect(r.expired_count).toBe(1); // 仍計入
-    expect(repo.updateCompBalance).toHaveBeenCalled(); // 仍標 expired_paid
+    // expiry-sweep 仍寫入 comp_time_balance.expiry_payout_amount(本身欄位)
+    expect(repo.updateCompBalance).toHaveBeenCalled();
+    const updPatch = repo.updateCompBalance.mock.calls[0][1];
+    expect(updPatch.expiry_payout_amount).toBeGreaterThan(0);
+    // 但不再寫 salary_records(Batch 9 已重新設計)
+    expect(repo.applyToSalaryRecord).not.toHaveBeenCalled();
   });
 
   it('時薪 0 → payout 0(不 throw)', async () => {

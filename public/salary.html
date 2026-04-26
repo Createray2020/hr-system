@@ -12,24 +12,21 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
-  .salary-breakdown{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
-  .salary-col{padding:16px}
-  .salary-col:first-child{border-right:1px solid var(--border)}
-  .salary-col-title{font-size:11px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px}
-  .salary-line{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(42,48,72,.4);font-size:13px}
-  .salary-line:last-child{border-bottom:none}
-  .salary-line.total{font-weight:700;font-size:14px;border-top:1px solid var(--border);padding-top:10px;margin-top:4px}
-  .sal-pos{color:var(--green)}.sal-neg{color:var(--red)}
-  .net-display{background:linear-gradient(135deg,rgba(91,141,239,.15),rgba(192,132,252,.1));border:1px solid rgba(91,141,239,.3);border-radius:10px;padding:20px;text-align:center;margin-bottom:16px}
-  .net-label{font-size:12px;color:var(--text-dim);margin-bottom:6px}
-  .net-amount{font-size:36px;font-weight:700;font-family:'DM Mono',monospace;color:var(--accent2)}
-  .month-nav{display:flex;align-items:center;gap:12px}
-  .month-nav button{background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:16px;transition:all .2s}
-  .month-nav button:hover{border-color:var(--accent);color:var(--accent2)}
-  .month-label{font-family:'DM Mono',monospace;font-size:14px;min-width:80px;text-align:center}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:right;vertical-align:middle}
+  th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15);text-align:center}
+  th:first-child, td:first-child{text-align:left}
+  .num{font-family:'DM Mono',monospace}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .s-draft{background:rgba(251,191,36,.15);color:#FBBF24}
+  .s-confirmed{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .s-paid{background:rgba(74,222,128,.15);color:#4ADE80}
+  .filter-bar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  .auto-cell{color:var(--text-dim)}
+  .manual-cell{color:#FBBF24}
+  .gen-cell{font-weight:600;color:#7FBBFF}
+  .breakdown{font-size:11px;color:var(--text-dim);margin-top:2px}
 </style>
 </head>
 <body data-page="salary">
@@ -39,429 +36,297 @@
     <div class="page-header">
       <div>
         <div class="page-title">薪資管理</div>
-        <div class="page-sub">每月薪資計算與發放紀錄</div>
-      </div>
-      <div class="header-actions">
-        <div class="month-nav">
-          <button onclick="changeMonth(-1)">‹</button>
-          <span class="month-label" id="month-label">—</span>
-          <button onclick="changeMonth(1)">›</button>
-        </div>
-        <button class="btn btn-ghost" onclick="openBatchModal()">⚙️ 批次產生</button>
-        <button class="btn btn-ghost btn-sm" onclick="exportSalaryData()" title="匯出薪資試算表">📤 匯出</button>
-        <button class="btn btn-pdf" onclick="exportPayrollPDF()">📄 薪資單</button>
+        <div class="page-sub">月度結算 / 完整重算 / 確認發放</div>
       </div>
     </div>
 
-    <!-- Stats -->
-    <div class="stats-row">
-      <div class="stat-card blue"><div class="stat-label">應發總額</div><div class="stat-value" id="st-gross" style="font-size:22px">—</div><div class="stat-hint">本月</div></div>
-      <div class="stat-card green"><div class="stat-label">實發總額</div><div class="stat-value" id="st-net" style="font-size:22px">—</div><div class="stat-hint">扣除項後</div></div>
-      <div class="stat-card orange"><div class="stat-label">待確認</div><div class="stat-value" id="st-draft">—</div><div class="stat-hint">份</div></div>
-      <div class="stat-card purple"><div class="stat-label">已發放</div><div class="stat-value" id="st-paid">—</div><div class="stat-hint">份</div></div>
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin)</div>
     </div>
 
-    <!-- Filter -->
-    <div class="filter-bar">
-      <select id="dept-filter" onchange="loadSalary()">
-        <option value="">全部部門</option>
-        <option value="研發部">研發部</option><option value="行銷部">行銷部</option>
-        <option value="財務部">財務部</option><option value="業務部">業務部</option>
-      </select>
-      <select id="status-filter" onchange="loadSalary()">
-        <option value="">全部狀態</option>
-        <option value="draft">草稿</option>
-        <option value="confirmed">已確認</option>
-        <option value="paid">已發放</option>
-      </select>
-    </div>
+    <div id="main-content">
+      <div class="filter-bar">
+        <select class="form-select" id="f-month" onchange="load()" style="width:140px"></select>
+        <input type="text" class="form-input" id="f-search" placeholder="搜尋員工" oninput="render()" style="flex:1;max-width:240px">
+        <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+        <button class="btn btn-primary" onclick="batchGenerate()">批次產生(完整重算)</button>
+      </div>
 
-    <!-- Table -->
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>員工</th><th>底薪</th><th>加班費</th><th>全勤獎金</th><th>津貼</th>
-          <th>應扣款</th><th>實發薪資</th><th>狀態</th><th>操作</th>
-        </tr></thead>
-        <tbody id="salary-tbody"><tr class="loading-row"><td colspan="9">載入中…</td></tr></tbody>
-      </table>
-      <div id="sal-empty" class="empty-state" style="display:none">
-        <div class="icon">💴</div><div>本月尚無薪資資料，請先批次產生</div>
+      <div class="table-wrap" style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>員工</th>
+              <th>底薪</th>
+              <th>全勤<br>(actual)</th>
+              <th>加班費<br>auto</th>
+              <th>加班費<br>manual</th>
+              <th>補休<br>失效</th>
+              <th>結算</th>
+              <th>假日<br>工作</th>
+              <th>津貼</th>
+              <th>扣<br>曠職</th>
+              <th>扣<br>勞保</th>
+              <th>扣<br>健保</th>
+              <th>扣<br>稅</th>
+              <th>扣<br>懲處</th>
+              <th>應發</th>
+              <th>實發</th>
+              <th>狀態</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
       </div>
     </div>
   </main>
 </div>
 
-<!-- 薪資詳細 Modal -->
-<div class="modal-bg" id="salary-modal">
-  <div class="modal">
-    <div class="modal-title" id="sal-modal-title">薪資明細</div>
+<!-- 編輯抽屜 -->
+<div class="modal-bg" id="edit-modal">
+  <div class="modal" style="max-width:680px;width:95vw">
+    <div class="modal-title" id="modal-title">編輯薪資</div>
+    <div id="modal-meta" style="font-size:12px;color:var(--text-dim);margin-bottom:14px"></div>
 
-    <div class="net-display">
-      <div class="net-label">本月實發薪資</div>
-      <div class="net-amount" id="sal-net">—</div>
+    <div style="font-size:12px;color:var(--text-dim);margin:10px 0 6px">自動計算欄位(唯讀)</div>
+    <div id="auto-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-bottom:12px;font-size:13px"></div>
+
+    <div style="font-size:12px;color:var(--text-dim);margin:10px 0 6px">手動覆寫(可改)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="form-row"><label class="form-label">加班費(手動)</label><input type="number" class="form-input num" id="m-otm" step="0.01" min="0"></div>
+      <div class="form-row"><label class="form-label">津貼</label><input type="number" class="form-input num" id="m-allow" step="0.01" min="0"></div>
+      <div class="form-row"><label class="form-label">額外津貼</label><input type="number" class="form-input num" id="m-extra" step="0.01" min="0"></div>
+      <div class="form-row"><label class="form-label">扣 勞保</label><input type="number" class="form-input num" id="m-li" step="0.01" min="0"></div>
+      <div class="form-row"><label class="form-label">扣 健保</label><input type="number" class="form-input num" id="m-hi" step="0.01" min="0"></div>
+      <div class="form-row"><label class="form-label">扣 稅</label><input type="number" class="form-input num" id="m-tax" step="0.01" min="0"></div>
     </div>
+    <div class="form-row"><label class="form-label">加班備註</label><input type="text" class="form-input" id="m-otn"></div>
+    <div class="form-row"><label class="form-label">結算備註</label><input type="text" class="form-input" id="m-sn"></div>
 
-    <!-- 正職薪資明細 -->
-    <div class="salary-breakdown" id="sal-fulltime-breakdown">
-      <div class="salary-col">
-        <div class="salary-col-title">收入項目</div>
-        <div class="salary-line"><span>底薪</span><span class="sal-pos" id="sal-base">—</span></div>
-        <div class="salary-line"><span>全勤獎金</span><span class="sal-pos" id="sal-bonus">—</span></div>
-        <div class="salary-line"><span>職等/主管加給</span><span class="sal-pos" id="sal-allow">—</span></div>
-        <div class="salary-line"><span>額外加給</span><span class="sal-pos" id="sal-extra-allow">—</span></div>
-        <div class="salary-line total"><span>應發合計</span><span class="sal-pos" id="sal-gross">—</span></div>
+    <div style="font-size:12px;color:var(--text-dim);margin:14px 0 6px">即時試算(基於本表單值)</div>
+    <div id="preview" style="font-size:14px;font-weight:600;color:#7FBBFF;background:rgba(91,141,239,.06);padding:10px 14px;border-radius:6px"></div>
+
+    <div class="modal-actions" style="justify-content:space-between;margin-top:14px">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="recalculate()">完整重算此筆</button>
+        <button class="btn btn-ghost btn-sm" id="btn-confirm" onclick="confirmRec()">確認</button>
+        <button class="btn btn-primary btn-sm" id="btn-pay" onclick="payRec()" style="display:none">標記發放</button>
       </div>
-      <div class="salary-col">
-        <div class="salary-col-title">扣除項目</div>
-        <div class="salary-line"><span>缺曠扣款</span><span class="sal-neg" id="sal-absence">—</span></div>
-        <div class="salary-line"><span>勞保費</span><span class="sal-neg" id="sal-labor">—</span></div>
-        <div class="salary-line"><span>健保費</span><span class="sal-neg" id="sal-health">—</span></div>
-        <div class="salary-line"><span>所得稅</span><span class="sal-neg" id="sal-tax">—</span></div>
-        <div class="salary-line total"><span>扣除合計</span><span class="sal-neg" id="sal-deduct-total">—</span></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveManual()">儲存手動欄位</button>
       </div>
-    </div>
-
-    <!-- 兼職薪資明細 -->
-    <div class="salary-breakdown" id="sal-parttime-breakdown" style="display:none;grid-template-columns:1fr">
-      <div class="salary-col">
-        <div class="salary-col-title">時薪制計算</div>
-        <div class="salary-line"><span>出勤時數</span><span class="sal-pos" id="sal-pt-hours">—</span></div>
-        <div class="salary-line"><span>時薪</span><span class="sal-pos" id="sal-pt-rate">—</span></div>
-        <div class="salary-line total"><span>薪資合計</span><span class="sal-pos" id="sal-pt-gross">—</span></div>
-      </div>
-    </div>
-
-    <!-- 編輯欄位 -->
-    <div id="sal-edit-section">
-      <hr class="form-divider">
-      <div class="form-section-title">調整項目</div>
-      <div class="form-grid-3">
-        <div class="form-row"><label class="form-label">加班費</label><input class="form-input" type="number" id="e-ot" min="0"></div>
-        <div class="form-row"><label class="form-label">全勤獎金</label><input class="form-input" type="number" id="e-bonus" min="0"></div>
-        <div class="form-row"><label class="form-label">津貼</label><input class="form-input" type="number" id="e-allow" min="0"></div>
-        <div class="form-row"><label class="form-label">額外加給</label><input class="form-input" type="number" id="e-extra-allow" min="0"></div>
-        <div class="form-row" style="grid-column:span 2"><label class="form-label">加給說明</label><input class="form-input" id="e-extra-allow-note" placeholder="例：交通補貼、技術加給"></div>
-        <div class="form-row"><label class="form-label">缺曠扣款</label><input class="form-input" type="number" id="e-absence" min="0"></div>
-        <div class="form-row"><label class="form-label">勞保費</label><input class="form-input" type="number" id="e-labor" min="0"></div>
-        <div class="form-row"><label class="form-label">健保費</label><input class="form-input" type="number" id="e-health" min="0"></div>
-        <div class="form-row"><label class="form-label">所得稅</label><input class="form-input" type="number" id="e-tax" min="0"></div>
-        <div class="form-row"><label class="form-label">備注</label><input class="form-input" id="e-note"></div>
-      </div>
-    </div>
-
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('salary-modal')">關閉</button>
-      <button class="btn btn-approve" id="sal-confirm-btn" onclick="confirmSalary()">✓ 確認薪資</button>
-      <button class="btn btn-primary" id="sal-save-btn" onclick="saveSalary()">儲存調整</button>
-      <button class="btn btn-warn" id="sal-pay-btn" onclick="markPaid()" style="display:none">💰 標記發放</button>
-    </div>
-  </div>
-</div>
-
-<!-- 批次產生 Modal -->
-<div class="modal-bg" id="batch-modal">
-  <div class="modal">
-    <div class="modal-title">⚙️ 批次產生薪資單</div>
-    <div class="form-row">
-      <label class="form-label">產生月份</label>
-      <input type="month" class="form-input" id="batch-month">
-    </div>
-    <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">將依據員工底薪自動建立本月薪資草稿，已存在的紀錄不會覆蓋。</p>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('batch-modal')">取消</button>
-      <button class="btn btn-primary" onclick="batchGenerate()">確認產生</button>
     </div>
   </div>
 </div>
 
 <script>
-function toast(msg, type='success') {
-  let wrap = document.getElementById('toast-wrap');
-  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
-  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
-}
+function toast(msg,type='success'){let w=document.getElementById('toast-wrap');if(!w){w=document.createElement('div');w.id='toast-wrap';w.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px';document.body.appendChild(w);}const el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;w.appendChild(el);setTimeout(()=>el.remove(),3500);}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmt$(n){ if(n==null) return '—'; return new Intl.NumberFormat('zh-TW',{maximumFractionDigits:0}).format(Number(n)); }
+function n0(v){ return v==null?0:Number(v); }
 
-function shouldHaveAttendanceBonus(r) {
-  if (r.employment_type === 'part_time') return false;
-  if (Roles.skipAttendanceBonus({ role: r.emp_role, is_manager: r.emp_is_manager })) return false;
-  return true;
-}
-let currentYear, currentMonth;
-let currentSalaryId = null;
-let salaryRows = [];
+let allRows = [], currentRow = null;
 
-window.onload = async () => {
-  const now = new Date();
-  currentYear  = now.getFullYear();
-  currentMonth = now.getMonth() + 1;
-  updateMonthLabel();
-  await new Promise(r => setTimeout(r, 600));
-  try { await loadSalary(); } catch(e) { toast('載入失敗：'+e.message,'error'); }
-};
-
-function updateMonthLabel() {
-  document.getElementById('month-label').textContent = `${currentYear}/${String(currentMonth).padStart(2,'0')}`;
-}
-
-function changeMonth(d) {
-  currentMonth += d;
-  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
-  if (currentMonth < 1)  { currentMonth = 12; currentYear--; }
-  updateMonthLabel();
-  loadSalary();
-}
-
-async function loadSalary() {
-  const dept   = document.getElementById('dept-filter').value;
-  const status = document.getElementById('status-filter').value;
-  const p = new URLSearchParams({ year: currentYear, month: currentMonth });
-  if (dept)   p.set('dept', dept);
-  if (status) p.set('status', status);
-
-  const tbody = document.getElementById('salary-tbody');
-  const empty = document.getElementById('sal-empty');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="9">載入中…</td></tr>';
-
-  try {
-    const rows = await api('/api/salary?' + p);
-    salaryRows = rows;
-    if (!rows.length) { tbody.innerHTML=''; empty.style.display='block'; updateStats([]); return; }
-    empty.style.display = 'none';
-    updateStats(rows);
-
-    const fmt = n => '$' + Number(n||0).toLocaleString();
-    const totalDeduct = r => (r.deduct_absence||0)+(r.deduct_labor_ins||0)+(r.deduct_health_ins||0)+(r.deduct_tax||0);
-
-    tbody.innerHTML = rows.map(r => {
-      const isPt = r.employment_type === 'part_time';
-      const bonusAmt = shouldHaveAttendanceBonus(r) ? (r.bonus || 0) : 0;
-      return `<tr>
-      <td><div class="emp-cell"><div class="avatar">${r.avatar||r.emp_name?.[0]||'?'}</div><div><div class="emp-name">${r.emp_name||'—'}</div><div class="emp-dept">${r.dept||''}${isPt?' <span style="font-size:10px;color:#FFA050;opacity:.8">兼職</span>':''}</div></div></div></td>
-      <td style="font-family:'DM Mono',monospace">${isPt?`<span style="font-size:11px;color:var(--text-dim)">${r.work_hours||0}h × ${fmt(r.hourly_rate)}</span>`:fmt(r.base_salary)}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.overtime_pay>0?'+'+fmt(r.overtime_pay):'—'}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':bonusAmt>0?'+'+fmt(bonusAmt):'—'}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--green)">${isPt?'—':r.allowance>0?'+'+fmt(r.allowance):'—'}</td>
-      <td style="font-family:'DM Mono',monospace;color:var(--red)">${isPt?'—':'-'+fmt(totalDeduct(r))}</td>
-      <td style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent2)">${fmt(r.net_salary)}</td>
-      <td>${statusBadge(r.status)}</td>
-      <td><div class="action-btns">
-        <button class="btn btn-ghost btn-sm" onclick="openSalaryModal('${r.id}')">詳細</button>
-        ${r.status==='confirmed'?`<button class="btn btn-warn btn-sm" onclick="markPaidDirect('${r.id}')">發放</button>`:''}
-      </div></td>
-    </tr>`;
-    }).join('');
-  } catch(e) { toast('載入失敗','error'); }
-}
-
-function updateStats(rows) {
-  const fmt = n => '$' + Number(n||0).toLocaleString();
-  const gross = rows.reduce((s,r)=>s+(r.gross_salary||0),0);
-  const net   = rows.reduce((s,r)=>s+(r.net_salary||0),0);
-  document.getElementById('st-gross').textContent = fmt(gross);
-  document.getElementById('st-net').textContent   = fmt(net);
-  document.getElementById('st-draft').textContent = rows.filter(r=>r.status==='draft').length;
-  document.getElementById('st-paid').textContent  = rows.filter(r=>r.status==='paid').length;
-}
-
-function statusBadge(s) {
-  const m={draft:'草稿',confirmed:'已確認',paid:'已發放'};
-  return `<span class="badge badge-${s}"><span class="badge-dot badge-dot-${s}"></span>${m[s]||s}</span>`;
-}
-
-function openSalaryModal(id) {
-  const r = salaryRows.find(x=>x.id===id);
-  if (!r) return;
-  currentSalaryId = id;
-
-  document.getElementById('sal-modal-title').textContent = `薪資明細 — ${r.emp_name} ${currentYear}/${String(currentMonth).padStart(2,'0')}`;
-
-  const fmt = n => '$' + Number(n||0).toLocaleString();
-  const isPart = r.employment_type === 'part_time';
-
-  document.getElementById('sal-net').textContent = fmt(r.net_salary);
-  document.getElementById('sal-fulltime-breakdown').style.display = isPart ? 'none' : '';
-  document.getElementById('sal-parttime-breakdown').style.display = isPart ? '' : 'none';
-
-  if (isPart) {
-    document.getElementById('sal-pt-hours').textContent = (r.work_hours || 0) + ' 小時';
-    document.getElementById('sal-pt-rate').textContent  = fmt(r.hourly_rate) + '/小時';
-    document.getElementById('sal-pt-gross').textContent = fmt(r.gross_salary);
-  } else {
-    const bonusAmt = shouldHaveAttendanceBonus(r) ? (r.bonus || 0) : 0;
-    const totalDeduct = (r.deduct_absence||0)+(r.deduct_labor_ins||0)+(r.deduct_health_ins||0)+(r.deduct_tax||0);
-    document.getElementById('sal-base').textContent        = fmt(r.base_salary);
-    document.getElementById('sal-bonus').textContent       = bonusAmt > 0 ? fmt(bonusAmt) : '—';
-    document.getElementById('sal-allow').textContent       = r.allowance > 0 ? fmt(r.allowance) : '—';
-    document.getElementById('sal-extra-allow').textContent = r.extra_allowance > 0 ? fmt(r.extra_allowance) : '—';
-    document.getElementById('sal-gross').textContent       = fmt(r.gross_salary);
-    document.getElementById('sal-absence').textContent     = fmt(r.deduct_absence);
-    document.getElementById('sal-labor').textContent       = fmt(r.deduct_labor_ins);
-    document.getElementById('sal-health').textContent      = fmt(r.deduct_health_ins);
-    document.getElementById('sal-tax').textContent         = fmt(r.deduct_tax);
-    document.getElementById('sal-deduct-total').textContent= fmt(totalDeduct);
+function buildMonthOptions(){
+  const sel = document.getElementById('f-month');
+  const d = new Date(); const out = [];
+  for (let i = 0; i < 12; i++) {
+    const v = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    out.push(`<option value="${v}"${i===0?' selected':''}>${v}</option>`);
+    d.setMonth(d.getMonth()-1);
   }
-
-  // Edit fields
-  const editBonusAmt = shouldHaveAttendanceBonus(r) ? (r.bonus || 0) : 0;
-  document.getElementById('e-ot').value              = r.overtime_pay||0;
-  document.getElementById('e-bonus').value           = editBonusAmt;
-  document.getElementById('e-allow').value           = r.allowance||0;
-  document.getElementById('e-extra-allow').value     = r.extra_allowance||0;
-  document.getElementById('e-extra-allow-note').value= r.extra_allowance_note||'';
-  document.getElementById('e-absence').value         = r.deduct_absence||0;
-  document.getElementById('e-labor').value  = r.deduct_labor_ins||0;
-  document.getElementById('e-health').value = r.deduct_health_ins||0;
-  document.getElementById('e-tax').value    = r.deduct_tax||0;
-  document.getElementById('e-note').value   = r.note||'';
-
-  const isPaid = r.status === 'paid';
-  document.getElementById('sal-edit-section').style.display = isPaid ? 'none' : '';
-  document.getElementById('sal-save-btn').style.display     = isPaid ? 'none' : '';
-  document.getElementById('sal-confirm-btn').style.display  = r.status==='draft' ? '' : 'none';
-  document.getElementById('sal-pay-btn').style.display      = r.status==='confirmed' ? '' : 'none';
-
-  document.getElementById('salary-modal').classList.add('open');
+  sel.innerHTML = out.join('');
 }
 
-async function saveSalary() {
+async function load(retries=0){
+  if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  const month = document.getElementById('f-month').value;
+  const [y, m] = month.split('-');
+  try {
+    const r = await api(`/api/salary?v=2&year=${y}&month=${parseInt(m)}`);
+    allRows = r.records || [];
+    render();
+  } catch(e){ toast('載入失敗:'+e.message,'error'); }
+}
+
+function render(){
+  const q = document.getElementById('f-search').value.trim().toLowerCase();
+  const rows = allRows.filter(r => {
+    if (!q) return true;
+    return `${r.emp_name||''} ${r.employee_id||''}`.toLowerCase().includes(q);
+  });
+  const tbody = document.getElementById('tbody');
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="18" style="text-align:center;padding:30px;color:var(--text-dim)">無記錄。請點「批次產生」</td></tr>`; return; }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></td>
+      <td class="num">${fmt$(r.base_salary)}</td>
+      <td class="num auto-cell">${fmt$(r.attendance_bonus_actual)}</td>
+      <td class="num auto-cell">${fmt$(r.overtime_pay_auto)}</td>
+      <td class="num manual-cell">${fmt$(r.overtime_pay_manual)}</td>
+      <td class="num auto-cell">${fmt$(r.comp_expiry_payout)}</td>
+      <td class="num auto-cell">${fmt$(r.settlement_amount)}</td>
+      <td class="num auto-cell">${fmt$(r.holiday_work_pay)}</td>
+      <td class="num manual-cell">${fmt$(n0(r.allowance)+n0(r.extra_allowance))}</td>
+      <td class="num auto-cell">${fmt$(r.deduct_absence)}</td>
+      <td class="num manual-cell">${fmt$(r.deduct_labor_ins)}</td>
+      <td class="num manual-cell">${fmt$(r.deduct_health_ins)}</td>
+      <td class="num manual-cell">${fmt$(r.deduct_tax)}</td>
+      <td class="num auto-cell">${fmt$(r.attendance_penalty_total)}</td>
+      <td class="num gen-cell">${fmt$(r.gross_salary)}</td>
+      <td class="num gen-cell">${fmt$(r.net_salary)}</td>
+      <td><span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(r.id)}')">編輯</button></td>
+    </tr>
+  `).join('');
+}
+
+async function batchGenerate(){
+  const month = document.getElementById('f-month').value;
+  const [y, m] = month.split('-');
+  if (!confirm(`完整重算 ${month} 全部員工的薪資?\n_manual 欄位保留;_auto 欄位重新算。`)) return;
+  try {
+    const r = await api('/api/salary', { method:'POST', body: JSON.stringify({
+      action: 'batch_v2', year: parseInt(y), month: parseInt(m),
+    })});
+    toast(`批次完成:成功 ${r.success} / 失敗 ${r.failed}`);
+    if (r.failed > 0) console.warn('failures', r.results.filter(x => !x.ok));
+    await load();
+  } catch(e){ toast('批次失敗:'+e.message,'error'); }
+}
+
+function openEdit(id){
+  currentRow = allRows.find(r => r.id === id);
+  if (!currentRow) return;
+  document.getElementById('modal-title').textContent = `編輯 ${currentRow.emp_name||currentRow.employee_id}`;
+  document.getElementById('modal-meta').textContent = `${currentRow.year}/${String(currentRow.month).padStart(2,'0')} · 狀態 ${currentRow.status}`;
+
+  // Auto fields(唯讀)
+  document.getElementById('auto-fields').innerHTML = `
+    <div>底薪:<span class="num">${fmt$(currentRow.base_salary)}</span></div>
+    <div>日薪 snapshot:<span class="num">${fmt$(currentRow.daily_wage_snapshot)}</span></div>
+    <div>全勤 base:<span class="num">${fmt$(currentRow.attendance_bonus_base)}</span></div>
+    <div>全勤扣比:<span class="num">${(n0(currentRow.attendance_bonus_deduction_rate)*100).toFixed(1)}%</span></div>
+    <div>全勤 actual:<span class="num gen-cell">${fmt$(currentRow.attendance_bonus_actual)}</span></div>
+    <div>加班費 auto:<span class="num">${fmt$(currentRow.overtime_pay_auto)}</span></div>
+    <div>補休失效付:<span class="num">${fmt$(currentRow.comp_expiry_payout)}</span></div>
+    <div>結算金額:<span class="num">${fmt$(currentRow.settlement_amount)}</span></div>
+    <div>假日工作:<span class="num">${fmt$(currentRow.holiday_work_pay)}</span></div>
+    <div>曠職天數:<span class="num">${currentRow.absence_days}</span></div>
+    <div>扣曠職:<span class="num">${fmt$(currentRow.deduct_absence)}</span></div>
+    <div>扣懲處:<span class="num">${fmt$(currentRow.attendance_penalty_total)}</span></div>
+  `;
+
+  document.getElementById('m-otm').value   = currentRow.overtime_pay_manual ?? 0;
+  document.getElementById('m-allow').value = currentRow.allowance ?? 0;
+  document.getElementById('m-extra').value = currentRow.extra_allowance ?? 0;
+  document.getElementById('m-li').value    = currentRow.deduct_labor_ins ?? 0;
+  document.getElementById('m-hi').value    = currentRow.deduct_health_ins ?? 0;
+  document.getElementById('m-tax').value   = currentRow.deduct_tax ?? 0;
+  document.getElementById('m-otn').value   = currentRow.overtime_pay_note ?? '';
+  document.getElementById('m-sn').value    = currentRow.settlement_note ?? '';
+
+  document.getElementById('btn-pay').style.display = currentRow.status === 'confirmed' ? '' : 'none';
+
+  ['m-otm','m-allow','m-extra','m-li','m-hi','m-tax'].forEach(id => {
+    document.getElementById(id).oninput = updatePreview;
+  });
+  updatePreview();
+
+  document.getElementById('edit-modal').classList.add('open');
+}
+function closeModal(){ document.getElementById('edit-modal').classList.remove('open'); }
+
+function updatePreview(){
+  if (!currentRow) return;
+  const otm = parseFloat(document.getElementById('m-otm').value) || 0;
+  const allow = parseFloat(document.getElementById('m-allow').value) || 0;
+  const extra = parseFloat(document.getElementById('m-extra').value) || 0;
+  const li = parseFloat(document.getElementById('m-li').value) || 0;
+  const hi = parseFloat(document.getElementById('m-hi').value) || 0;
+  const tax = parseFloat(document.getElementById('m-tax').value) || 0;
+  // 套 batch_c GENERATED 公式
+  const gross = n0(currentRow.base_salary) + n0(currentRow.attendance_bonus_actual)
+    + allow + extra
+    + (n0(currentRow.overtime_pay_auto) + otm)
+    + n0(currentRow.comp_expiry_payout)
+    + n0(currentRow.holiday_work_pay)
+    + n0(currentRow.settlement_amount);
+  const net = gross
+    - n0(currentRow.deduct_absence) - li - hi - tax
+    - n0(currentRow.attendance_penalty_total);
+  document.getElementById('preview').innerHTML =
+    `應發: $${fmt$(gross)} &nbsp;&nbsp; 實發: $${fmt$(net)}`;
+}
+
+async function saveManual(){
+  if (!currentRow) return;
   const payload = {
-    overtime_pay:        parseFloat(document.getElementById('e-ot').value)||0,
-    bonus:               parseFloat(document.getElementById('e-bonus').value)||0,
-    allowance:           parseFloat(document.getElementById('e-allow').value)||0,
-    extra_allowance:     parseFloat(document.getElementById('e-extra-allow').value)||0,
-    extra_allowance_note:document.getElementById('e-extra-allow-note').value.trim()||null,
-    deduct_absence:      parseFloat(document.getElementById('e-absence').value)||0,
-    deduct_labor_ins:  parseFloat(document.getElementById('e-labor').value)||0,
-    deduct_health_ins: parseFloat(document.getElementById('e-health').value)||0,
-    deduct_tax:        parseFloat(document.getElementById('e-tax').value)||0,
-    note:              document.getElementById('e-note').value,
+    overtime_pay_manual: parseFloat(document.getElementById('m-otm').value) || 0,
+    allowance:           parseFloat(document.getElementById('m-allow').value) || 0,
+    extra_allowance:     parseFloat(document.getElementById('m-extra').value) || 0,
+    deduct_labor_ins:    parseFloat(document.getElementById('m-li').value) || 0,
+    deduct_health_ins:   parseFloat(document.getElementById('m-hi').value) || 0,
+    deduct_tax:          parseFloat(document.getElementById('m-tax').value) || 0,
+    overtime_pay_note:   document.getElementById('m-otn').value || null,
+    settlement_note:     document.getElementById('m-sn').value || null,
   };
   try {
-    await api(`/api/salary/${currentSalaryId}`, { method:'PUT', body: JSON.stringify(payload) });
-    closeModal('salary-modal');
-    await loadSalary();
-    toast('✅ 薪資已更新','success');
-  } catch(e) { toast('儲存失敗：'+e.message,'error'); }
+    await api(`/api/salary/${encodeURIComponent(currentRow.id)}`, { method:'PUT', body: JSON.stringify(payload) });
+    toast('已儲存手動欄位');
+    closeModal();
+    await load();
+  } catch(e){ toast('儲存失敗:'+e.message,'error'); }
 }
 
-async function confirmSalary() {
+async function recalculate(){
+  if (!currentRow) return;
+  if (!confirm(`完整重算此筆薪資?\n_manual 欄位保留;_auto 欄位重新算。`)) return;
   try {
-    await api(`/api/salary/${currentSalaryId}/confirm`, { method:'PUT' });
-    closeModal('salary-modal');
-    await loadSalary();
-    toast('✅ 薪資已確認','success');
-  } catch(e) { toast('確認失敗：'+e.message,'error'); }
+    await api('/api/salary/recalculate', { method:'POST', body: JSON.stringify({
+      employee_id: currentRow.employee_id, year: currentRow.year, month: currentRow.month,
+    })});
+    toast('已重算');
+    closeModal();
+    await load();
+  } catch(e){ toast('重算失敗:'+e.message,'error'); }
 }
 
-async function markPaid() {
+async function confirmRec(){
+  if (!currentRow) return;
   try {
-    await api(`/api/salary/${currentSalaryId}/pay`, { method:'PUT' });
-    closeModal('salary-modal');
-    await loadSalary();
-    toast('💰 已標記為發放','success');
-  } catch(e) { toast('操作失敗：'+e.message,'error'); }
+    await api(`/api/salary/${encodeURIComponent(currentRow.id)}?action=confirm`, { method:'PUT' });
+    toast('已確認');
+    closeModal();
+    await load();
+  } catch(e){ toast('確認失敗:'+e.message,'error'); }
 }
 
-async function markPaidDirect(id) {
+async function payRec(){
+  if (!currentRow) return;
+  if (!confirm('標記為已發放?')) return;
   try {
-    await api(`/api/salary/${id}/pay`, { method:'PUT' });
-    await loadSalary();
-    toast('💰 已標記為發放','success');
-  } catch(e) { toast('操作失敗：'+e.message,'error'); }
+    await api(`/api/salary/${encodeURIComponent(currentRow.id)}?action=pay`, { method:'PUT' });
+    toast('已標記發放');
+    closeModal();
+    await load();
+  } catch(e){ toast('標記失敗:'+e.message,'error'); }
 }
 
-function openBatchModal() {
-  const m = String(currentMonth).padStart(2,'0');
-  document.getElementById('batch-month').value = `${currentYear}-${m}`;
-  document.getElementById('batch-modal').classList.add('open');
-}
-
-async function batchGenerate() {
-  const val = document.getElementById('batch-month').value;
-  if (!val) { toast('請選擇月份','error'); return; }
-  const [y,m] = val.split('-');
-  try {
-    const result = await api('/api/salary/batch', { method:'POST', body: JSON.stringify({ year: parseInt(y), month: parseInt(m) }) });
-    closeModal('batch-modal');
-    currentYear  = parseInt(y); currentMonth = parseInt(m);
-    updateMonthLabel();
-    await loadSalary();
-    toast(`✅ 已產生 ${result.created} 筆薪資草稿`,'success');
-  } catch(e) { toast('產生失敗：'+e.message,'error'); }
-}
-
-function exportPayrollPDF() {
-  if (!salaryRows.length) { toast('目前沒有資料可匯出','error'); return; }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
-  const ym  = `${currentYear}/${String(currentMonth).padStart(2,'0')}`;
-
-  doc.setFillColor(15,17,23); doc.rect(0,0,297,22,'F');
-  doc.setFontSize(14); doc.setTextColor(232,234,240);
-  doc.text(`Payroll Report — ${ym}`, 148.5, 10, {align:'center'});
-  doc.setFontSize(8); doc.setTextColor(122,133,160);
-  doc.text(`${new Date().toLocaleString('zh-TW')}  |  ${salaryRows.length} employees`, 148.5, 17, {align:'center'});
-
-  const fmt = n => '$' + Number(n||0).toLocaleString();
-  const totalDeduct = r => (r.deduct_absence||0)+(r.deduct_labor_ins||0)+(r.deduct_health_ins||0)+(r.deduct_tax||0);
-
-  const statusMap = {draft:'Draft',confirmed:'Confirmed',paid:'Paid'};
-  doc.autoTable({
-    startY:28,
-    head:[['Employee','Dept','Base','OT Pay','Bonus','Allow.','Deductions','Net Salary','Status']],
-    body: salaryRows.map(r=>[
-      r.emp_name||'—', r.dept||'—',
-      fmt(r.base_salary), fmt(r.overtime_pay), fmt(r.bonus), fmt(r.allowance),
-      fmt(totalDeduct(r)), fmt(r.net_salary),
-      statusMap[r.status]||r.status,
-    ]),
-    headStyles:{fillColor:[30,35,51],textColor:[200,208,230],fontSize:8.5},
-    styles:{fontSize:8.5,cellPadding:3},
-    columnStyles:{7:{fontStyle:'bold'},8:{halign:'center'}},
-    didParseCell:(data)=>{
-      if (data.section==='body' && data.column.index===7) data.cell.styles.textColor=[91,141,239];
-    },
-    margin:{left:8,right:8}, theme:'grid',
-    foot:[['','TOTAL','','','','','',fmt(salaryRows.reduce((s,r)=>s+(r.net_salary||0),0)),'']],
-    footStyles:{fillColor:[30,35,51],textColor:[200,208,230],fontStyle:'bold',fontSize:9},
-  });
-
-  doc.save(`Payroll_${currentYear}${String(currentMonth).padStart(2,'0')}.pdf`);
-  toast('📄 薪資報表已下載','success');
-}
-
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-
-/* ── Export ── */
-const SAL_COLUMNS = [
-  { key:'emp_no',             label:'員工編號' },
-  { key:'emp_name',           label:'姓名' },
-  { key:'dept',               label:'部門' },
-  { key:'base_salary',        label:'本薪' },
-  { key:'overtime_pay',       label:'加班費' },
-  { key:'bonus',              label:'獎金' },
-  { key:'allowance',          label:'加給' },
-  { key:'extra_allowance',    label:'其他加給' },
-  { key:'absence_deduction',  label:'缺勤扣款' },
-  { key:'labor_insurance',    label:'勞保費' },
-  { key:'health_insurance',   label:'健保費' },
-  { key:'tax',                label:'所得稅' },
-  { key:'net_salary',         label:'實發薪資' },
-  { key:'status',             label:'狀態' },
-];
-
-function exportSalaryData() {
-  if (!salaryRows.length) { toast('目前沒有薪資資料', 'warn'); return; }
-  const filename = `salary_${currentYear}${String(currentMonth).padStart(2,'0')}`;
-  ExcelTools.exportData({ sheetName:'薪資資料', filename, columns: SAL_COLUMNS }, salaryRows);
-}
+buildMonthOptions();
+load();
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="/js/excel-tools.js"></script>
 <script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
-
 <script src="/js/pwa.js"></script>
 <script>PWA.init();</script>
 </body>
