@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>國定假日 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .type-badge{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;font-family:'DM Mono',monospace}
+  .t-national{background:rgba(248,113,113,.15);color:#F87171}
+  .t-makeup_workday{background:rgba(251,146,60,.15);color:#FB923C}
+  .t-company{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .t-flexible{background:rgba(74,222,128,.15);color:#4ADE80}
+  .source-badge{padding:2px 6px;border-radius:3px;font-size:10px;font-family:'DM Mono',monospace}
+  .src-imported{background:rgba(91,141,239,.12);color:#7FBBFF}
+  .src-manual{background:rgba(107,114,128,.15);color:#9CA3AF}
+</style>
+</head>
+<body data-page="holidays-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">國定假日</div>
+        <div class="page-sub">管理年度國定假日、補行上班、彈性放假與公司休息日</div>
+      </div>
+      <div class="header-actions" style="display:flex;gap:8px;align-items:center">
+        <select class="form-select" id="year-select" onchange="onYearChange()" style="width:120px"></select>
+        <button class="btn btn-ghost" onclick="confirmImport()">📥 從 data.gov.tw 匯入</button>
+        <button class="btn btn-primary" onclick="openCreate()">＋ 新增假日</button>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面</div>
+    </div>
+
+    <div id="main-content">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>日期</th><th>類型</th><th>名稱</th><th>備註</th>
+            <th>倍率</th><th>來源</th><th>操作</th>
+          </tr></thead>
+          <tbody id="hol-tbody">
+            <tr class="loading-row"><td colspan="7">載入中…</td></tr>
+          </tbody>
+        </table>
+        <div id="hol-empty" class="empty-state" style="display:none">
+          <div class="icon">🎌</div><div id="empty-msg">該年度尚無假日資料</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 新增/編輯 Modal -->
+<div class="modal-bg" id="hol-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title" id="modal-title">新增假日</div>
+    <input type="hidden" id="f-id">
+    <div class="form-row">
+      <label class="form-label">日期 <span style="color:#F87171">*</span></label>
+      <input type="date" class="form-input" id="f-date">
+    </div>
+    <div class="form-row">
+      <label class="form-label">類型 <span style="color:#F87171">*</span></label>
+      <select class="form-select" id="f-type">
+        <option value="national">國定假日（national）</option>
+        <option value="makeup_workday">補行上班日（makeup_workday）</option>
+        <option value="company">公司自訂休息日（company）</option>
+        <option value="flexible">彈性放假（flexible）</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="form-label">名稱 <span style="color:#F87171">*</span></label>
+      <input type="text" class="form-input" id="f-name" placeholder="例：中華民國開國紀念日">
+    </div>
+    <div class="form-row">
+      <label class="form-label">備註（選填）</label>
+      <input type="text" class="form-input" id="f-desc" placeholder="例：依政府公告">
+    </div>
+    <div class="form-row">
+      <label class="form-label">薪資倍率</label>
+      <input type="number" class="form-input" id="f-multiplier" step="0.01" min="0" max="10" value="2.00">
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between">
+      <button class="btn btn-ghost" onclick="closeModal('hol-modal')">取消</button>
+      <button class="btn btn-primary" onclick="saveHoliday()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+const TYPE_LABEL = {
+  national:       '國定假日',
+  makeup_workday: '補行上班日',
+  company:        '公司休息日',
+  flexible:       '彈性放假',
+};
+
+let currentYear = new Date().getFullYear();
+let allHolidays = [];
+
+function fmtDate(s) {
+  if (!s) return '';
+  // 接受 ISO 'YYYY-MM-DD' 直接顯示
+  return s;
+}
+function escHtml(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function buildYearOptions() {
+  const sel = document.getElementById('year-select');
+  const now = new Date().getFullYear();
+  const years = [];
+  for (let y = now - 2; y <= now + 2; y++) years.push(y);
+  sel.innerHTML = years.map(y => `<option value="${y}"${y===currentYear?' selected':''}>${y}</option>`).join('');
+}
+
+function onYearChange() {
+  currentYear = parseInt(document.getElementById('year-select').value);
+  loadHolidays();
+}
+
+async function loadHolidays(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadHolidays(retries + 1), 300);
+    return;
+  }
+
+  // Page-level gate（HR/admin 才能看）
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  try {
+    allHolidays = await api(`/api/holidays?year=${currentYear}`);
+    renderHolidays();
+  } catch(e) {
+    document.getElementById('hol-tbody').innerHTML =
+      `<tr><td colspan="7" style="color:#F87171">載入失敗：${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderHolidays() {
+  const tbody = document.getElementById('hol-tbody');
+  const empty = document.getElementById('hol-empty');
+  if (!allHolidays.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = allHolidays.map(h => `
+    <tr>
+      <td style="font-family:'DM Mono',monospace">${escHtml(fmtDate(h.date))}</td>
+      <td><span class="type-badge t-${escHtml(h.holiday_type)}">${escHtml(TYPE_LABEL[h.holiday_type] || h.holiday_type)}</span></td>
+      <td>${escHtml(h.name)}</td>
+      <td style="color:var(--text-dim);font-size:13px">${escHtml(h.description || '')}</td>
+      <td style="font-family:'DM Mono',monospace">${Number(h.pay_multiplier).toFixed(2)}</td>
+      <td><span class="source-badge src-${escHtml(h.source)}">${h.source==='imported'?'匯入':'手動'}</span></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="openEdit(${h.id})">編輯</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteHoliday(${h.id})">刪除</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function openCreate() {
+  document.getElementById('modal-title').textContent = '新增假日';
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-date').value = `${currentYear}-01-01`;
+  document.getElementById('f-type').value = 'national';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-desc').value = '';
+  document.getElementById('f-multiplier').value = '2.00';
+  document.getElementById('hol-modal').classList.add('open');
+}
+
+function openEdit(id) {
+  const h = allHolidays.find(x => x.id === id);
+  if (!h) return;
+  document.getElementById('modal-title').textContent = '編輯假日';
+  document.getElementById('f-id').value = h.id;
+  document.getElementById('f-date').value = h.date;
+  document.getElementById('f-type').value = h.holiday_type;
+  document.getElementById('f-name').value = h.name;
+  document.getElementById('f-desc').value = h.description || '';
+  document.getElementById('f-multiplier').value = Number(h.pay_multiplier).toFixed(2);
+  document.getElementById('hol-modal').classList.add('open');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+async function saveHoliday() {
+  const id = document.getElementById('f-id').value;
+  const payload = {
+    date:           document.getElementById('f-date').value,
+    holiday_type:   document.getElementById('f-type').value,
+    name:           document.getElementById('f-name').value.trim(),
+    description:    document.getElementById('f-desc').value.trim() || null,
+    pay_multiplier: parseFloat(document.getElementById('f-multiplier').value) || 2.00,
+  };
+  if (!payload.date || !payload.name) {
+    toast('日期與名稱必填', 'error'); return;
+  }
+  try {
+    if (id) {
+      await api(`/api/holidays/${id}`, { method:'PUT', body: JSON.stringify(payload) });
+      toast('已更新');
+    } else {
+      await api('/api/holidays', { method:'POST', body: JSON.stringify(payload) });
+      toast('已新增');
+    }
+    closeModal('hol-modal');
+    loadHolidays();
+  } catch(e) { toast('儲存失敗：' + e.message, 'error'); }
+}
+
+async function deleteHoliday(id) {
+  const h = allHolidays.find(x => x.id === id);
+  if (!h) return;
+  if (!confirm(`確定刪除「${h.name}」（${h.date}）？`)) return;
+  try {
+    await api(`/api/holidays/${id}`, { method:'DELETE' });
+    toast('已刪除');
+    loadHolidays();
+  } catch(e) { toast('刪除失敗：' + e.message, 'error'); }
+}
+
+function confirmImport() {
+  const msg = `從 data.gov.tw 匯入 ${currentYear} 年度國定假日？\n\n注意：\n- 該年既有「匯入來源」資料會先被刪除再重匯\n- 「手動建立」的假日不會動\n- 若 data.gov.tw 該年度資料未公布，匯入會回 0 筆`;
+  if (!confirm(msg)) return;
+  doImport();
+}
+
+async function doImport() {
+  toast('匯入中…');
+  try {
+    const r = await api('/api/holidays/import', {
+      method:'POST',
+      body: JSON.stringify({ year: currentYear }),
+    });
+    toast(`匯入完成：新增 ${r.imported} 筆，刪除舊匯入 ${r.deleted} 筆`);
+    if (r.warning) toast(r.warning, 'warn');
+    loadHolidays();
+  } catch(e) { toast('匯入失敗：' + e.message, 'error'); }
+}
+
+// Init
+buildYearOptions();
+loadHolidays();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

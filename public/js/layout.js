@@ -57,9 +57,10 @@
     {
       title: '勤務管理',
       items: [
-        { page:'leave',      icon:'📋', label:'請假審批', href:'/leave.html' },
-        { page:'attendance', icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
-        { page:'schedule',   icon:'🗓️', label:'排班管理', href:'/schedule.html' },
+        { page:'leave',          icon:'📋', label:'請假審批', href:'/leave.html' },
+        { page:'attendance',     icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
+        { page:'schedule',       icon:'🗓️', label:'排班管理', href:'/schedule.html' },
+        { page:'holidays-admin', icon:'🎌', label:'國定假日', href:'/holidays-admin.html', gate: u => !!u && ['hr','admin'].includes(u.role) },
       ]
     },
     {
