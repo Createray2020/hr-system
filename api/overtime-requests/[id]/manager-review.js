@@ -10,6 +10,7 @@
 //   5. 若直接 approved + comp_leave → 觸發 convertOvertimeToCompTime
 
 import { requireAuth } from '../../../lib/auth.js';
+import { isBackofficeRole } from '../../../lib/roles.js';
 import { canTransition } from '../../../lib/overtime/request-state.js';
 import { convertOvertimeToCompTime } from '../../../lib/overtime/comp-conversion.js';
 import { makeOvertimeRepo } from '../_repo.js';
@@ -39,7 +40,7 @@ export default async function handler(req, res) {
   if (!reqRow) return res.status(404).json({ error: 'request not found' });
 
   // 主管權限:該員工 manager_id == caller.id 或 caller is HR
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const isHR = isBackofficeRole(caller);
   let isDirectManager = false;
   if (caller.id) {
     const emp = await repo.findEmployeeManager(reqRow.employee_id);

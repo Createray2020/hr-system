@@ -25,6 +25,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { submitLeaveRequest } from '../../lib/leave/request-flow.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
@@ -116,7 +117,7 @@ export default async function handler(req, res) {
   // PUT(legacy 審核)
   if (req.method === 'PUT') {
     if (!id) return res.status(400).json({ error: '缺少 id' });
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo'], { allowManager: true });
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
     if (!caller) return;
     const { status, handler_note } = req.body;
     if (!['approved', 'rejected'].includes(status))
@@ -188,7 +189,7 @@ async function handleNewGet(req, res) {
 }
 
 async function handleNewPost(req, res) {
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo'], { allowManager: true });
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
   if (!caller) return;
 
   const { leave_type, start_at, end_at, reason } = req.body;

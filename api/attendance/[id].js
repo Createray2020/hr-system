@@ -17,6 +17,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
 const ALLOWED_PUT_FIELDS = new Set([
   'clock_in', 'clock_out',
@@ -39,12 +40,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'invalid id' });
   }
 
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
-
-  // 權限:HR / admin 才能改打卡紀錄
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
-  if (!isHR) return res.status(403).json({ error: 'HR / admin only' });
 
   const { data: existing, error: gErr } = await supabase
     .from('attendance').select('*').eq('id', id).maybeSingle();

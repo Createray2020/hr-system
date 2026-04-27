@@ -3,6 +3,7 @@
 // DELETE /api/overtime-limits/:id
 
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { makeOvertimeRepo } from '../overtime-requests/_repo.js';
 
 const ALLOWED_PUT = new Set([
@@ -16,10 +17,8 @@ const ALLOWED_PUT = new Set([
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
-  if (!isHR) return res.status(403).json({ error: 'HR / admin only' });
 
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'limit id required' });

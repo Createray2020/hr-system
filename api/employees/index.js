@@ -4,12 +4,10 @@
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { sendPushToEmployees, sendPushToRoles } from '../../lib/push.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-// 可寫部門資料的權限白名單（requireRoleOrPass 目前為 pass-through，此為意圖宣告）
-// 部門主管（is_manager=true）也應被視為後台使用者；未來 requireRoleOrPass 轉嚴格時應改走 canAccessBackoffice。
-const DEPT_WRITE_ROLES = ['hr', 'ceo', 'chairman', 'admin'];
 
 // 同步 employees.is_manager。在 departments 表變動「之後」呼叫。
 // oldManagerId / newManagerId 可為 null。
@@ -105,7 +103,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const caller = await requireRole(req, res, DEPT_WRITE_ROLES);
+      const caller = await requireRole(req, res, BACKOFFICE_ROLES);
       if (!caller) return;
       const { name, description, color, manager_id } = req.body;
       if (!name) return res.status(400).json({ error: '缺少部門名稱' });
@@ -123,7 +121,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
-      const caller = await requireRole(req, res, DEPT_WRITE_ROLES);
+      const caller = await requireRole(req, res, BACKOFFICE_ROLES);
       if (!caller) return;
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: '缺少 id' });
@@ -150,7 +148,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      const caller = await requireRole(req, res, DEPT_WRITE_ROLES);
+      const caller = await requireRole(req, res, BACKOFFICE_ROLES);
       if (!caller) return;
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: '缺少 id' });
@@ -187,7 +185,7 @@ export default async function handler(req, res) {
 
   // ── 新增員工 POST ────────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const caller = await requireRole(req, res, ['hr', 'ceo', 'admin']);
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
     const body = { ...req.body };
     const id = 'E' + Date.now();

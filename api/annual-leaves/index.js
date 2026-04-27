@@ -8,6 +8,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
+import { isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { calculateLegalDays, calculatePeriodBoundary } from '../../lib/leave/annual.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
@@ -25,7 +26,7 @@ async function handleGet(req, res) {
   if (!caller) return;
 
   const { employee_id, status } = req.query;
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const isHR = isBackofficeRole(caller);
 
   // 員工查自己餘額(快速路徑)
   if (employee_id && (employee_id === caller.id || isHR)) {
@@ -64,11 +65,8 @@ async function handleGet(req, res) {
 }
 
 async function handlePost(req, res) {
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
-  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
-    return res.status(403).json({ error: 'HR / admin only' });
-  }
 
   const { employee_id, period_start, period_end, granted_days, note } = req.body || {};
   if (!employee_id) return res.status(400).json({ error: 'employee_id required' });

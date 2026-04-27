@@ -32,6 +32,7 @@
 // 若上 prod 時 fetch 失敗或格式變更，HR 可改走「手動新增」與 Excel 匯入（未來可加）。
 import { supabase } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { parseGovHolidays } from '../../lib/holidays/parser.js';
 
 const DATA_GOV_TW_URL_TEMPLATE =
@@ -42,7 +43,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
 
   const { year } = req.body || {};

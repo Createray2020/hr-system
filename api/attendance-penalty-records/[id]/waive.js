@@ -5,17 +5,15 @@
 // HR / admin 才能呼叫。UPDATE attendance_penalty_records SET status='waived'。
 
 import { requireRole } from '../../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../../lib/roles.js';
 import { makeAttendancePenaltyRepo } from '../../attendance-penalties/_repo.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
-  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
-    return res.status(403).json({ error: 'HR / admin only' });
-  }
 
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'record id required' });

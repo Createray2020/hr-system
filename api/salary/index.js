@@ -17,7 +17,7 @@
 // 對應實作計畫:docs/attendance-system-implementation-plan-v1.md §11.4
 
 import { supabase } from '../../lib/supabase.js';
-import { skipAttendanceBonus } from '../../lib/roles.js';
+import { skipAttendanceBonus, isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { makeSalaryRepo } from './_repo.js';
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
 
   // ── Legacy POST ?_action=batch ──────────────────────────
   if (req.method === 'POST' && req.query._action === 'batch') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
     const { year, month } = req.body || {};
     if (!Number.isInteger(year) || !Number.isInteger(month)) {
@@ -119,7 +119,7 @@ async function handleNewGet(req, res) {
   const caller = await requireAuth(req, res);
   if (!caller) return;
   const { year, month, employee_id, status } = req.query;
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const isHR = isBackofficeRole(caller);
 
   const queryEmpId = employee_id || (isHR ? null : caller.id);
   if (employee_id && employee_id !== caller.id && !isHR) {
@@ -153,11 +153,8 @@ async function handleNewGet(req, res) {
 }
 
 async function handleNewBatch(req, res) {
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
-  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
-    return res.status(403).json({ error: 'HR / admin only' });
-  }
 
   const { year, month, employee_id } = req.body || {};
   const y = parseInt(year), m = parseInt(month);

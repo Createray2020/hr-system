@@ -7,6 +7,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
+import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
 
 const ALLOWED_STATUSES = ['draft', 'submitted', 'approved', 'locked'];
 
@@ -41,9 +42,8 @@ async function handleGet(req, res, caller) {
   if (employee_id) q = q.eq('employee_id', employee_id);
   if (status) q = q.eq('status', status);
 
-  // 權限：員工只能看自己；主管/HR 看下屬或全部（dev mode 寬鬆）
-  const callerRole = caller.role || '';
-  const callerIsManagerOrHR = caller.is_manager === true || ['hr', 'admin', 'ceo'].includes(callerRole);
+  // 權限：員工只能看自己；主管/HR 看下屬或全部
+  const callerIsManagerOrHR = canAccessBackoffice(caller);
   if (!callerIsManagerOrHR && caller.id) {
     q = q.eq('employee_id', caller.id);
   }
@@ -69,7 +69,7 @@ async function handlePost(req, res, caller) {
   if (!Number.isInteger(m) || m < 1 || m > 12) return res.status(400).json({ error: 'invalid month' });
 
   // 員工自建 → employee_id 必須是自己；HR 代建 → 接受 body.employee_id
-  const callerIsHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const callerIsHR = isBackofficeRole(caller);
   const targetEmpId = (callerIsHR && employee_id) ? employee_id : caller.id;
   if (!targetEmpId) return res.status(400).json({ error: 'employee_id required (caller has no id, must be HR providing target)' });
 

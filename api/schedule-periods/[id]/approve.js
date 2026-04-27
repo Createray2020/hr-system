@@ -6,6 +6,7 @@
 
 import { supabase } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
+import { isBackofficeRole } from '../../../lib/roles.js';
 import { canTransition } from '../../../lib/schedule/period-state.js';
 import { logScheduleChange } from '../../../lib/schedule/change-logger.js';
 
@@ -25,7 +26,7 @@ export default async function handler(req, res) {
   if (!period) return res.status(404).json({ error: 'period not found' });
 
   // 必須是該員工的主管或 HR
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const isHR = isBackofficeRole(caller);
   let isDirectManager = false;
   if (caller.is_manager === true && caller.id) {
     const { data: emp } = await supabase

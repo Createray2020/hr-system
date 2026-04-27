@@ -1,6 +1,7 @@
 // api/employees/[id].js — GET one / PUT update / DELETE / /me route
 import { supabase } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -30,7 +31,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'PUT') {
     try {
-      const caller = await requireRole(req, res, ['hr', 'ceo', 'chairman', 'admin'], { allowManager: true });
+      const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
       if (!caller) return;
 
       const body = req.body;
@@ -129,7 +130,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
     const { error } = await supabase.from('employees').update({ status: 'resigned' }).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });

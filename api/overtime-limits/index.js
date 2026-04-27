@@ -7,15 +7,14 @@
 //   - 同 scope 同生效期間有重疊 → 拒絕
 
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { makeOvertimeRepo } from '../overtime-requests/_repo.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
-  if (!isHR) return res.status(403).json({ error: 'HR / admin only' });
 
   const repo = makeOvertimeRepo();
 

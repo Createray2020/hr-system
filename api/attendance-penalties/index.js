@@ -3,6 +3,7 @@
 // POST /api/attendance-penalties                             HR 新增規則
 
 import { requireAuth, requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { makeAttendancePenaltyRepo } from './_repo.js';
 
 const TRIGGERS = new Set(['late', 'early_leave', 'absent', 'other']);
@@ -32,11 +33,8 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
-    if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
-      return res.status(403).json({ error: 'HR / admin only' });
-    }
 
     const body = req.body || {};
     const {

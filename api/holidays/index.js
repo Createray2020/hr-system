@@ -6,6 +6,7 @@
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §4.4
 import { supabase } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
 const HOLIDAY_TYPES = ['national', 'makeup_workday', 'company', 'flexible'];
 
@@ -38,7 +39,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
 
     const { date, holiday_type, name, description, pay_multiplier } = req.body || {};

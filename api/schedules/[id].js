@@ -7,6 +7,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
+import { isBackofficeRole } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
@@ -57,7 +58,7 @@ export default async function handler(req, res) {
     };
     const r = canManagerEditSchedule(period, manager, today);
     if (!r.ok) return res.status(403).json({ error: r.reason });
-    actorKind = ['hr', 'admin', 'ceo'].includes(caller.role || '') ? 'hr' : 'manager';
+    actorKind = isBackofficeRole(caller) ? 'hr' : 'manager';
     isLateChange = !!r.isLateChange && existing.work_date === today;
   }
 

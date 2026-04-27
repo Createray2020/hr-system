@@ -10,6 +10,7 @@
 // 否則本檔永遠不會被 hit(會被 rewrite 到 index.js?id=...)。
 
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import {
   approveLeaveRequest, rejectLeaveRequest, cancelLeaveRequest,
 } from '../../lib/leave/request-flow.js';
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'leave id required' });
 
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo'], { allowManager: true });
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
   if (!caller) return;
   const callerId = caller.id;
 

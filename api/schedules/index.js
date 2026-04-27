@@ -13,6 +13,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
+import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
@@ -149,7 +150,7 @@ async function handleNewGet(req, res) {
   }
 
   // 員工只能看自己（dev mode 寬鬆）
-  const callerIsManagerOrHR = caller.is_manager === true || ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const callerIsManagerOrHR = canAccessBackoffice(caller);
   if (!callerIsManagerOrHR && caller.id) q = q.eq('employee_id', caller.id);
 
   const { data, error } = await q;
@@ -188,7 +189,7 @@ async function handleNewPost(req, res) {
     allowed = r.ok;
     if (!r.ok) return res.status(403).json({ error: r.reason });
   } else {
-    const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+    const isHR = isBackofficeRole(caller);
     let manages = false;
     if (caller.is_manager === true && caller.id) {
       const { data: emp } = await supabase.from('employees')

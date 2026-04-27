@@ -6,6 +6,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
+import { isBackofficeRole } from '../../lib/roles.js';
 import { makeAttendancePenaltyRepo } from '../attendance-penalties/_repo.js';
 
 export default async function handler(req, res) {
@@ -16,7 +17,7 @@ export default async function handler(req, res) {
   if (!caller) return;
 
   const { employee_id, year, month, status } = req.query;
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const isHR = isBackofficeRole(caller);
   const repo = makeAttendancePenaltyRepo();
 
   // 員工只能看自己

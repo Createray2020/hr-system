@@ -11,6 +11,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
+import { isBackofficeRole } from '../../lib/roles.js';
 import { getCompBalance } from '../../lib/comp-time/balance.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
 
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
   if (!caller) return;
 
   const { employee_id } = req.query;
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const isHR = isBackofficeRole(caller);
 
   // 員工自己 / HR 看別人
   if (employee_id && (employee_id === caller.id || isHR)) {

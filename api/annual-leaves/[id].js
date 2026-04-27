@@ -13,6 +13,7 @@
 // Routing 假設:同 holidays/[id].js precedent,Vercel 靜態檔名優先 dynamic route。
 
 import { requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
 
 export default async function handler(req, res) {
@@ -22,11 +23,8 @@ export default async function handler(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'record id required' });
 
-  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
-  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
-    return res.status(403).json({ error: 'HR / admin only' });
-  }
 
   const repo = makeLeaveRepo();
   const recId = parseInt(id);

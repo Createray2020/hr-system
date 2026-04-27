@@ -12,6 +12,7 @@
 //   5. INSERT overtime_requests with status='pending'
 
 import { requireAuth } from '../../lib/auth.js';
+import { isBackofficeRole } from '../../lib/roles.js';
 import { checkOverLimit, isCrossMonth } from '../../lib/overtime/limits.js';
 import {
   calculateOvertimePay, getHourlyRate, pickFrozenPayMultiplier,
@@ -36,7 +37,7 @@ async function handleGet(req, res, caller) {
   const { employee_id, status, year, month, scope } = req.query;
   const repo = makeOvertimeRepo();
 
-  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
+  const isHR = isBackofficeRole(caller);
   const isManager = caller.is_manager === true;
 
   try {
