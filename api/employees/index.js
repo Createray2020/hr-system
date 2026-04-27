@@ -3,7 +3,7 @@
 // Also handles: POST /api/push (via ?_resource=push)
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../lib/supabase.js';
-import { requireRole } from '../../lib/auth.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { sendPushToEmployees, sendPushToRoles } from '../../lib/push.js';
 
@@ -74,6 +74,8 @@ export default async function handler(req, res) {
   // ── 部門管理（合併自 api/departments.js） ─────────────────────────────────
   if (req.query._resource === 'departments') {
     if (req.method === 'GET') {
+      const caller = await requireAuth(req, res);
+      if (!caller) return;
       try {
         const { data: depts, error } = await supabase
           .from('departments').select('*').order('name');
@@ -173,6 +175,8 @@ export default async function handler(req, res) {
 
   // ── 員工列表 GET ─────────────────────────────────────────────────────────
   if (req.method === 'GET') {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
     const { status, dept, search } = req.query;
     let q = supabase.from('employees').select('*').order('name');
     if (status) q = q.eq('status', status);
