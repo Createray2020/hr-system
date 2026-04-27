@@ -142,4 +142,63 @@ describe('parseGovHolidays', () => {
       imported_from: 'data.gov.tw',
     });
   });
+
+  // ── Google Calendar CSV 格式（data.gov.tw 14718 _Google行事曆專用）─────
+  // 欄位：Subject, Start Date, Start Time, End Date, End Time, All Day Event, Description, Location
+
+  it('Google Calendar 格式：Subject + Start Date 2026/1/1 + All Day Event True → national', () => {
+    const raw = [
+      { 'Subject': '開國紀念日', 'Start Date': '2026/1/1', 'All Day Event': 'True', 'Description': '' },
+    ];
+    const out = parseGovHolidays(raw, 2026);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      date: '2026-01-01',
+      holiday_type: 'national',
+      name: '開國紀念日',
+      pay_multiplier: 2.00,
+    });
+  });
+
+  it('Google Calendar Subject="補假" → national（不是 makeup_workday）', () => {
+    const raw = [
+      { 'Subject': '補假', 'Start Date': '2026/2/16', 'All Day Event': 'True' },
+    ];
+    const out = parseGovHolidays(raw, 2026);
+    expect(out).toHaveLength(1);
+    expect(out[0].holiday_type).toBe('national');
+    expect(out[0].name).toBe('補假');
+  });
+
+  it('Google Calendar Subject="例假日" → 跳過 + 不 warn（每個週六日不是國定假日）', () => {
+    const raw = [
+      { 'Subject': '例假日', 'Start Date': '2026/1/3', 'All Day Event': 'True' },
+      { 'Subject': '例假日', 'Start Date': '2026/1/4', 'All Day Event': 'True' },
+    ];
+    const out = parseGovHolidays(raw, 2026);
+    expect(out).toHaveLength(0);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('Google Calendar 空 row（Subject="" Start Date=""）→ 跳過、不 throw', () => {
+    const raw = [
+      { 'Subject': '', 'Start Date': '', 'All Day Event': '' },
+      { 'Subject': '開國紀念日', 'Start Date': '2026/1/1', 'All Day Event': 'True' },
+    ];
+    const out = parseGovHolidays(raw, 2026);
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe('開國紀念日');
+  });
+
+  it('日期格式 normalize：2026/1/1 / 2026-01-01 / 20260101 三種都 → 2026-01-01', () => {
+    expect(parseGovHolidays(
+      [{ 'Subject': '甲', 'Start Date': '2026/1/1', 'All Day Event': 'True' }], 2026
+    )[0].date).toBe('2026-01-01');
+    expect(parseGovHolidays(
+      [{ 'Subject': '乙', 'Start Date': '2026-01-01', 'All Day Event': 'True' }], 2026
+    )[0].date).toBe('2026-01-01');
+    expect(parseGovHolidays(
+      [{ '西元日期': '20260101', '名稱': '丙', '是否放假': '是' }], 2026
+    )[0].date).toBe('2026-01-01');
+  });
 });
