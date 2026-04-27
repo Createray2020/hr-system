@@ -307,7 +307,6 @@ async function saveDay() {
         work_date: date,
         shift_type_id: 'ST003',
         segment_no: 1,
-        crosses_midnight: false,
       })});
     } catch(e) {
       toast('儲存失敗:'+e.message, 'error');
