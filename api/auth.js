@@ -2,6 +2,7 @@
 // POST /api/auth?action=change-password  → 員工修改自己密碼
 // POST /api/auth?action=reset-password   → 管理員重設員工密碼
 import { createClient } from '@supabase/supabase-js';
+import { supabase, supabaseAdmin } from '../lib/supabase.js';
 import { canManageAuthAccounts } from '../lib/roles.js';
 
 export default async function handler(req, res) {
@@ -19,7 +20,6 @@ export default async function handler(req, res) {
     if (new_password.length < 6)
       return res.status(400).json({ error: '新密碼至少需要 6 個字元' });
 
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
     const email = emp_no + '@chuwa.hr';
 
     // Step 1: verify old password
@@ -51,10 +51,8 @@ export default async function handler(req, res) {
     if (new_password.length < 6)
       return res.status(400).json({ error: '密碼至少需要 6 個字元' });
 
-    const adminClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-
     // Step 1: verify admin role
-    const { data: admin, error: adminErr } = await adminClient
+    const { data: admin, error: adminErr } = await supabaseAdmin
       .from('employees').select('id, role, status').eq('emp_no', admin_emp_no).single();
     if (adminErr || !admin)
       return res.status(403).json({ error: '找不到管理員帳號' });
@@ -64,7 +62,7 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: '管理員帳號已停用' });
 
     // Step 2: find target employee
-    const { data: emp, error: empErr } = await adminClient
+    const { data: emp, error: empErr } = await supabaseAdmin
       .from('employees').select('auth_user_id, name, emp_no').eq('emp_no', emp_no).single();
     if (empErr || !emp)
       return res.status(404).json({ error: '找不到此員工（員工編號：' + emp_no + '）' });
@@ -72,7 +70,7 @@ export default async function handler(req, res) {
     // Step 3: resolve auth user id
     let userId = emp.auth_user_id;
     if (!userId) {
-      const { data: { users } } = await adminClient.auth.admin.listUsers();
+      const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
       const found = (users || []).find(u => u.email === emp_no + '@chuwa.hr');
       userId = found?.id || null;
     }
@@ -80,7 +78,7 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: '找不到此員工的登入帳號，請先建立 Auth 帳號' });
 
     // Step 4: reset password
-    const { error: resetErr } = await adminClient.auth.admin.updateUserById(userId, {
+    const { error: resetErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
       password: new_password,
     });
     if (resetErr)

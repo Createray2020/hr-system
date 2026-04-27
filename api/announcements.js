@@ -1,5 +1,5 @@
 // api/announcements.js — 公告系統 CRUD + 發布推播
-import { supabase } from '../lib/supabase.js';
+import { supabaseAdmin } from '../lib/supabase.js';
 import { sendPushToEmployees, createNotifications } from '../lib/push.js';
 
 export default async function handler(req, res) {
@@ -11,15 +11,15 @@ export default async function handler(req, res) {
 
     // 單筆（記錄已讀 + 增加瀏覽數）
     if (id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('announcements').select('*').eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到公告' });
 
-      await supabase.from('announcements')
+      await supabaseAdmin.from('announcements')
         .update({ view_count: (data.view_count || 0) + 1 }).eq('id', id);
 
       if (employee_id) {
-        await supabase.from('announcement_reads').upsert([{
+        await supabaseAdmin.from('announcement_reads').upsert([{
           id: `READ_${id}_${employee_id}`,
           announcement_id: id,
           employee_id,
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
       // 取作者資料（避免 FK join）
       let author = null;
       if (data.author_id) {
-        const { data: emp } = await supabase
+        const { data: emp } = await supabaseAdmin
           .from('employees').select('name, position, avatar').eq('id', data.author_id).single();
         author = emp || null;
       }
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     }
 
     // 列表
-    let q = supabase.from('announcements').select('*')
+    let q = supabaseAdmin.from('announcements').select('*')
       .order('is_pinned', { ascending: false })
       .order('published_at', { ascending: false });
 
@@ -65,7 +65,7 @@ export default async function handler(req, res) {
     // 補充作者名稱（two-query merge）
     const authorIds = [...new Set(rows.map(r => r.author_id).filter(Boolean))];
     if (authorIds.length) {
-      const { data: emps } = await supabase
+      const { data: emps } = await supabaseAdmin
         .from('employees').select('id, name, avatar').in('id', authorIds);
       const empMap = {};
       (emps || []).forEach(e => { empMap[e.id] = e; });
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
     // 新增草稿
     if (body.action === 'create') {
       const id = 'ANN' + Date.now();
-      const { error } = await supabase.from('announcements').insert([{
+      const { error } = await supabaseAdmin.from('announcements').insert([{
         id,
         title:        body.title,
         content:      body.content,
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
 
     // 更新
     if (body.action === 'update') {
-      const { error } = await supabase.from('announcements').update({
+      const { error } = await supabaseAdmin.from('announcements').update({
         title:        body.title,
         content:      body.content,
         category:     body.category,
@@ -116,17 +116,17 @@ export default async function handler(req, res) {
 
     // 發布
     if (body.action === 'publish') {
-      await supabase.from('announcements').update({
+      await supabaseAdmin.from('announcements').update({
         is_published: true,
         published_at: new Date().toISOString(),
         updated_at:   new Date().toISOString(),
       }).eq('id', body.id);
 
-      const { data: ann } = await supabase
+      const { data: ann } = await supabaseAdmin
         .from('announcements').select('*').eq('id', body.id).single();
 
       const targets = ann?.target_roles || ['all'];
-      let empQuery = supabase.from('employees').select('id').eq('status', 'active');
+      let empQuery = supabaseAdmin.from('employees').select('id').eq('status', 'active');
       if (!targets.includes('all')) empQuery = empQuery.in('role', targets);
       const { data: emps } = await empQuery;
       const empIds = (emps || []).map(e => e.id);
@@ -146,16 +146,16 @@ export default async function handler(req, res) {
 
     // 置頂切換
     if (body.action === 'pin') {
-      const { data: ann } = await supabase
+      const { data: ann } = await supabaseAdmin
         .from('announcements').select('is_pinned').eq('id', body.id).single();
       const newPinned = !ann?.is_pinned;
-      await supabase.from('announcements').update({ is_pinned: newPinned }).eq('id', body.id);
+      await supabaseAdmin.from('announcements').update({ is_pinned: newPinned }).eq('id', body.id);
       return res.status(200).json({ message: newPinned ? '已置頂' : '已取消置頂' });
     }
 
     // 刪除
     if (body.action === 'delete') {
-      await supabase.from('announcements').delete().eq('id', body.id);
+      await supabaseAdmin.from('announcements').delete().eq('id', body.id);
       return res.status(200).json({ message: '已刪除' });
     }
 

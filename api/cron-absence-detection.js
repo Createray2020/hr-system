@@ -7,7 +7,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §6.4
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §6.3
 
-import { supabase } from '../lib/supabase.js';
+import { supabaseAdmin } from '../lib/supabase.js';
 import { runAbsenceSweep } from '../lib/attendance/absence-sweep.js';
 import { sendPushToEmployees, sendPushToRoles, createNotification, createNotificationsForRoles } from '../lib/push.js';
 import { requireCron } from '../lib/cron-auth.js';
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
 function supabaseRepo() {
   return {
     async findLockedSchedulesByDate(date) {
-      const { data: scheds, error } = await supabase
+      const { data: scheds, error } = await supabaseAdmin
         .from('schedules')
         .select('id, employee_id, segment_no, period_id')
         .eq('work_date', date);
@@ -41,14 +41,14 @@ function supabaseRepo() {
       if (!scheds || scheds.length === 0) return [];
       const periodIds = [...new Set(scheds.map(s => s.period_id).filter(Boolean))];
       if (periodIds.length === 0) return [];
-      const { data: periods } = await supabase
+      const { data: periods } = await supabaseAdmin
         .from('schedule_periods').select('id, status').in('id', periodIds);
       const lockedSet = new Set((periods || []).filter(p => p.status === 'locked').map(p => p.id));
       return scheds.filter(s => lockedSet.has(s.period_id));
     },
 
     async findAttendanceByDateSegment(employee_id, date, segment_no) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('*')
         .eq('employee_id', employee_id).eq('work_date', date).eq('segment_no', segment_no)
         .maybeSingle();
@@ -60,7 +60,7 @@ function supabaseRepo() {
       // 找 approved leave_request 涵蓋該日期。schema:start_at / end_at TIMESTAMPTZ
       const dayStart = `${date}T00:00:00+08:00`;
       const dayEnd   = `${date}T23:59:59+08:00`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('leave_requests').select('id, leave_type, start_at, end_at')
         .eq('employee_id', employee_id).eq('status', 'approved')
         .lte('start_at', dayEnd).gte('end_at', dayStart)
@@ -70,14 +70,14 @@ function supabaseRepo() {
     },
 
     async getEmployeeManager(employee_id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('employees').select('id, manager_id').eq('id', employee_id).maybeSingle();
       if (error) throw error;
       return data || null;
     },
 
     async upsertAttendance(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').upsert([row], { onConflict: 'id' }).select().maybeSingle();
       if (error) throw error;
       return data;

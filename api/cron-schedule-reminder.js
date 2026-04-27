@@ -6,7 +6,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §6.4
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.7
 
-import { supabase } from '../lib/supabase.js';
+import { supabaseAdmin } from '../lib/supabase.js';
 import { runScheduleReminder } from '../lib/schedule/reminder.js';
 import { sendPushToEmployees, createNotification } from '../lib/push.js';
 import { requireCron } from '../lib/cron-auth.js';
@@ -33,7 +33,7 @@ function supabaseRepo() {
   return {
     async findEmployeesNeedingReminder(year, month) {
       // 找下個月已建立但 status='draft' 的員工
-      const { data: drafts, error: dErr } = await supabase
+      const { data: drafts, error: dErr } = await supabaseAdmin
         .from('schedule_periods')
         .select('employee_id')
         .eq('period_year', year).eq('period_month', month).eq('status', 'draft');
@@ -41,11 +41,11 @@ function supabaseRepo() {
       const draftIds = new Set((drafts || []).map(p => p.employee_id));
 
       // 也找該月「還沒建 period」的活躍員工 — 也要提醒
-      const { data: allEmps, error: eErr } = await supabase
+      const { data: allEmps, error: eErr } = await supabaseAdmin
         .from('employees').select('id, name').eq('status', 'active');
       if (eErr) throw eErr;
 
-      const { data: existingPeriods } = await supabase
+      const { data: existingPeriods } = await supabaseAdmin
         .from('schedule_periods').select('employee_id')
         .eq('period_year', year).eq('period_month', month);
       const existingIds = new Set((existingPeriods || []).map(p => p.employee_id));

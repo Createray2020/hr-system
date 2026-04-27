@@ -4,7 +4,7 @@
 // GET  /api/salary-grade?_resource=insurance&brackets=labor  → 勞保級距表
 // GET  /api/salary-grade?_resource=insurance&brackets=health → 健保級距表
 // POST /api/salary-grade?_resource=insurance     → upsert 員工設定
-import { supabase } from '../lib/supabase.js';
+import { supabaseAdmin } from '../lib/supabase.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -15,19 +15,19 @@ export default async function handler(req, res) {
   if (_resource === 'insurance') {
     if (req.method === 'GET') {
       if (brackets === 'labor') {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from('labor_insurance_brackets').select('*').order('bracket_level');
         if (error) return res.status(500).json({ error: error.message });
         return res.status(200).json(data);
       }
       if (brackets === 'health') {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from('health_insurance_brackets').select('*').order('bracket_level');
         if (error) return res.status(500).json({ error: error.message });
         return res.status(200).json(data);
       }
       if (brackets === 'pending') {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from('insurance_change_requests')
           .select('*, employees(name, dept)')
           .eq('status', 'pending')
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
         return res.status(200).json(data || []);
       }
       // Insurance settings list (join employees)
-      let q = supabase.from('insurance_settings')
+      let q = supabaseAdmin.from('insurance_settings')
         .select('*, employees(name, emp_no, dept, position, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, has_insurance, employment_type)');
       if (employee_id) q = q.eq('employee_id', employee_id).single();
       const { data, error } = await q;
@@ -48,11 +48,11 @@ export default async function handler(req, res) {
 
       // ── 核准級距變動申請 ──────────────────────────────────────────────────
       if (body.action === 'approve_change') {
-        const { data: change, error: cErr } = await supabase
+        const { data: change, error: cErr } = await supabaseAdmin
           .from('insurance_change_requests').select('*').eq('id', body.change_id).single();
         if (cErr || !change) return res.status(404).json({ error: '找不到變動申請' });
 
-        const { error: upsertErr } = await supabase.from('insurance_settings').upsert([{
+        const { error: upsertErr } = await supabaseAdmin.from('insurance_settings').upsert([{
           id: 'INS_' + change.employee_id,
           employee_id:         change.employee_id,
           has_insurance:       true,
@@ -66,7 +66,7 @@ export default async function handler(req, res) {
         }], { onConflict: 'employee_id' });
         if (upsertErr) return res.status(500).json({ error: upsertErr.message });
 
-        const { error: updErr } = await supabase.from('insurance_change_requests').update({
+        const { error: updErr } = await supabaseAdmin.from('insurance_change_requests').update({
           status: 'approved',
           approved_by:    body.approved_by    || null,
           effective_date: body.effective_date || null,
@@ -80,7 +80,7 @@ export default async function handler(req, res) {
 
       // ── 拒絕級距變動申請 ──────────────────────────────────────────────────
       if (body.action === 'reject_change') {
-        const { error } = await supabase.from('insurance_change_requests').update({
+        const { error } = await supabaseAdmin.from('insurance_change_requests').update({
           status: 'rejected',
           handled_at: new Date().toISOString(),
         }).eq('id', body.change_id);
@@ -90,7 +90,7 @@ export default async function handler(req, res) {
 
       if (!body.employee_id) return res.status(400).json({ error: '缺少 employee_id' });
       const id = 'INS_' + body.employee_id;
-      const { error } = await supabase.from('insurance_settings')
+      const { error } = await supabaseAdmin.from('insurance_settings')
         .upsert([{ id, ...body, updated_at: new Date().toISOString() }],
           { onConflict: 'employee_id' });
       if (error) return res.status(500).json({ error: error.message });
@@ -101,7 +101,7 @@ export default async function handler(req, res) {
 
   // ── Salary grade (original) ───────────────────────────────────────────────
   if (req.method === 'GET') {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('salary_grade').select('*').order('grade').order('grade_level');
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json(data);

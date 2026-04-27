@@ -7,7 +7,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §6.4
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.5
 
-import { supabase } from '../lib/supabase.js';
+import { supabaseAdmin } from '../lib/supabase.js';
 import { runLockSweep } from '../lib/schedule/lock-sweep.js';
 import { requireCron } from '../lib/cron-auth.js';
 
@@ -36,7 +36,7 @@ function todayIso() {
 function supabaseRepo() {
   return {
     async findApprovedPeriodsToLock(today) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedule_periods').select('id, employee_id, period_start, period_end, status')
         .eq('status', 'approved').lte('period_start', today);
       if (error) throw error;
@@ -45,7 +45,7 @@ function supabaseRepo() {
 
     async lockPeriod(id, today) {
       const now = new Date().toISOString();
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedule_periods')
         .update({ status: 'locked', locked_at: now, updated_at: now })
         .eq('id', id).eq('status', 'approved')
@@ -55,7 +55,7 @@ function supabaseRepo() {
     },
 
     async logChange(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedule_change_logs').insert([row]).select().single();
       if (error) throw error;
       return data;
