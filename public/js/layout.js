@@ -36,8 +36,8 @@
 
   // 注入 Sidebar
   const page = document.body.dataset.page || '';
-  const isHRish     = u => !!u && ['hr','admin','ceo'].includes(u.role);
-  const isMgrOrHR   = u => !!u && (u.is_manager === true || ['hr','admin','ceo'].includes(u.role));
+  const isHRish     = u => !!u && ['hr','admin','ceo','chairman'].includes(u.role);
+  const isMgrOrHR   = u => !!u && (u.is_manager === true || ['hr','admin','ceo','chairman'].includes(u.role));
   const isMgrOrCEO  = u => !!u && (u.is_manager === true || u.role === 'ceo');
   const navGroups = [
     {

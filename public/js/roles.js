@@ -15,6 +15,12 @@
       return u.is_manager === true;
     },
 
+    // role 屬於後台白名單（不認 is_manager）。比 canAccessBackoffice 嚴格。
+    // 跟 lib/roles.js isBackofficeRole 同語意。
+    isBackofficeRole(u) {
+      return !!u && BACKOFFICE.includes(u.role);
+    },
+
     canViewAllApprovals(u) {
       return !!u && BACKOFFICE.includes(u.role);
     },
