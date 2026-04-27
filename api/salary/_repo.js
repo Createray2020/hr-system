@@ -2,7 +2,7 @@
 //
 // 同時被 api/salary/{index,[id],recalculate}.js 共用。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 
 export function makeSalaryRepo() {
   return {
@@ -10,7 +10,7 @@ export function makeSalaryRepo() {
 
     // ─── employees ────────────────────────────────────────────
     async findEmployeeForSalary(id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('employees')
         .select('id, name, base_salary, attendance_bonus, employment_type, manager_allowance, grade_allowance, dept')
         .eq('id', id).maybeSingle();
@@ -19,17 +19,17 @@ export function makeSalaryRepo() {
     },
 
     async findEmployeeHourlyRate(employee_id) {
-      const { data: settings } = await supabase
+      const { data: settings } = await supabaseAdmin
         .from('system_overtime_settings').select('monthly_work_hours_base').eq('id', 1).maybeSingle();
       const base = Number(settings?.monthly_work_hours_base) || 240;
-      const { data: emp } = await supabase
+      const { data: emp } = await supabaseAdmin
         .from('employees').select('base_salary').eq('id', employee_id).maybeSingle();
       const monthly = Number(emp?.base_salary) || 0;
       return base > 0 ? monthly / base : 0;
     },
 
     async listActiveEmployees() {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('employees').select('id, name, dept, base_salary, attendance_bonus, employment_type')
         .eq('status', 'active').order('id');
       if (error) throw error;
@@ -38,7 +38,7 @@ export function makeSalaryRepo() {
 
     // ─── salary_records ──────────────────────────────────────
     async findSalaryRecord(id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('salary_records').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
@@ -47,7 +47,7 @@ export function makeSalaryRepo() {
     async upsertSalaryRecord(row) {
       // GENERATED column 不能 INSERT/UPDATE
       const { gross_salary, net_salary, ...payload } = row;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('salary_records')
         .upsert([{ ...payload, updated_at: new Date().toISOString() }], { onConflict: 'id' })
         .select().maybeSingle();
@@ -57,7 +57,7 @@ export function makeSalaryRepo() {
 
     async updateSalaryRecord(id, patch) {
       const { gross_salary, net_salary, ...rest } = patch;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('salary_records').update({ ...rest, updated_at: new Date().toISOString() })
         .eq('id', id).select().maybeSingle();
       if (error) throw error;
@@ -65,7 +65,7 @@ export function makeSalaryRepo() {
     },
 
     async listSalaryRecords({ year, month, employee_id, status }) {
-      let q = supabase.from('salary_records').select('*').order('employee_id');
+      let q = supabaseAdmin.from('salary_records').select('*').order('employee_id');
       if (year)        q = q.eq('year', parseInt(year));
       if (month)       q = q.eq('month', parseInt(month));
       if (employee_id) q = q.eq('employee_id', employee_id);
@@ -77,7 +77,7 @@ export function makeSalaryRepo() {
 
     // ─── 完整重算:reset child markers ──────────────────────
     async resetOvertimeMarkers(salary_record_id) {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('overtime_requests')
         .update({ applied_to_salary_record_id: null, updated_at: new Date().toISOString() })
         .eq('applied_to_salary_record_id', salary_record_id);
@@ -85,7 +85,7 @@ export function makeSalaryRepo() {
     },
 
     async resetPenaltyRecordsMarkers(salary_record_id) {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('attendance_penalty_records')
         .update({ salary_record_id: null, status: 'pending', updated_at: new Date().toISOString() })
         .eq('salary_record_id', salary_record_id);
@@ -97,7 +97,7 @@ export function makeSalaryRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('work_date')
         .eq('employee_id', employee_id).eq('status', 'absent')
         .gte('work_date', start).lte('work_date', end);
@@ -110,7 +110,7 @@ export function makeSalaryRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('holidays').select('id, date, holiday_type, pay_multiplier')
         .gte('date', start).lte('date', end);
       if (error) throw error;
@@ -121,7 +121,7 @@ export function makeSalaryRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('id, work_date, work_hours, holiday_id')
         .eq('employee_id', employee_id).eq('is_holiday_work', true)
         .gte('work_date', start).lte('work_date', end);
@@ -131,7 +131,7 @@ export function makeSalaryRepo() {
 
     // attendance-bonus / lib/attendance/bonus.js 需要的
     async findPenaltyRecordsByEmployeeMonth({ employee_id, year, month }) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalty_records').select('*')
         .eq('employee_id', employee_id)
         .eq('applies_to_year', year).eq('applies_to_month', month);
@@ -143,7 +143,7 @@ export function makeSalaryRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01T00:00:00+08:00`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}T23:59:59+08:00`;
-      const { data: leaves, error } = await supabase
+      const { data: leaves, error } = await supabaseAdmin
         .from('leave_requests')
         .select('id, leave_type, hours, finalized_hours, days, start_at, end_at')
         .eq('employee_id', employee_id).eq('status', 'approved')
@@ -151,7 +151,7 @@ export function makeSalaryRepo() {
       if (error) throw error;
       const types = [...new Set((leaves || []).map(l => l.leave_type))];
       if (!types.length) return [];
-      const { data: lts } = await supabase
+      const { data: lts } = await supabaseAdmin
         .from('leave_types').select('code, affects_attendance_bonus').in('code', types);
       const map = Object.fromEntries((lts || []).map(t => [t.code, t.affects_attendance_bonus]));
       return (leaves || []).map(l => ({ ...l, affects_attendance_bonus: map[l.leave_type] === true }));
@@ -159,7 +159,7 @@ export function makeSalaryRepo() {
 
     async getAbsentDayDeductionRate() {
       const today = new Date().toISOString().slice(0, 10);
-      const { data } = await supabase
+      const { data } = await supabaseAdmin
         .from('attendance_penalties').select('penalty_amount')
         .eq('is_active', true).eq('trigger_type', 'absent')
         .eq('penalty_type', 'deduct_attendance_bonus_pct')
@@ -171,7 +171,7 @@ export function makeSalaryRepo() {
 
     // ─── overtime_requests ──────────────────────────────────
     async findApprovedOvertimePayRequests({ employee_id, year, month }) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('overtime_requests').select('*')
         .eq('employee_id', employee_id).eq('status', 'approved')
         .eq('compensation_type', 'overtime_pay')
@@ -181,7 +181,7 @@ export function makeSalaryRepo() {
     },
 
     async markOvertimeRequestApplied(id, salary_record_id) {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('overtime_requests')
         .update({ applied_to_salary_record_id: salary_record_id, updated_at: new Date().toISOString() })
         .eq('id', id);
@@ -190,7 +190,7 @@ export function makeSalaryRepo() {
 
     // ─── attendance_penalty_records ─────────────────────────
     async findPendingPenaltyRecords({ employee_id, year, month }) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalty_records').select('*')
         .eq('employee_id', employee_id)
         .eq('applies_to_year', year).eq('applies_to_month', month)
@@ -200,7 +200,7 @@ export function makeSalaryRepo() {
     },
 
     async markPenaltyRecordApplied(id, salary_record_id) {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('attendance_penalty_records')
         .update({ salary_record_id, status: 'applied', updated_at: new Date().toISOString() })
         .eq('id', id);
@@ -213,7 +213,7 @@ export function makeSalaryRepo() {
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}T23:59:59+08:00`;
       // 找 status='paid_out' 且 settlement_amount IN (0, NULL) 且 settled_at 在該年月
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('annual_leave_records').select('*')
         .eq('employee_id', employee_id).eq('status', 'paid_out')
         .gte('settled_at', start).lte('settled_at', end);
@@ -222,7 +222,7 @@ export function makeSalaryRepo() {
     },
 
     async updateAnnualRecord(id, patch) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('annual_leave_records').update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id).select().maybeSingle();
       if (error) throw error;
@@ -233,7 +233,7 @@ export function makeSalaryRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01T00:00:00+08:00`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}T23:59:59+08:00`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('comp_time_balance').select('*')
         .eq('employee_id', employee_id).eq('status', 'expired_paid')
         .gte('expiry_processed_at', start).lte('expiry_processed_at', end);
@@ -245,7 +245,7 @@ export function makeSalaryRepo() {
       // 從 salary_records 拿已凍結的 daily_wage_snapshot;若沒 record(理論不會,calculator 主流程會先算)
       // 退而求其次:base_salary / 22 粗估
       const id = `S_${employee_id}_${year}_${String(month).padStart(2,'0')}`;
-      const { data: rec } = await supabase
+      const { data: rec } = await supabaseAdmin
         .from('salary_records').select('daily_wage_snapshot, base_salary').eq('id', id).maybeSingle();
       if (rec?.daily_wage_snapshot != null) return Number(rec.daily_wage_snapshot);
       if (rec?.base_salary != null) return Math.round((Number(rec.base_salary) / 22) * 100) / 100;
@@ -253,7 +253,7 @@ export function makeSalaryRepo() {
     },
 
     async getSystemOvertimeSettings() {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('system_overtime_settings').select('*').eq('id', 1).maybeSingle();
       if (error) throw error;
       return data || null;

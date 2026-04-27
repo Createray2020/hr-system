@@ -16,7 +16,7 @@
 //
 // 對應實作計畫:docs/attendance-system-implementation-plan-v1.md §11.4
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { skipAttendanceBonus, isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
@@ -43,7 +43,7 @@ export default async function handler(req, res) {
   // ── Legacy GET ──────────────────────────────────────────
   if (req.method === 'GET') {
     const { year, month, dept, status, employee_id } = req.query;
-    let q = supabase.from('salary_records')
+    let q = supabaseAdmin.from('salary_records')
       .select(`*, employees!inner(name, dept, avatar, role, is_manager, employment_type)`)
       .order('employee_id');
     if (year)        q = q.eq('year',        parseInt(year));
@@ -89,13 +89,13 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'year / month required' });
     }
     // legacy:只建 row + 預填 base_salary / attendance_bonus,不算 overtime/penalty/settlement
-    const { data: emps } = await supabase
+    const { data: emps } = await supabaseAdmin
       .from('employees').select('id, base_salary, attendance_bonus, employment_type').eq('status', 'active');
     let created = 0;
     for (const emp of (emps || [])) {
       const id = `S_${emp.id}_${year}_${String(month).padStart(2,'0')}`;
       const bonus = calcAttendanceBonus(emp);
-      const { error } = await supabase.from('salary_records').upsert([{
+      const { error } = await supabaseAdmin.from('salary_records').upsert([{
         id, employee_id: emp.id, year, month,
         base_salary: emp.base_salary || 0,
         bonus, status: 'draft',
@@ -137,7 +137,7 @@ async function handleNewGet(req, res) {
     const ids = [...new Set(records.map(r => r.employee_id))];
     let empMap = {};
     if (ids.length) {
-      const { data: emps } = await supabase
+      const { data: emps } = await supabaseAdmin
         .from('employees').select('id, name, dept').in('id', ids);
       for (const e of (emps || [])) empMap[e.id] = e;
     }

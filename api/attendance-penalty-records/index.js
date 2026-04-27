@@ -4,7 +4,7 @@
 // 員工只看自己;HR / admin 可看全部。
 // 用 makeAttendancePenaltyRepo 共用 supabase 邏輯。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { makeAttendancePenaltyRepo } from '../attendance-penalties/_repo.js';
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     const empIds = [...new Set(records.map(r => r.employee_id))];
     let empMap = {};
     if (empIds.length) {
-      const { data: emps } = await supabase
+      const { data: emps } = await supabaseAdmin
         .from('employees').select('id, name, dept').in('id', empIds);
       for (const e of (emps || [])) empMap[e.id] = e;
     }

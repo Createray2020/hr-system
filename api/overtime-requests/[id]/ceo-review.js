@@ -17,8 +17,8 @@ async function isCallerCEO(repo, caller) {
   if (caller.role === 'admin') return true;  // admin 視同 CEO
   if (!caller.id) return false;
   try {
-    const { supabase } = await import('../../../lib/supabase.js');
-    const { data } = await supabase
+    const { supabaseAdmin } = await import('../../../lib/supabase.js');
+    const { data } = await supabaseAdmin
       .from('approvals_v2_role_assignments')
       .select('user_id').eq('role', 'ceo').eq('user_id', caller.id).maybeSingle();
     return !!data;

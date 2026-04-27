@@ -6,7 +6,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §4.3.3
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §7.6
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { calculateLegalDays, calculatePeriodBoundary } from '../../lib/leave/annual.js';
@@ -42,7 +42,7 @@ async function handleGet(req, res) {
   // HR 查全部
   if (!isHR) return res.status(403).json({ error: 'HR / admin only' });
 
-  let q = supabase.from('annual_leave_records').select('*').order('period_start', { ascending: false });
+  let q = supabaseAdmin.from('annual_leave_records').select('*').order('period_start', { ascending: false });
   if (status) q = q.eq('status', status);
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
@@ -51,7 +51,7 @@ async function handleGet(req, res) {
   const empIds = [...new Set((data || []).map(r => r.employee_id))];
   const empMap = {};
   if (empIds.length) {
-    const { data: emps } = await supabase
+    const { data: emps } = await supabaseAdmin
       .from('employees').select('id, name, dept, annual_leave_seniority_start').in('id', empIds);
     for (const e of (emps || [])) empMap[e.id] = e;
   }
@@ -74,7 +74,7 @@ async function handlePost(req, res) {
   // 自動算 seniority_years / legal_days 若未提供
   let { seniority_years, legal_days } = req.body || {};
   if (seniority_years == null || legal_days == null || !period_start || !period_end) {
-    const { data: emp } = await supabase
+    const { data: emp } = await supabaseAdmin
       .from('employees').select('annual_leave_seniority_start').eq('id', employee_id).maybeSingle();
     if (!emp?.annual_leave_seniority_start) {
       return res.status(400).json({ error: 'employee has no annual_leave_seniority_start' });

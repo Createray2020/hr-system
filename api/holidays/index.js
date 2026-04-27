@@ -4,7 +4,7 @@
 //
 // 對應設計文件：docs/attendance-system-design-v1.md §4.1.1
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §4.4
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'invalid year' });
     }
 
-    let q = supabase.from('holidays')
+    let q = supabaseAdmin.from('holidays')
       .select('*')
       .gte('date', `${y}-01-01`)
       .lte('date', `${y}-12-31`)
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
       created_by: caller.id || null,
     };
 
-    const { data, error } = await supabase.from('holidays').insert([row]).select().single();
+    const { data, error } = await supabaseAdmin.from('holidays').insert([row]).select().single();
     if (error) return res.status(500).json({ error: error.message });
     return res.status(201).json(data);
   }

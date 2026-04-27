@@ -30,7 +30,7 @@
 //   https://data.ntpc.gov.tw/api/datasets/308DCD75-6434-45BC-A95F-584DA4FED251/json
 //
 // 若上 prod 時 fetch 失敗或格式變更，HR 可改走「手動新增」與 Excel 匯入（未來可加）。
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { parseGovHolidays } from '../../lib/holidays/parser.js';
@@ -91,7 +91,7 @@ export default async function handler(req, res) {
     imported_at: batchAt,
     created_by: caller.id || null,
   }));
-  const { data, error: insErr } = await supabase
+  const { data, error: insErr } = await supabaseAdmin
     .from('holidays')
     .upsert(toInsert, { onConflict: 'date,holiday_type' })
     .select();
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
   // ── 4. delete stale imported rows for this year ─────────────
   // imported_at < batchAt 排除「剛剛這批 upsert 的」（剛 upsert 的 imported_at = batchAt）。
   // 此步驟失敗不影響新資料正確性（資料已寫入），回 200 + warning 即可。
-  const { count: deletedCount, error: delErr } = await supabase
+  const { count: deletedCount, error: delErr } = await supabaseAdmin
     .from('holidays')
     .delete({ count: 'exact' })
     .eq('source', 'imported')

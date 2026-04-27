@@ -9,7 +9,7 @@
 // 本批沒新增 api/comp-time/[id].js — 補休增/扣走 leave_requests + overtime_requests
 // (Batch 7 補),不直接 PATCH comp_time_balance。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { getCompBalance } from '../../lib/comp-time/balance.js';
@@ -39,14 +39,14 @@ export default async function handler(req, res) {
   if (!isHR) return res.status(403).json({ error: 'employee_id required (or HR/admin to list all)' });
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('comp_time_balance').select('*').eq('status', 'active')
       .order('employee_id').order('expires_at');
     if (error) return res.status(500).json({ error: error.message });
     const empIds = [...new Set((data || []).map(r => r.employee_id))];
     let empMap = {};
     if (empIds.length) {
-      const { data: emps } = await supabase
+      const { data: emps } = await supabaseAdmin
         .from('employees').select('id, name, dept').in('id', empIds);
       for (const e of (emps || [])) empMap[e.id] = e;
     }

@@ -3,7 +3,7 @@
 // 同時被 attendance-penalties/{index,[id]}.js + attendance-penalty-records/{index,[id]/waive}.js 共用。
 // _ 前綴避免被當成 API route。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 
 export function makeAttendancePenaltyRepo() {
   return {
@@ -11,7 +11,7 @@ export function makeAttendancePenaltyRepo() {
 
     // ─── attendance_penalties (rules) ────────────────────────
     async findActivePenaltyRules({ trigger_type, on_date }) {
-      let q = supabase.from('attendance_penalties').select('*')
+      let q = supabaseAdmin.from('attendance_penalties').select('*')
         .eq('is_active', true)
         .lte('effective_from', on_date)
         .or(`effective_to.is.null,effective_to.gte.${on_date}`)
@@ -23,7 +23,7 @@ export function makeAttendancePenaltyRepo() {
     },
 
     async listPenalties({ trigger_type, is_active }) {
-      let q = supabase.from('attendance_penalties').select('*')
+      let q = supabaseAdmin.from('attendance_penalties').select('*')
         .order('trigger_type').order('display_order').order('threshold_minutes_min');
       if (trigger_type) q = q.eq('trigger_type', trigger_type);
       if (is_active !== undefined) q = q.eq('is_active', is_active === true || is_active === 'true');
@@ -33,21 +33,21 @@ export function makeAttendancePenaltyRepo() {
     },
 
     async findPenaltyById(id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalties').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
     },
 
     async insertPenalty(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalties').insert([row]).select().single();
       if (error) throw error;
       return data;
     },
 
     async updatePenalty(id, patch) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalties').update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id).select().maybeSingle();
       if (error) throw error;
@@ -55,20 +55,20 @@ export function makeAttendancePenaltyRepo() {
     },
 
     async deletePenalty(id) {
-      const { error } = await supabase.from('attendance_penalties').delete().eq('id', id);
+      const { error } = await supabaseAdmin.from('attendance_penalties').delete().eq('id', id);
       if (error) throw error;
     },
 
     // ─── attendance_penalty_records ──────────────────────────
     async insertPenaltyRecord(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalty_records').insert([row]).select().single();
       if (error) throw error;
       return data;
     },
 
     async listPenaltyRecords({ employee_id, year, month, status }) {
-      let q = supabase.from('attendance_penalty_records').select('*')
+      let q = supabaseAdmin.from('attendance_penalty_records').select('*')
         .order('applies_to_year', { ascending: false })
         .order('applies_to_month', { ascending: false })
         .order('id', { ascending: false });
@@ -82,14 +82,14 @@ export function makeAttendancePenaltyRepo() {
     },
 
     async findPenaltyRecordById(id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalty_records').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
     },
 
     async updatePenaltyRecord(id, patch) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalty_records').update({ ...patch, updated_at: new Date().toISOString() })
         .eq('id', id).select().maybeSingle();
       if (error) throw error;
@@ -97,7 +97,7 @@ export function makeAttendancePenaltyRepo() {
     },
 
     async findPenaltyRecordsByEmployeeMonth({ employee_id, year, month }) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance_penalty_records').select('*')
         .eq('employee_id', employee_id)
         .eq('applies_to_year', year).eq('applies_to_month', month);
@@ -113,7 +113,7 @@ export function makeAttendancePenaltyRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('work_date, status', { count: 'exact', head: false })
         .eq('employee_id', employee_id).eq('status', status)
         .gte('work_date', start).lte('work_date', end);
@@ -126,7 +126,7 @@ export function makeAttendancePenaltyRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01T00:00:00+08:00`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}T23:59:59+08:00`;
-      const { data: leaves, error } = await supabase
+      const { data: leaves, error } = await supabaseAdmin
         .from('leave_requests')
         .select('id, leave_type, hours, finalized_hours, days, start_at, end_at')
         .eq('employee_id', employee_id).eq('status', 'approved')
@@ -134,7 +134,7 @@ export function makeAttendancePenaltyRepo() {
       if (error) throw error;
       const types = [...new Set((leaves || []).map(l => l.leave_type))];
       if (!types.length) return [];
-      const { data: lts } = await supabase
+      const { data: lts } = await supabaseAdmin
         .from('leave_types').select('code, affects_attendance_bonus, affects_attendance_rate').in('code', types);
       const bonusMap = Object.fromEntries((lts || []).map(t => [t.code, t.affects_attendance_bonus]));
       return (leaves || []).map(l => ({
@@ -147,7 +147,7 @@ export function makeAttendancePenaltyRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01T00:00:00+08:00`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}T23:59:59+08:00`;
-      const { data: leaves, error } = await supabase
+      const { data: leaves, error } = await supabaseAdmin
         .from('leave_requests')
         .select('id, leave_type, hours, finalized_hours, days, start_at, end_at')
         .eq('employee_id', employee_id).eq('status', 'approved')
@@ -155,7 +155,7 @@ export function makeAttendancePenaltyRepo() {
       if (error) throw error;
       const types = [...new Set((leaves || []).map(l => l.leave_type))];
       if (!types.length) return [];
-      const { data: lts } = await supabase
+      const { data: lts } = await supabaseAdmin
         .from('leave_types').select('code, affects_attendance_rate').in('code', types);
       const rateMap = Object.fromEntries((lts || []).map(t => [t.code, t.affects_attendance_rate]));
       return (leaves || []).map(l => ({ ...l, affects_attendance_rate: rateMap[l.leave_type] !== false }));
@@ -165,7 +165,7 @@ export function makeAttendancePenaltyRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('work_date')
         .eq('employee_id', employee_id).eq('status', 'absent')
         .gte('work_date', start).lte('work_date', end);
@@ -178,7 +178,7 @@ export function makeAttendancePenaltyRepo() {
       // 從 attendance_penalties 中 trigger_type='absent' 且 penalty_type='deduct_attendance_bonus_pct'
       // 的活躍規則讀 penalty_amount(視為比例)
       const today = new Date().toISOString().slice(0, 10);
-      const { data } = await supabase
+      const { data } = await supabaseAdmin
         .from('attendance_penalties').select('penalty_amount')
         .eq('is_active', true).eq('trigger_type', 'absent')
         .eq('penalty_type', 'deduct_attendance_bonus_pct')
@@ -192,7 +192,7 @@ export function makeAttendancePenaltyRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('*')
         .eq('employee_id', employee_id)
         .gte('work_date', start).lte('work_date', end);
@@ -204,7 +204,7 @@ export function makeAttendancePenaltyRepo() {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('holidays').select('date, holiday_type')
         .gte('date', start).lte('date', end);
       if (error) throw error;

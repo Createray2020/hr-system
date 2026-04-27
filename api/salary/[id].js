@@ -6,7 +6,7 @@
 // 同 Batch 3/4 模式:legacy + 新路徑共存,白名單合併。
 // GENERATED column(gross_salary / net_salary)永遠不允許覆寫;_auto 欄位也不接受手改。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
   if (action === 'confirm' && req.method === 'PUT') {
     const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
-    const { error } = await supabase.from('salary_records')
+    const { error } = await supabaseAdmin.from('salary_records')
       .update({ status: 'confirmed', updated_at: new Date().toISOString() }).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已確認' });
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   if (action === 'pay' && req.method === 'PUT') {
     const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
-    const { error } = await supabase.from('salary_records')
+    const { error } = await supabaseAdmin.from('salary_records')
       .update({
         status: 'paid',
         pay_date: new Date().toISOString().split('T')[0],
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'no allowed fields to update' });
     }
     update.updated_at = new Date().toISOString();
-    const { error } = await supabase.from('salary_records').update(update).eq('id', id);
+    const { error } = await supabaseAdmin.from('salary_records').update(update).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已更新' });
   }

@@ -4,7 +4,7 @@
 //
 // 對應設計文件：docs/attendance-system-design-v1.md §4.1.1
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §4.4
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     if (update.pay_multiplier != null) update.pay_multiplier = Number(update.pay_multiplier);
     update.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('holidays').update(update).eq('id', id).select().single();
     if (error) return res.status(500).json({ error: error.message });
     if (!data) return res.status(404).json({ error: 'not found' });
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
     const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
 
-    const { error } = await supabase.from('holidays').delete().eq('id', id);
+    const { error } = await supabaseAdmin.from('holidays').delete().eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已刪除' });
   }
