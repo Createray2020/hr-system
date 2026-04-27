@@ -385,6 +385,18 @@ const GRADE_LEVELS = { '一等': [1,2,3], '二等': [1,2,3], '三等': [1,2,3,4,
 
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 600));
+
+  // Hotfix: 員工資料是 HR 後台、非 backoffice 跳走
+  // 等 layout.js 設好 currentUser（最多再等 2 秒）
+  for (let i = 0; i < 40; i++) {
+    if (window.currentUser) break;
+    await new Promise(r => setTimeout(r, 50));
+  }
+  if (!Roles.isBackofficeRole(window.currentUser)) {
+    window.location.href = '/employee-app.html';
+    return;
+  }
+
   try {
     await Promise.all([loadEmployees(), loadSalaryGrades(), loadDepts()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
