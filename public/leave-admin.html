@@ -113,7 +113,7 @@ async function load(retries = 0) {
     return;
   }
   const u = window.currentUser;
-  const allowed = u && (u.is_manager === true || ['hr', 'admin', 'ceo'].includes(u.role));
+  const allowed = u && (u.is_manager === true || ['hr', 'admin', 'ceo', 'chairman'].includes(u.role));
   if (u && !allowed) {
     document.getElementById('main-content').style.display = 'none';
     document.getElementById('gate-blocked').style.display = '';

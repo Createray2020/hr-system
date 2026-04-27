@@ -173,7 +173,7 @@ async function load(retries = 0) {
 
   // Page-level gate
   const u = window.currentUser;
-  const allowed = u && (u.is_manager === true || ['hr','admin','ceo'].includes(u.role));
+  const allowed = u && (u.is_manager === true || ['hr','admin','ceo','chairman'].includes(u.role));
   if (u && !allowed) {
     document.getElementById('main-content').style.display = 'none';
     document.getElementById('gate-blocked').style.display = '';
@@ -193,7 +193,7 @@ async function load(retries = 0) {
 }
 
 function filterVisibleEmps(emps, user) {
-  if (['hr','admin','ceo'].includes(user.role)) return emps;
+  if (['hr','admin','ceo','chairman'].includes(user.role)) return emps;
   if (user.is_manager) return emps.filter(e => e.manager_id === user.id);
   return [];
 }
