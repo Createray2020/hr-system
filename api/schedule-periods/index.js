@@ -6,14 +6,14 @@
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
 
 import { supabase } from '../../lib/supabase.js';
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireAuth } from '../../lib/auth.js';
 
 const ALLOWED_STATUSES = ['draft', 'submitted', 'approved', 'locked'];
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   if (req.method === 'GET') return handleGet(req, res, caller);

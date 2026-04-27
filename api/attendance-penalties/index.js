@@ -2,7 +2,7 @@
 // GET  /api/attendance-penalties[?trigger_type&is_active]   列表
 // POST /api/attendance-penalties                             HR 新增規則
 
-import { requireRole, requireRoleOrPass } from '../../lib/auth.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
 import { makeAttendancePenaltyRepo } from './_repo.js';
 
 const TRIGGERS = new Set(['late', 'early_leave', 'absent', 'other']);
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     // 規則查詢:HR / admin / manager 都可看(便於部門主管了解規則)
-    const caller = await requireRoleOrPass(req, res, []);
+    const caller = await requireAuth(req, res);
     if (!caller) return;
     const repo = makeAttendancePenaltyRepo();
     try {

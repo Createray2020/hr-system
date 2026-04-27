@@ -16,7 +16,7 @@
 // 否則本檔永遠不會被 hit(會被 rewrite 到 index.js?_id=...)。
 
 import { supabase } from '../../lib/supabase.js';
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireRole } from '../../lib/auth.js';
 
 const ALLOWED_PUT_FIELDS = new Set([
   'clock_in', 'clock_out',
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'invalid id' });
   }
 
-  const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
   if (!caller) return;
 
   // 權限:HR / admin 才能改打卡紀錄

@@ -10,7 +10,7 @@
 // (Batch 7 補),不直接 PATCH comp_time_balance。
 
 import { supabase } from '../../lib/supabase.js';
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireAuth } from '../../lib/auth.js';
 import { getCompBalance } from '../../lib/comp-time/balance.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
 
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   const { employee_id } = req.query;

@@ -3,7 +3,7 @@
 // Also handles: POST /api/push (via ?_resource=push)
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../lib/supabase.js';
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireRole } from '../../lib/auth.js';
 import { sendPushToEmployees, sendPushToRoles } from '../../lib/push.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -105,7 +105,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const caller = await requireRoleOrPass(req, res, DEPT_WRITE_ROLES);
+      const caller = await requireRole(req, res, DEPT_WRITE_ROLES);
       if (!caller) return;
       const { name, description, color, manager_id } = req.body;
       if (!name) return res.status(400).json({ error: '缺少部門名稱' });
@@ -123,7 +123,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
-      const caller = await requireRoleOrPass(req, res, DEPT_WRITE_ROLES);
+      const caller = await requireRole(req, res, DEPT_WRITE_ROLES);
       if (!caller) return;
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: '缺少 id' });
@@ -150,7 +150,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'DELETE') {
-      const caller = await requireRoleOrPass(req, res, DEPT_WRITE_ROLES);
+      const caller = await requireRole(req, res, DEPT_WRITE_ROLES);
       if (!caller) return;
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: '缺少 id' });
@@ -187,7 +187,7 @@ export default async function handler(req, res) {
 
   // ── 新增員工 POST ────────────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const caller = await requireRoleOrPass(req, res, ['hr', 'ceo', 'admin']);
+    const caller = await requireRole(req, res, ['hr', 'ceo', 'admin']);
     if (!caller) return;
     const body = { ...req.body };
     const id = 'E' + Date.now();

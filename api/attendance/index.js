@@ -23,7 +23,7 @@
 //   不需要 vercel.json rewrite 輔助。Batch 10 上 prod 後手測再次確認。
 
 import { supabase } from '../../lib/supabase.js';
-import { requireAuth, requireRoleOrPass, getEmployee } from '../../lib/auth.js';
+import { requireAuth, getEmployee } from '../../lib/auth.js';
 import {
   clockIn, clockOut,
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
@@ -212,7 +212,7 @@ export default async function handler(req, res) {
 // ─────────────────────────────────────────────────────────────────
 
 async function handleNewPunch(req, res) {
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   const { action } = req.body;

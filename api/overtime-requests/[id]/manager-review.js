@@ -9,7 +9,7 @@
 //   4. UPDATE overtime_requests:status / manager_id / manager_reviewed_at / manager_decision / manager_note
 //   5. 若直接 approved + comp_leave → 觸發 convertOvertimeToCompTime
 
-import { requireRoleOrPass } from '../../../lib/auth.js';
+import { requireAuth } from '../../../lib/auth.js';
 import { canTransition } from '../../../lib/overtime/request-state.js';
 import { convertOvertimeToCompTime } from '../../../lib/overtime/comp-conversion.js';
 import { makeOvertimeRepo } from '../_repo.js';
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   const id = req.query.id;

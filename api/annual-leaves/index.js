@@ -7,7 +7,7 @@
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §7.6
 
 import { supabase } from '../../lib/supabase.js';
-import { requireRole, requireRoleOrPass } from '../../lib/auth.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateLegalDays, calculatePeriodBoundary } from '../../lib/leave/annual.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 }
 
 async function handleGet(req, res) {
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   const { employee_id, status } = req.query;

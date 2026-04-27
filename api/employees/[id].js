@@ -1,6 +1,6 @@
 // api/employees/[id].js — GET one / PUT update / DELETE / /me route
 import { supabase } from '../../lib/supabase.js';
-import { requireRole, requireRoleOrPass } from '../../lib/auth.js';
+import { requireRole } from '../../lib/auth.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'PUT') {
     try {
-      const caller = await requireRoleOrPass(req, res, ['hr', 'ceo', 'chairman', 'admin'], { allowManager: true });
+      const caller = await requireRole(req, res, ['hr', 'ceo', 'chairman', 'admin'], { allowManager: true });
       if (!caller) return;
 
       const body = req.body;

@@ -13,13 +13,13 @@
 //   Batch 10 上 prod 後手測再次確認。
 
 import { supabase } from '../../lib/supabase.js';
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireRole } from '../../lib/auth.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
   if (!caller) return;
   const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
   if (!isHR) return res.status(403).json({ error: 'HR / admin only' });

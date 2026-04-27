@@ -5,7 +5,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §4.1.1
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §4.4
 import { supabase } from '../../lib/supabase.js';
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireRole } from '../../lib/auth.js';
 
 const HOLIDAY_TYPES = ['national', 'makeup_workday', 'company', 'flexible'];
 
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   if (!id) return res.status(400).json({ error: 'id required' });
 
   if (req.method === 'PUT') {
-    const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
     if (!caller) return;
 
     const allowed = ['date', 'holiday_type', 'name', 'description', 'pay_multiplier'];
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
     if (!caller) return;
 
     const { error } = await supabase.from('holidays').delete().eq('id', id);

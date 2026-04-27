@@ -18,7 +18,7 @@
 
 import { supabase } from '../../lib/supabase.js';
 import { skipAttendanceBonus } from '../../lib/roles.js';
-import { requireRoleOrPass, requireRole } from '../../lib/auth.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { makeSalaryRepo } from './_repo.js';
 
@@ -116,7 +116,7 @@ export default async function handler(req, res) {
 // ─────────────────────────────────────────────────────────────
 
 async function handleNewGet(req, res) {
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
   const { year, month, employee_id, status } = req.query;
   const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');

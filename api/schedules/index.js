@@ -12,7 +12,7 @@
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
 
 import { supabase } from '../../lib/supabase.js';
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireAuth } from '../../lib/auth.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
@@ -132,7 +132,7 @@ export default async function handler(req, res) {
 // ─────────────────────────────────────────────────────────────────
 
 async function handleNewGet(req, res) {
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   const { period_id, employee_id, year, month } = req.query;
@@ -158,7 +158,7 @@ async function handleNewGet(req, res) {
 }
 
 async function handleNewPost(req, res) {
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   const {

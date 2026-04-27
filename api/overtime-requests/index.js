@@ -11,7 +11,7 @@
 //   4. 算 estimated_pay(供參考,即使選 comp_leave 也算)
 //   5. INSERT overtime_requests with status='pending'
 
-import { requireRoleOrPass } from '../../lib/auth.js';
+import { requireAuth } from '../../lib/auth.js';
 import { checkOverLimit, isCrossMonth } from '../../lib/overtime/limits.js';
 import {
   calculateOvertimePay, getHourlyRate, pickFrozenPayMultiplier,
@@ -24,7 +24,7 @@ const REQUEST_KINDS = new Set(['pre_approval', 'post_approval']);
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   if (req.method === 'GET')  return handleGet(req, res, caller);

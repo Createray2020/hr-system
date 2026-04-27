@@ -4,7 +4,7 @@
 //
 // CEO 審核超時案件(status='pending_ceo')。
 
-import { requireRoleOrPass } from '../../../lib/auth.js';
+import { requireAuth } from '../../../lib/auth.js';
 import { canTransition } from '../../../lib/overtime/request-state.js';
 import { convertOvertimeToCompTime } from '../../../lib/overtime/comp-conversion.js';
 import { makeOvertimeRepo } from '../_repo.js';
@@ -31,7 +31,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const caller = await requireRoleOrPass(req, res, []);
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
   const id = req.query.id;
