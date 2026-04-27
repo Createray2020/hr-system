@@ -95,9 +95,15 @@ const PWA = {
         return;
       }
 
+      const session = await window._supabase?.auth?.getSession();
+      const token = session?.data?.session?.access_token;
+      if (!token) console.warn('[PWA] 未登入、推播訂閱會失敗');
       const res = await fetch('/api/push', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body:    JSON.stringify({ action: 'subscribe', employee_id: empId, subscription: sub.toJSON() }),
       });
       const result = await res.json().catch(() => ({}));
