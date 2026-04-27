@@ -79,7 +79,7 @@ dev-mode 三個 function 的修法：
 ### 1.5 部署策略
 
 5 個 Phase、每 phase 獨立 commit、可獨立 ROLLBACK。
-Phase 1: lib/supabase.js + Vercel env var SUPABASE_SERVICE_ROLE_KEY
+Phase 1: lib/supabase.js + Vercel env var SUPABASE_SERVICE_KEY
 行為：完全無感（兩個 client 都加進去、暫時沒人用 supabaseAdmin）
 Phase 2: lib/auth.js dev→strict
 行為：未登入或 role 不符的 request 開始回 401/403
@@ -108,14 +108,14 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing SUPABASE_URL or SUPABASE_ANON_KEY');
 }
 
 if (!supabaseServiceRoleKey) {
-  throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY (required for server-side operations)');
+  throw new Error('Missing SUPABASE_SERVICE_KEY (required for server-side operations)');
 }
 
 /**
@@ -145,7 +145,7 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
 
 **部署前要做**：
 
-Vercel Project Settings → Environment Variables 加 `SUPABASE_SERVICE_ROLE_KEY`（從 Supabase Dashboard → Settings → API → service_role secret 複製）。
+Vercel Project Settings → Environment Variables 加 `SUPABASE_SERVICE_KEY`（從 Supabase Dashboard → Settings → API → service_role secret 複製）。
 
 ### 2.2 lib/auth.js 改造
 
@@ -1474,7 +1474,7 @@ USING (auth_role_in('hr', 'admin'));
 
 **前置**：
 1. 從 Supabase Dashboard → Settings → API 複製 service_role key
-2. Vercel Project Settings → Environment Variables → 新增 `SUPABASE_SERVICE_ROLE_KEY`、scope 選 production + preview + development、貼上 key
+2. Vercel Project Settings → Environment Variables → 新增 `SUPABASE_SERVICE_KEY`、scope 選 production + preview + development、貼上 key
 3. 不要 redeploy
 
 **Action**：
@@ -1787,7 +1787,7 @@ prod 上有兩個 admin role 員工（EMP_ADMIN + EMP_99999999）、之前盤點
 ## 10. 實作 Checklist（給 Claude Code 用）
 
 ### Phase 1
-- [ ] 確認 Vercel env var `SUPABASE_SERVICE_ROLE_KEY` 已設好（Ray 操作）
+- [ ] 確認 Vercel env var `SUPABASE_SERVICE_KEY` 已設好（Ray 操作）
 - [ ] 改 lib/supabase.js（按 §2.1）
 - [ ] 跑 vitest 全綠
 - [ ] commit + push + 觀察 prod 1 小時
