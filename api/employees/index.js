@@ -2,7 +2,7 @@
 // Also handles: GET|POST|PUT|DELETE /api/departments (via ?_resource=departments)
 // Also handles: POST /api/push (via ?_resource=push)
 import { createClient } from '@supabase/supabase-js';
-import { supabase, supabaseAdmin } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -10,8 +10,8 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 // 同步 employees.is_manager。在 departments 表變動「之後」呼叫。
 // oldManagerId / newManagerId 可為 null。
-// Exported for testability; handler 內部使用 supabase 預設值。
-export async function syncDeptManagerFlag({ oldManagerId, newManagerId }, sb = supabase) {
+// Exported for testability; handler 內部使用 supabaseAdmin 預設值。
+export async function syncDeptManagerFlag({ oldManagerId, newManagerId }, sb = supabaseAdmin) {
   if (oldManagerId === newManagerId) return;
 
   if (newManagerId) {
@@ -73,11 +73,11 @@ export default async function handler(req, res) {
       const caller = await requireAuth(req, res);
       if (!caller) return;
       try {
-        const { data: depts, error } = await supabase
+        const { data: depts, error } = await supabaseAdmin
           .from('departments').select('*').order('name');
         if (error) return res.status(500).json({ error: error.message });
 
-        const { data: emps } = await supabase
+        const { data: emps } = await supabaseAdmin
           .from('employees').select('dept').eq('status', 'active');
         const countMap = {};
         (emps || []).forEach(e => { countMap[e.dept] = (countMap[e.dept] || 0) + 1; });
@@ -85,7 +85,7 @@ export default async function handler(req, res) {
         const managerIds = depts.map(d => d.manager_id).filter(Boolean);
         let managerMap = {};
         if (managerIds.length) {
-          const { data: mgrs } = await supabase
+          const { data: mgrs } = await supabaseAdmin
             .from('employees').select('id, name').in('id', managerIds);
           (mgrs || []).forEach(m => { managerMap[m.id] = m.name; });
         }
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
       if (!name) return res.status(400).json({ error: '缺少部門名稱' });
       const id = 'D' + Date.now();
       const newManagerId = manager_id || null;
-      const { error } = await supabase.from('departments').insert([{
+      const { error } = await supabaseAdmin.from('departments').insert([{
         id, name,
         description: description || '',
         color:       color || '#5B8DEF',
@@ -131,12 +131,12 @@ export default async function handler(req, res) {
       const managerIdChanging = Object.prototype.hasOwnProperty.call(req.body, 'manager_id');
       let oldManagerId = null;
       if (managerIdChanging) {
-        const { data: cur } = await supabase.from('departments')
+        const { data: cur } = await supabaseAdmin.from('departments')
           .select('manager_id').eq('id', id).single();
         oldManagerId = cur?.manager_id || null;
       }
 
-      const { error } = await supabase.from('departments').update(update).eq('id', id);
+      const { error } = await supabaseAdmin.from('departments').update(update).eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
 
       if (managerIdChanging) {
@@ -151,16 +151,16 @@ export default async function handler(req, res) {
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: '缺少 id' });
 
-      const { data: dept } = await supabase
+      const { data: dept } = await supabaseAdmin
         .from('departments').select('name, manager_id').eq('id', id).single();
       if (!dept) return res.status(404).json({ error: '找不到部門' });
 
-      const { data: active } = await supabase
+      const { data: active } = await supabaseAdmin
         .from('employees').select('id').eq('dept', dept.name).eq('status', 'active').limit(1);
       if (active && active.length > 0)
         return res.status(409).json({ error: '該部門仍有在職員工，無法刪除' });
 
-      const { error } = await supabase.from('departments').delete().eq('id', id);
+      const { error } = await supabaseAdmin.from('departments').delete().eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
       await syncDeptManagerFlag({ oldManagerId: dept.manager_id || null, newManagerId: null });
       return res.status(200).json({ message: '已刪除' });
@@ -174,7 +174,7 @@ export default async function handler(req, res) {
     const caller = await requireAuth(req, res);
     if (!caller) return;
     const { status, dept, search } = req.query;
-    let q = supabase.from('employees').select('*').order('name');
+    let q = supabaseAdmin.from('employees').select('*').order('name');
     if (status) q = q.eq('status', status);
     if (dept)   q = q.eq('dept', dept);
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
@@ -198,7 +198,7 @@ export default async function handler(req, res) {
       const dd = String(d.getDate()).padStart(2, '0');
       const base = empType + yy + mm + dd;
 
-      const { data: existing } = await supabase
+      const { data: existing } = await supabaseAdmin
         .from('employees').select('emp_no').like('emp_no', base + '%');
       const taken = new Set((existing || []).map(e => e.emp_no));
 
@@ -214,7 +214,7 @@ export default async function handler(req, res) {
       }
     }
 
-    const { error } = await supabase.from('employees').insert([{ id, ...body }]);
+    const { error } = await supabaseAdmin.from('employees').insert([{ id, ...body }]);
     if (error) return res.status(500).json({ error: error.message });
 
     let authEmail = null;
@@ -232,7 +232,7 @@ export default async function handler(req, res) {
           console.warn('[Auth] 建立帳號失敗:', authError.message);
           authEmail = null;
         } else if (authData?.user?.id) {
-          await supabase.from('employees')
+          await supabaseAdmin.from('employees')
             .update({ auth_user_id: authData.user.id })
             .eq('id', id);
         }

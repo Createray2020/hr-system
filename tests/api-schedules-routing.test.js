@@ -24,15 +24,19 @@ vi.mock('../lib/supabase.js', () => {
     c.then = (onF, onR) => Promise.resolve({ data: [], error: null }).then(onF, onR);
     return c;
   }
+  // 同一個 client 物件 export 為 supabase 跟 supabaseAdmin
+  // 因為 Phase 3 後 handler 一律走 supabaseAdmin、test 仍然攔截 from() 即可
+  const client = {
+    from: vi.fn((table) => {
+      calls.fromTables.push(table);
+      calls._lastTable = table;
+      return chain();
+    }),
+    auth: { getUser: vi.fn(async () => ({ data: { user: null }, error: null })) },
+  };
   return {
-    supabase: {
-      from: vi.fn((table) => {
-        calls.fromTables.push(table);
-        calls._lastTable = table;
-        return chain();
-      }),
-      auth: { getUser: vi.fn(async () => ({ data: { user: null }, error: null })) },
-    },
+    supabase: client,
+    supabaseAdmin: client,
   };
 });
 

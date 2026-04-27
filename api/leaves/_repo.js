@@ -3,7 +3,7 @@
 // 同時被 leaves/index.js / leaves/[id].js / annual-leaves/* / cron-annual-leave-rollover.js 共用。
 // _ 前綴避免被當成 API route(Vercel 不會把 _xxx.js 當 endpoint)。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 
 export function makeLeaveRepo() {
   return {
@@ -11,13 +11,13 @@ export function makeLeaveRepo() {
 
     // ─── leave_types ─────
     async findLeaveType(code) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('leave_types').select('*').eq('code', code).maybeSingle();
       if (error) throw error;
       return data || null;
     },
     async listActiveLeaveTypes() {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('leave_types').select('*').eq('is_active', true).order('display_order');
       if (error) throw error;
       return data || [];
@@ -25,7 +25,7 @@ export function makeLeaveRepo() {
 
     // ─── schedules ───────
     async findSchedulesInRange(employee_id, dateStart, dateEnd) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedules')
         .select('id, employee_id, work_date, start_time, end_time, crosses_midnight, scheduled_work_minutes, segment_no, period_id')
         .eq('employee_id', employee_id)
@@ -37,7 +37,7 @@ export function makeLeaveRepo() {
 
     // ─── annual_leave_records ─────
     async findActiveAnnualRecord(employee_id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('annual_leave_records').select('*')
         .eq('employee_id', employee_id).eq('status', 'active')
         .order('period_start', { ascending: false }).limit(1).maybeSingle();
@@ -48,7 +48,7 @@ export function makeLeaveRepo() {
     async lockAndIncrementUsedDays({ record_id, delta_days, allow_negative = false, max_retries = 3 }) {
       // 樂觀鎖:UPDATE WHERE used_days = current_used_days,失敗則重試
       for (let attempt = 0; attempt < max_retries; attempt++) {
-        const { data: cur } = await supabase
+        const { data: cur } = await supabaseAdmin
           .from('annual_leave_records').select('id, granted_days, used_days, status')
           .eq('id', record_id).maybeSingle();
         if (!cur) return { ok: false, reason: 'NOT_FOUND' };
@@ -60,7 +60,7 @@ export function makeLeaveRepo() {
         if (newUsed > granted + 1e-6) return { ok: false, reason: 'INSUFFICIENT_BALANCE' };
         if (newUsed < -1e-6 && !allow_negative) return { ok: false, reason: 'NEGATIVE_BALANCE' };
 
-        const { data: updated, error } = await supabase
+        const { data: updated, error } = await supabaseAdmin
           .from('annual_leave_records')
           .update({ used_days: newUsed, updated_at: new Date().toISOString() })
           .eq('id', record_id).eq('used_days', curUsed)
@@ -75,7 +75,7 @@ export function makeLeaveRepo() {
     async insertAnnualRecord(row) {
       // remaining_days 是 GENERATED,不能 INSERT
       const { remaining_days, ...payload } = row;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('annual_leave_records').insert([payload]).select().single();
       if (error) throw error;
       return data;
@@ -83,7 +83,7 @@ export function makeLeaveRepo() {
 
     async updateAnnualRecord(id, patch) {
       const { remaining_days, ...rest } = patch;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('annual_leave_records').update({ ...rest, updated_at: new Date().toISOString() })
         .eq('id', id).select().maybeSingle();
       if (error) throw error;
@@ -91,7 +91,7 @@ export function makeLeaveRepo() {
     },
 
     async listAnnualRecords({ employee_id, status }) {
-      let q = supabase.from('annual_leave_records').select('*').order('period_start', { ascending: false });
+      let q = supabaseAdmin.from('annual_leave_records').select('*').order('period_start', { ascending: false });
       if (employee_id) q = q.eq('employee_id', employee_id);
       if (status)      q = q.eq('status', status);
       const { data, error } = await q;
@@ -101,7 +101,7 @@ export function makeLeaveRepo() {
 
     // ─── leave_balance_logs ──
     async insertBalanceLog(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('leave_balance_logs').insert([row]).select().single();
       if (error) throw error;
       return data;
@@ -109,19 +109,19 @@ export function makeLeaveRepo() {
 
     // ─── leave_requests ──────
     async insertLeaveRequest(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('leave_requests').insert([row]).select().single();
       if (error) throw error;
       return data;
     },
     async findLeaveRequestById(id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('leave_requests').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
     },
     async updateLeaveRequest(id, patch) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('leave_requests').update(patch).eq('id', id).select().maybeSingle();
       if (error) throw error;
       return data;
@@ -129,7 +129,7 @@ export function makeLeaveRepo() {
 
     // ─── comp_time_balance(Batch 6 加,deductCompTime / refundCompTime / getCompBalance 用)──
     async findActiveCompBalances(employee_id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('comp_time_balance').select('*')
         .eq('employee_id', employee_id).eq('status', 'active')
         .order('expires_at', { ascending: true })
@@ -141,7 +141,7 @@ export function makeLeaveRepo() {
     async lockAndIncrementCompUsedHours({ comp_id, delta_hours, allow_negative = false, max_retries = 3 }) {
       // 樂觀鎖:UPDATE WHERE used_hours = current,失敗則重試
       for (let attempt = 0; attempt < max_retries; attempt++) {
-        const { data: cur } = await supabase
+        const { data: cur } = await supabaseAdmin
           .from('comp_time_balance').select('id, earned_hours, used_hours, status')
           .eq('id', comp_id).maybeSingle();
         if (!cur) return { ok: false, reason: 'NOT_FOUND' };
@@ -157,7 +157,7 @@ export function makeLeaveRepo() {
         const patch = { used_hours: newUsed, updated_at: new Date().toISOString() };
         if (newUsed >= earned - 1e-6 && delta_hours > 0) patch.status = 'fully_used';
 
-        const { data: updated, error } = await supabase
+        const { data: updated, error } = await supabaseAdmin
           .from('comp_time_balance').update(patch)
           .eq('id', comp_id).eq('used_hours', curUsed)
           .select().maybeSingle();
@@ -169,7 +169,7 @@ export function makeLeaveRepo() {
 
     async insertCompBalance(row) {
       const { remaining_hours, ...payload } = row;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('comp_time_balance').insert([payload]).select().single();
       if (error) throw error;
       return data;
@@ -177,7 +177,7 @@ export function makeLeaveRepo() {
 
     async updateCompBalance(id, patch) {
       const { remaining_hours, ...rest } = patch;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('comp_time_balance').update({ ...rest, updated_at: new Date().toISOString() })
         .eq('id', id).select().maybeSingle();
       if (error) throw error;
@@ -185,7 +185,7 @@ export function makeLeaveRepo() {
     },
 
     async findExpiringCompBalances(today) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('comp_time_balance').select('*')
         .eq('status', 'active').lte('expires_at', today)
         .order('expires_at');
@@ -194,7 +194,7 @@ export function makeLeaveRepo() {
     },
 
     async findCompBalancesExpiringOn(date) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('comp_time_balance').select('*')
         .eq('status', 'active').eq('expires_at', date);
       if (error) throw error;
@@ -203,7 +203,7 @@ export function makeLeaveRepo() {
 
     // ─── system_overtime_settings ─────
     async getSystemOvertimeSettings() {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('system_overtime_settings').select('*').eq('id', 1).maybeSingle();
       if (error) throw error;
       return data || null;
@@ -212,10 +212,10 @@ export function makeLeaveRepo() {
     // ─── 員工時薪(expiry-sweep auto_payout 算金額用)─────
     async findEmployeeHourlyRate(employee_id) {
       // 粗估:salary_records.base_salary / monthly_work_hours_base
-      const { data: settings } = await supabase
+      const { data: settings } = await supabaseAdmin
         .from('system_overtime_settings').select('monthly_work_hours_base').eq('id', 1).maybeSingle();
       const base = Number(settings?.monthly_work_hours_base) || 240;
-      const { data: sal } = await supabase
+      const { data: sal } = await supabaseAdmin
         .from('salary_records').select('base_salary')
         .eq('employee_id', employee_id).order('year', { ascending: false })
         .order('month', { ascending: false }).limit(1).maybeSingle();
@@ -252,7 +252,7 @@ export function makeLeaveRepo() {
     async findEmployeesWithAnniversaryToday(today) {
       // today: 'YYYY-MM-DD',匹配 annual_leave_seniority_start 月日
       const md = today.slice(5); // 'MM-DD'
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('employees')
         .select('id, name, annual_leave_seniority_start')
         .eq('status', 'active');

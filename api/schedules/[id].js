@@ -5,7 +5,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §4.2.2 / §9.4
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
@@ -22,13 +22,13 @@ export default async function handler(req, res) {
   const id = req.query.id || req.body?.id;
   if (!id) return res.status(400).json({ error: 'schedule id required' });
 
-  const { data: existing, error: eErr } = await supabase
+  const { data: existing, error: eErr } = await supabaseAdmin
     .from('schedules').select('*').eq('id', id).maybeSingle();
   if (eErr) return res.status(500).json({ error: eErr.message });
   if (!existing) return res.status(404).json({ error: 'schedule not found' });
 
   // 撈對應的 period
-  const { data: period, error: pErr } = await supabase
+  const { data: period, error: pErr } = await supabaseAdmin
     .from('schedule_periods').select('*').eq('id', existing.period_id).maybeSingle();
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) {
@@ -47,7 +47,7 @@ export default async function handler(req, res) {
   } else {
     let manages = false;
     if (caller.is_manager === true && caller.id) {
-      const { data: emp } = await supabase.from('employees')
+      const { data: emp } = await supabaseAdmin.from('employees')
         .select('manager_id').eq('id', existing.employee_id).maybeSingle();
       manages = !!emp && emp.manager_id === caller.id;
     }
@@ -87,7 +87,7 @@ async function handlePut(req, res, { existing, caller, actorKind, isLateChange }
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('schedules').update(patch).eq('id', existing.id).select().maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
 
@@ -105,7 +105,7 @@ async function handlePut(req, res, { existing, caller, actorKind, isLateChange }
 }
 
 async function handleDelete(req, res, { existing, caller, actorKind, isLateChange }) {
-  const { error } = await supabase.from('schedules').delete().eq('id', existing.id);
+  const { error } = await supabaseAdmin.from('schedules').delete().eq('id', existing.id);
   if (error) return res.status(500).json({ error: error.message });
 
   await writeLogAndMaybeNotify({
@@ -164,7 +164,7 @@ function changeTypeFor(actorKind, isLateChange) {
 function repoFromSupabase() {
   return {
     async insertScheduleChangeLog(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedule_change_logs').insert([row]).select().single();
       if (error) throw error;
       return data;

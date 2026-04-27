@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Stub lib/supabase.js 以免 import api/employees/index.js 時要求 env
-vi.mock('../lib/supabase.js', () => ({ supabase: {} }));
+vi.mock('../lib/supabase.js', () => ({ supabase: {}, supabaseAdmin: {} }));
 
 const { syncDeptManagerFlag } = await import('../api/employees/index.js');
 

@@ -22,7 +22,7 @@
 //   本 repo precedent: api/holidays/{[id].js, import.js, index.js} 已驗證 work,
 //   不需要 vercel.json rewrite 輔助。Batch 10 上 prod 後手測再次確認。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, getEmployee } from '../../lib/auth.js';
 import {
   clockIn, clockOut,
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
       const localMs = now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000;
       const local = new Date(localMs);
       const today = `${local.getFullYear()}-${String(local.getMonth()+1).padStart(2,'0')}-${String(local.getDate()).padStart(2,'0')}`;
-      const { data, error } = await supabase.from('attendance').select('*')
+      const { data, error } = await supabaseAdmin.from('attendance').select('*')
         .eq('employee_id', employee_id).eq('work_date', today).single();
       if (error && error.code !== 'PGRST116') return res.status(500).json({ error: error.message });
       if (!data) return res.status(200).json({ date: today, punch_in: null, punch_out: null });
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
     // ── GET all employees' records (管理者用，JS 合併員工資料) ─────────────
     if (allRecords === 'true') {
       // 取打卡紀錄
-      let q = supabase.from('attendance').select('*').order('work_date', { ascending: false });
+      let q = supabaseAdmin.from('attendance').select('*').order('work_date', { ascending: false });
       if (start)  q = q.gte('work_date', start);
       if (end)    q = q.lte('work_date', end);
       if (status) q = q.eq('status', status);
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
       if (attErr) return res.status(500).json({ error: attErr.message });
 
       // 取員工資料（一次全撈，在 JS 合併）
-      const { data: empData } = await supabase.from('employees').select('id, name, dept, avatar');
+      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept, avatar');
       const empMap = {};
       (empData || []).forEach(e => { empMap[e.id] = e; });
 
@@ -88,7 +88,7 @@ export default async function handler(req, res) {
       return res.status(200).json(rows);
     }
 
-    let q = supabase.from('attendance').select('*').order('work_date', { ascending: false });
+    let q = supabaseAdmin.from('attendance').select('*').order('work_date', { ascending: false });
     if (employee_id) q = q.eq('employee_id', employee_id);
     if (status)      q = q.eq('status', status);
     if (date)        q = q.eq('work_date', date);
@@ -125,15 +125,15 @@ export default async function handler(req, res) {
       if (type === 'in') {
         const isLate = now.getHours() > WORK_START_HOUR ||
                        (now.getHours() === WORK_START_HOUR && now.getMinutes() > 5);
-        const { data: existing } = await supabase
+        const { data: existing } = await supabaseAdmin
           .from('attendance').select('id').eq('employee_id', employee_id).eq('work_date', today).single();
         if (existing) {
-          const { error } = await supabase.from('attendance')
+          const { error } = await supabaseAdmin.from('attendance')
             .update({ clock_in: timeStr, status: isLate ? 'late' : 'normal' })
             .eq('id', existing.id);
           if (error) return res.status(500).json({ error: error.message });
         } else {
-          const { error } = await supabase.from('attendance').insert([{
+          const { error } = await supabaseAdmin.from('attendance').insert([{
             id, employee_id, work_date: today,
             clock_in: timeStr,
             status: isLate ? 'late' : 'normal',
@@ -144,13 +144,13 @@ export default async function handler(req, res) {
       }
 
       if (type === 'out') {
-        const { data: rec } = await supabase
+        const { data: rec } = await supabaseAdmin
           .from('attendance').select('*').eq('employee_id', employee_id).eq('work_date', today).single();
         if (!rec) return res.status(400).json({ error: '尚未上班打卡' });
         const clockIn   = rec.clock_in ? new Date(rec.clock_in) : null;
         const workHours = clockIn ? Math.round((now - clockIn) / 36000) / 100 : 0;
         const otHours   = Math.max(0, Math.round((workHours - 8) * 2) / 2);
-        const { error } = await supabase.from('attendance')
+        const { error } = await supabaseAdmin.from('attendance')
           .update({ clock_out: timeStr, work_hours: workHours, overtime_hours: otHours })
           .eq('id', rec.id);
         if (error) return res.status(500).json({ error: error.message });
@@ -178,14 +178,14 @@ export default async function handler(req, res) {
       note:           note   || '',
     };
 
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from('attendance').select('id').eq('employee_id', employee_id).eq('work_date', work_date).single();
 
     let error;
     if (existing) {
-      ({ error } = await supabase.from('attendance').update(payload).eq('id', existing.id));
+      ({ error } = await supabaseAdmin.from('attendance').update(payload).eq('id', existing.id));
     } else {
-      ({ error } = await supabase.from('attendance').insert([{
+      ({ error } = await supabaseAdmin.from('attendance').insert([{
         id: `AM${Date.now()}`, employee_id, work_date, ...payload
       }]));
     }
@@ -199,7 +199,7 @@ export default async function handler(req, res) {
     // 此分支保留以防漏接(舊 client 直接 call ?_id=xxx)。正式路徑請走 [id].js。
     const id = req.query._id || req.url.split('/').pop().split('?')[0];
     if (!id || id === 'index') return res.status(400).json({ error: '缺少 id' });
-    const { error } = await supabase.from('attendance').delete().eq('id', id);
+    const { error } = await supabaseAdmin.from('attendance').delete().eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已刪除' });
   }
@@ -246,7 +246,7 @@ async function handleNewPunch(req, res) {
 export function makeRepo() {
   return {
     async findSchedulesForDate(employee_id, date) {
-      const { data: scheds, error } = await supabase
+      const { data: scheds, error } = await supabaseAdmin
         .from('schedules')
         .select('id, employee_id, work_date, period_id, segment_no, start_time, end_time, crosses_midnight, scheduled_work_minutes')
         .eq('employee_id', employee_id).eq('work_date', date)
@@ -255,7 +255,7 @@ export function makeRepo() {
       if (!scheds || scheds.length === 0) return [];
       const periodIds = [...new Set(scheds.map(s => s.period_id).filter(Boolean))];
       if (periodIds.length === 0) return []; // 沒 period_id 的 legacy schedule 視同沒排班
-      const { data: periods } = await supabase
+      const { data: periods } = await supabaseAdmin
         .from('schedule_periods').select('id, status').in('id', periodIds);
       const valid = new Set((periods || [])
         .filter(p => p.status === 'locked' || p.status === 'approved').map(p => p.id));
@@ -263,7 +263,7 @@ export function makeRepo() {
     },
 
     async findHolidayByDate(date) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('holidays').select('id, holiday_type')
         .eq('date', date).limit(1).maybeSingle();
       if (error) throw error;
@@ -271,7 +271,7 @@ export function makeRepo() {
     },
 
     async findAttendanceByDateSegment(employee_id, date, segment_no) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('*')
         .eq('employee_id', employee_id).eq('work_date', date).eq('segment_no', segment_no)
         .maybeSingle();
@@ -280,7 +280,7 @@ export function makeRepo() {
     },
 
     async findOpenAttendanceForEmployee(employee_id, candidate_dates) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').select('*')
         .eq('employee_id', employee_id).in('work_date', candidate_dates)
         .is('clock_out', null).not('clock_in', 'is', null)
@@ -290,14 +290,14 @@ export function makeRepo() {
     },
 
     async findScheduleById(id) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedules').select('*').eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
     },
 
     async upsertAttendance(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance')
         .upsert([row], { onConflict: 'id' })
         .select().maybeSingle();
@@ -306,7 +306,7 @@ export function makeRepo() {
     },
 
     async updateAttendance(id, patch) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('attendance').update(patch).eq('id', id).select().maybeSingle();
       if (error) throw error;
       return data;

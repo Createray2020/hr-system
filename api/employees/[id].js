@@ -1,5 +1,5 @@
 // api/employees/[id].js — GET one / PUT update / DELETE / /me route
-import { supabase } from '../../lib/supabase.js';
+import { supabase, supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user) return res.status(401).json({ error: 'Invalid token' });
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('employees').select('*').eq('email', user.email).single();
     if (error) {
       return res.status(200).json({ id: null, name: user.email.split('@')[0], email: user.email, role: 'employee' });
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
 
   // GET — 不需要權限驗證
   if (req.method === 'GET') {
-    const { data, error } = await supabase.from('employees').select('*').eq('id', id).single();
+    const { data, error } = await supabaseAdmin.from('employees').select('*').eq('id', id).single();
     if (error) return res.status(404).json({ error: '找不到員工' });
     return res.status(200).json(data);
   }
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
 
       const body = req.body;
       // 前端負責計算薪資欄位後傳入，PUT 只負責寫入 employees 資料表
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('employees')
         .update({ ...body, updated_at: new Date().toISOString() })
         .eq('id', id);
@@ -47,7 +47,7 @@ export default async function handler(req, res) {
       const hasSalaryChange = salaryFields.some(f => body[f] !== undefined);
 
       if (hasSalaryChange) {
-        const { data: updatedEmp } = await supabase
+        const { data: updatedEmp } = await supabaseAdmin
           .from('employees').select('*').eq('id', id).single();
 
         if (updatedEmp && updatedEmp.employment_type !== 'part_time' && updatedEmp.has_insurance !== false) {
@@ -55,16 +55,16 @@ export default async function handler(req, res) {
                              (updatedEmp.grade_allowance||0) + (updatedEmp.manager_allowance||0) +
                              (updatedEmp.extra_allowance||0);
 
-          const { data: ins } = await supabase
+          const { data: ins } = await supabaseAdmin
             .from('insurance_settings').select('*').eq('employee_id', id).single();
 
           if (ins && ins.has_insurance !== false) {
-            const { data: laborBracket } = await supabase
+            const { data: laborBracket } = await supabaseAdmin
               .from('labor_insurance_brackets').select('*')
               .lte('monthly_wage_min', newMonthly).gte('monthly_wage_max', newMonthly)
               .single();
 
-            const { data: healthBracket } = await supabase
+            const { data: healthBracket } = await supabaseAdmin
               .from('health_insurance_brackets').select('*')
               .lte('monthly_wage_min', newMonthly).gte('monthly_wage_max', newMonthly)
               .single();
@@ -76,7 +76,7 @@ export default async function handler(req, res) {
               const changeId = 'ICR' + Date.now();
               const deps = ins.health_ins_dependents || 0;
 
-              await supabase.from('insurance_change_requests').insert([{
+              await supabaseAdmin.from('insurance_change_requests').insert([{
                 id: changeId,
                 employee_id: id,
                 old_monthly_salary:  Number(ins.labor_ins_bracket) || 0,
@@ -132,7 +132,7 @@ export default async function handler(req, res) {
   if (req.method === 'DELETE') {
     const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
-    const { error } = await supabase.from('employees').update({ status: 'resigned' }).eq('id', id);
+    const { error } = await supabaseAdmin.from('employees').update({ status: 'resigned' }).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已設為離職' });
   }

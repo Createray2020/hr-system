@@ -11,7 +11,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §4.2.2
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   // Detected by ?_resource=shift_types query param
   if (req.query._resource === 'shift_types') {
     if (req.method === 'GET') {
-      const { data, error } = await supabase.from('shift_types').select('*').order('id');
+      const { data, error } = await supabaseAdmin.from('shift_types').select('*').order('id');
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json(data);
     }
@@ -34,7 +34,7 @@ export default async function handler(req, res) {
       const { name, start_time, end_time, is_flexible, is_off, color } = req.body;
       if (!name) return res.status(400).json({ error: '班別名稱為必填' });
       const id = 'ST' + Date.now();
-      const { error } = await supabase.from('shift_types').insert([{
+      const { error } = await supabaseAdmin.from('shift_types').insert([{
         id, name,
         start_time:  start_time  || null,
         end_time:    end_time    || null,
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     try {
       const { dept, start, end, employee_id } = req.query;
 
-      let q = supabase
+      let q = supabaseAdmin
         .from('schedules')
         .select('*, shift_types(name, color, is_off, is_flexible, start_time, end_time)')
         .order('work_date');
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
 
       // Two-step: fetch employees
       const empIds = [...new Set(schedules.map(s => s.employee_id))];
-      const { data: emps, error: empErr } = await supabase
+      const { data: emps, error: empErr } = await supabaseAdmin
         .from('employees').select('id, name, dept, avatar').in('id', empIds);
       if (empErr) return res.status(500).json({ error: empErr.message });
 
@@ -108,7 +108,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: '缺少必填欄位' });
 
       const id = `S${employee_id}${work_date.replace(/-/g, '')}`;
-      const { error } = await supabase.from('schedules').upsert([{
+      const { error } = await supabaseAdmin.from('schedules').upsert([{
         id, employee_id, work_date, shift_type_id,
         start_time:  start_time || null,
         end_time:    end_time   || null,
@@ -138,7 +138,7 @@ async function handleNewGet(req, res) {
 
   const { period_id, employee_id, year, month } = req.query;
 
-  let q = supabase.from('schedules').select('*').order('work_date').order('segment_no');
+  let q = supabaseAdmin.from('schedules').select('*').order('work_date').order('segment_no');
   if (period_id) q = q.eq('period_id', period_id);
   if (employee_id) q = q.eq('employee_id', employee_id);
   if (year)  q = q.gte('work_date', `${parseInt(year)}-01-01`).lte('work_date', `${parseInt(year)}-12-31`);
@@ -172,7 +172,7 @@ async function handleNewPost(req, res) {
     return res.status(400).json({ error: 'period_id / employee_id / work_date 必填' });
   }
 
-  const { data: period, error: pErr } = await supabase
+  const { data: period, error: pErr } = await supabaseAdmin
     .from('schedule_periods').select('*').eq('id', period_id).maybeSingle();
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'period not found' });
@@ -192,7 +192,7 @@ async function handleNewPost(req, res) {
     const isHR = isBackofficeRole(caller);
     let manages = false;
     if (caller.is_manager === true && caller.id) {
-      const { data: emp } = await supabase.from('employees')
+      const { data: emp } = await supabaseAdmin.from('employees')
         .select('manager_id').eq('id', employee_id).maybeSingle();
       manages = !!emp && emp.manager_id === caller.id;
     }
@@ -235,9 +235,9 @@ async function handleNewPost(req, res) {
   };
 
   // 撈舊值給 log
-  const { data: before } = await supabase.from('schedules').select('*').eq('id', id).maybeSingle();
+  const { data: before } = await supabaseAdmin.from('schedules').select('*').eq('id', id).maybeSingle();
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('schedules')
     .upsert([row], { onConflict: 'employee_id,work_date,segment_no' })
     .select().maybeSingle();
@@ -285,7 +285,7 @@ function changeTypeFor(actorKind, isLateChange) {
 function repoFromSupabase() {
   return {
     async insertScheduleChangeLog(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedule_change_logs').insert([row]).select().single();
       if (error) throw error;
       return data;

@@ -15,7 +15,7 @@
 // vercel.json 中既有的 /api/attendance/:id rewrite 已在 Batch 4 移除,
 // 否則本檔永遠不會被 hit(會被 rewrite 到 index.js?_id=...)。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -43,7 +43,7 @@ export default async function handler(req, res) {
   const caller = await requireRole(req, res, BACKOFFICE_ROLES);
   if (!caller) return;
 
-  const { data: existing, error: gErr } = await supabase
+  const { data: existing, error: gErr } = await supabaseAdmin
     .from('attendance').select('*').eq('id', id).maybeSingle();
   if (gErr) return res.status(500).json({ error: gErr.message });
   if (!existing) return res.status(404).json({ error: 'attendance not found' });
@@ -61,14 +61,14 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'invalid status' });
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('attendance').update(patch).eq('id', id).select().maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ attendance: data });
   }
 
   if (req.method === 'DELETE') {
-    const { error } = await supabase.from('attendance').delete().eq('id', id);
+    const { error } = await supabaseAdmin.from('attendance').delete().eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ deleted: true, id });
   }

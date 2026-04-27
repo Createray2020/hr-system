@@ -23,7 +23,7 @@
 // Routing 假設:同 api/holidays/{[id].js, import.js, index.js} 與
 // api/attendance/{[id].js, anomaly.js, index.js} precedent,Vercel 靜態檔名優先 dynamic route。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
@@ -57,10 +57,10 @@ export default async function handler(req, res) {
   // GET
   if (req.method === 'GET') {
     if (id) {
-      const { data: leave, error } = await supabase
+      const { data: leave, error } = await supabaseAdmin
         .from('leave_requests').select('*').eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到假單' });
-      const { data: emp } = await supabase
+      const { data: emp } = await supabaseAdmin
         .from('employees').select('name, dept, position, avatar')
         .eq('id', leave.employee_id).single();
       return res.status(200).json({
@@ -70,7 +70,7 @@ export default async function handler(req, res) {
     }
 
     if (req.query.stats === 'true') {
-      const { data, error } = await supabase.from('leave_requests').select('status');
+      const { data, error } = await supabaseAdmin.from('leave_requests').select('status');
       if (error) return res.status(500).json({ error: error.message });
       const stats = { pending: 0, approved: 0, rejected: 0, total: data.length };
       data.forEach(r => { if (r.status in stats) stats[r.status]++; });
@@ -78,7 +78,7 @@ export default async function handler(req, res) {
     }
 
     const { status, dept, type, search } = req.query;
-    let q = supabase.from('leave_requests').select('*').order('applied_at', { ascending: false });
+    let q = supabaseAdmin.from('leave_requests').select('*').order('applied_at', { ascending: false });
     if (status) q = q.eq('status',     status);
     if (type)   q = q.eq('leave_type', type);
 
@@ -87,7 +87,7 @@ export default async function handler(req, res) {
     if (!leaves.length) return res.status(200).json([]);
 
     const empIds = [...new Set(leaves.map(l => l.employee_id))];
-    const { data: emps, error: empErr } = await supabase
+    const { data: emps, error: empErr } = await supabaseAdmin
       .from('employees').select('id, name, dept, position, avatar').in('id', empIds);
     if (empErr) return res.status(500).json({ error: empErr.message });
 
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
     if (!employee_id || !leave_type || !start_date || !end_date || !days)
       return res.status(400).json({ error: '缺少必填欄位' });
     const lid = 'L' + Date.now();
-    const { error } = await supabase.from('leave_requests')
+    const { error } = await supabaseAdmin.from('leave_requests')
       .insert([{ id: lid, employee_id, leave_type, start_date, end_date, days, reason, status: 'pending',
                  attachment_url: attachment_url || null, attachment_name: attachment_name || null }]);
     if (error) return res.status(500).json({ error: error.message });
@@ -122,9 +122,9 @@ export default async function handler(req, res) {
     const { status, handler_note } = req.body;
     if (!['approved', 'rejected'].includes(status))
       return res.status(400).json({ error: '無效的 status' });
-    const { data: leave } = await supabase
+    const { data: leave } = await supabaseAdmin
       .from('leave_requests').select('employee_id, leave_type').eq('id', id).single();
-    const { error } = await supabase.from('leave_requests')
+    const { error } = await supabaseAdmin.from('leave_requests')
       .update({ status, handler_note: handler_note || '', handled_at: new Date().toISOString() })
       .eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
@@ -165,7 +165,7 @@ async function handleNewGet(req, res) {
   const y = parseInt(year);
   if (!Number.isInteger(y)) return res.status(400).json({ error: 'invalid year' });
 
-  let q = supabase.from('leave_requests').select('*')
+  let q = supabaseAdmin.from('leave_requests').select('*')
     .eq('employee_id', employee_id)
     .order('start_at', { ascending: false });
 

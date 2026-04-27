@@ -12,7 +12,7 @@
 //   本 repo precedent: api/holidays/{[id].js, import.js, index.js} 已驗證 work。
 //   Batch 10 上 prod 後手測再次確認。
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'is_anomaly must be boolean' });
   }
 
-  const { data: existing, error: gErr } = await supabase
+  const { data: existing, error: gErr } = await supabaseAdmin
     .from('attendance').select('id').eq('id', attendance_id).maybeSingle();
   if (gErr) return res.status(500).json({ error: gErr.message });
   if (!existing) return res.status(404).json({ error: 'attendance not found' });
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     anomaly_note: is_anomaly ? (anomaly_note || null) : null,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('attendance').update(patch).eq('id', attendance_id).select().maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ attendance: data });

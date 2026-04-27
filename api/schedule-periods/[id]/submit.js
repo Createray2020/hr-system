@@ -4,7 +4,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §4.2.1
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
 
-import { supabase } from '../../../lib/supabase.js';
+import { supabaseAdmin } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
 import { canTransition } from '../../../lib/schedule/period-state.js';
 import { logScheduleChange } from '../../../lib/schedule/change-logger.js';
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
   const id = req.query.id || req.body?.id;
   if (!id) return res.status(400).json({ error: 'period id required' });
 
-  const { data: period, error: pErr } = await supabase
+  const { data: period, error: pErr } = await supabaseAdmin
     .from('schedule_periods').select('*').eq('id', id).maybeSingle();
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'period not found' });
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   }
 
   // 必須有至少一筆 schedules
-  const { count: schedCount, error: cErr } = await supabase
+  const { count: schedCount, error: cErr } = await supabaseAdmin
     .from('schedules').select('id', { count: 'exact', head: true }).eq('period_id', id);
   if (cErr) return res.status(500).json({ error: cErr.message });
   if (!schedCount || schedCount === 0) {
@@ -42,7 +42,7 @@ export default async function handler(req, res) {
   if (!tr.ok) return res.status(409).json({ error: 'illegal transition', detail: tr.reason });
 
   const now = new Date().toISOString();
-  const { data: updated, error: uErr } = await supabase
+  const { data: updated, error: uErr } = await supabaseAdmin
     .from('schedule_periods')
     .update({ status: tr.nextState, submitted_at: now, updated_at: now })
     .eq('id', id).eq('status', 'draft') // optimistic：避免 race
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
 function repoFromSupabase() {
   return {
     async insertScheduleChangeLog(row) {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('schedule_change_logs').insert([row]).select().single();
       if (error) throw error;
       return data;

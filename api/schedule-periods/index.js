@@ -5,7 +5,7 @@
 // 對應設計文件：docs/attendance-system-design-v1.md §4.2.1
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
 
-import { supabase } from '../../lib/supabase.js';
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
 
@@ -36,7 +36,7 @@ async function handleGet(req, res, caller) {
     return res.status(400).json({ error: 'invalid status' });
   }
 
-  let q = supabase.from('schedule_periods').select('*').order('period_start', { ascending: true });
+  let q = supabaseAdmin.from('schedule_periods').select('*').order('period_start', { ascending: true });
   if (y != null) q = q.eq('period_year', y);
   if (m != null) q = q.eq('period_month', m);
   if (employee_id) q = q.eq('employee_id', employee_id);
@@ -54,7 +54,7 @@ async function handleGet(req, res, caller) {
 
   // 一次撈所有相關 schedules
   const periodIds = periods.map(p => p.id);
-  const { data: schedules, error: sErr } = await supabase
+  const { data: schedules, error: sErr } = await supabaseAdmin
     .from('schedules').select('*').in('period_id', periodIds).order('work_date');
   if (sErr) return res.status(500).json({ error: sErr.message });
 
@@ -89,7 +89,7 @@ async function handlePost(req, res, caller) {
     end_date:   periodEnd,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('schedule_periods')
     .upsert([row], { onConflict: 'employee_id,period_year,period_month', ignoreDuplicates: true })
     .select()
@@ -98,7 +98,7 @@ async function handlePost(req, res, caller) {
 
   // ignoreDuplicates → 已存在時 data 為 null，撈一次回給呼叫端
   if (!data) {
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from('schedule_periods').select('*')
       .eq('employee_id', targetEmpId).eq('period_year', y).eq('period_month', m)
       .maybeSingle();
