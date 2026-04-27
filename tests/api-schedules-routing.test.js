@@ -5,9 +5,17 @@
 // 策略：mock lib/supabase.js + lib/auth.js + lib/push.js，攔截 supabase.from(table)
 // 的第一次呼叫，據此判定 handler 走了哪條分支。
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const calls = { fromTables: [], inserted: [], action: null };
+
+// Per-test override registry。新 describe block 在 beforeEach 設定後、
+// mock 讀這個 object 提供回應。預設 null = 跟 Phase 3 既有 9 個 test 行為一樣
+// （maybeSingle 回 null、requireAuth 回 HR1）。
+const overrides = {
+  caller: null,                    // null → 預設 { id: 'HR1' }
+  schedulePeriodsResponse: null,   // null → schedule_periods.maybeSingle 回 { data: null }
+};
 
 vi.mock('../lib/supabase.js', () => {
   function chain() {
@@ -18,7 +26,13 @@ vi.mock('../lib/supabase.js', () => {
     c.upsert = vi.fn((row) => { calls.inserted.push({ table: calls._lastTable, row, kind: 'upsert' }); return c; });
     c.update = vi.fn(() => c);
     c.delete = vi.fn(() => c);
-    c.maybeSingle = vi.fn(() => Promise.resolve({ data: null, error: null }));
+    c.maybeSingle = vi.fn(() => {
+      // 新 describe 可在 beforeEach 注入 schedule_periods 回應
+      if (calls._lastTable === 'schedule_periods' && overrides.schedulePeriodsResponse) {
+        return Promise.resolve({ data: overrides.schedulePeriodsResponse, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
     c.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
     // thenable so `await q` resolves
     c.then = (onF, onR) => Promise.resolve({ data: [], error: null }).then(onF, onR);
@@ -44,7 +58,7 @@ vi.mock('../lib/auth.js', () => ({
   requireRoleOrPass: vi.fn(async () => ({ id: 'HR1', role: 'hr', is_manager: false })),
   getAuthUser:       vi.fn(async () => null),
   getEmployee:       vi.fn(async () => null),
-  requireAuth:       vi.fn(async () => ({ id: 'HR1' })),
+  requireAuth:       vi.fn(async () => overrides.caller || { id: 'HR1' }),
   requireRole:       vi.fn(async () => ({ id: 'HR1', role: 'hr' })),
 }));
 
@@ -160,5 +174,57 @@ describe('分流：新路徑（Batch 3+）', () => {
     await handler(req, res);
     // 新 POST 第一步先撈 schedule_periods 確認 period 存在
     expect(calls.fromTables[0]).toBe('schedule_periods');
+  });
+});
+
+// ─── Phase C: 員工自助 shift 限制 ───────────────────────────────────
+// 員工只能 INSERT shift_type_id='ST003'（員工希望班）或 note='__OFF__'（整天不排）。
+// 其他 shift（ST001 早班 / ST002 晚班 等）只有主管 / HR 能填、由 canManagerEditSchedule 路徑進。
+
+describe('Phase C: 員工自助 shift 限制', () => {
+  beforeEach(() => {
+    overrides.caller = { id: 'E001', role: 'employee', is_manager: false };
+    overrides.schedulePeriodsResponse = {
+      id: 'p1',
+      employee_id: 'E001',
+      status: 'draft',
+      period_year: 2099,
+      period_month: 1,
+      period_start: '2099-01-01',
+      period_end: '2099-01-31',
+      dept: 'kitchen',
+    };
+  });
+
+  afterEach(() => {
+    overrides.caller = null;
+    overrides.schedulePeriodsResponse = null;
+  });
+
+  it('員工 INSERT shift_type_id="ST001"(早班) → 403 EMPLOYEE_SHIFT_RESTRICTED', async () => {
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E001', work_date: '2099-01-15',
+        shift_type_id: 'ST001', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body?.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+
+  it('員工 INSERT shift_type_id="ST003"(員工希望班) → 通過 (201)', async () => {
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E001', work_date: '2099-01-15',
+        shift_type_id: 'ST003', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
   });
 });
