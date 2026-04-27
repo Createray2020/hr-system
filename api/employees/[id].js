@@ -1,7 +1,7 @@
 // api/employees/[id].js — GET one / PUT update / DELETE / /me route
 import { supabase, supabaseAdmin } from '../../lib/supabase.js';
-import { requireRole } from '../../lib/auth.js';
-import { BACKOFFICE_ROLES } from '../../lib/roles.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -22,9 +22,17 @@ export default async function handler(req, res) {
     return res.status(200).json(data);
   }
 
-  // GET — 不需要權限驗證
+  // GET 員工詳情 — 自己看自己回完整、看別人回 16 欄位白名單（除非是 backoffice）
   if (req.method === 'GET') {
-    const { data, error } = await supabaseAdmin.from('employees').select('*').eq('id', id).single();
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    const isSelf = caller.id === id;
+    const isHR = isBackofficeRole(caller);
+    const PUBLIC_FIELDS = 'id, emp_no, name, dept, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
+    const cols = (isSelf || isHR) ? '*' : PUBLIC_FIELDS;
+
+    const { data, error } = await supabaseAdmin.from('employees').select(cols).eq('id', id).single();
     if (error) return res.status(404).json({ error: '找不到員工' });
     return res.status(200).json(data);
   }

@@ -4,7 +4,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
-import { BACKOFFICE_ROLES } from '../../lib/roles.js';
+import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -174,7 +174,12 @@ export default async function handler(req, res) {
     const caller = await requireAuth(req, res);
     if (!caller) return;
     const { status, dept, search } = req.query;
-    let q = supabaseAdmin.from('employees').select('*').order('name');
+
+    // 員工互看用 16 欄位白名單（排除薪資/個資/系統欄位）；後台 (hr/admin/ceo/chairman) 看全欄位
+    const PUBLIC_FIELDS = 'id, emp_no, name, dept, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
+    const cols = isBackofficeRole(caller) ? '*' : PUBLIC_FIELDS;
+
+    let q = supabaseAdmin.from('employees').select(cols).order('name');
     if (status) q = q.eq('status', status);
     if (dept)   q = q.eq('dept', dept);
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
