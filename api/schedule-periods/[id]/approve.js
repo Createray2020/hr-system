@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   if (!period) return res.status(404).json({ error: 'period not found' });
 
   // 必須是該員工的主管或 HR
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
   let isDirectManager = false;
   if (caller.is_manager === true && caller.id) {
     const { data: emp } = await supabase

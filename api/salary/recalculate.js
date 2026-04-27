@@ -10,9 +10,9 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const caller = await requireRole(req, res, ['hr', 'admin']);
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
   if (!caller) return;
-  if (!['hr', 'admin'].includes(caller.role || '')) {
+  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
     return res.status(403).json({ error: 'HR / admin only' });
   }
 

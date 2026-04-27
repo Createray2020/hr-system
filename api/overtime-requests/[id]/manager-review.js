@@ -39,7 +39,7 @@ export default async function handler(req, res) {
   if (!reqRow) return res.status(404).json({ error: 'request not found' });
 
   // 主管權限:該員工 manager_id == caller.id 或 caller is HR
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
   let isDirectManager = false;
   if (caller.id) {
     const emp = await repo.findEmployeeManager(reqRow.employee_id);

@@ -149,7 +149,7 @@ async function handleNewGet(req, res) {
   }
 
   // 員工只能看自己（dev mode 寬鬆）
-  const callerIsManagerOrHR = caller.is_manager === true || ['hr', 'admin'].includes(caller.role || '');
+  const callerIsManagerOrHR = caller.is_manager === true || ['hr', 'admin', 'ceo'].includes(caller.role || '');
   if (!callerIsManagerOrHR && caller.id) q = q.eq('employee_id', caller.id);
 
   const { data, error } = await q;
@@ -188,7 +188,7 @@ async function handleNewPost(req, res) {
     allowed = r.ok;
     if (!r.ok) return res.status(403).json({ error: r.reason });
   } else {
-    const isHR = ['hr', 'admin'].includes(caller.role || '');
+    const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
     let manages = false;
     if (caller.is_manager === true && caller.id) {
       const { data: emp } = await supabase.from('employees')

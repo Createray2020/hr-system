@@ -38,7 +38,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const caller = await requireRoleOrPass(req, res, ['hr', 'admin']);
+    const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
     if (!caller) return;
 
     const { date, holiday_type, name, description, pay_multiplier } = req.body || {};

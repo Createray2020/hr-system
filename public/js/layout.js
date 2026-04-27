@@ -36,6 +36,9 @@
 
   // 注入 Sidebar
   const page = document.body.dataset.page || '';
+  const isHRish     = u => !!u && ['hr','admin','ceo'].includes(u.role);
+  const isMgrOrHR   = u => !!u && (u.is_manager === true || ['hr','admin','ceo'].includes(u.role));
+  const isMgrOrCEO  = u => !!u && (u.is_manager === true || u.role === 'ceo');
   const navGroups = [
     {
       title: '總覽',
@@ -55,19 +58,35 @@
       ]
     },
     {
+      title: '我的勤務',
+      items: [
+        { page:'attendance',        icon:'⏱️', label:'打卡',     href:'/attendance.html' },
+        { page:'employee-schedule', icon:'🗓️', label:'我的排班', href:'/employee-schedule.html' },
+        { page:'leave',             icon:'📋', label:'請假',     href:'/leave.html' },
+        { page:'comp-time',         icon:'🌴', label:'補休',     href:'/comp-time.html' },
+        { page:'overtime',          icon:'⏰', label:'加班申請', href:'/overtime.html' },
+      ]
+    },
+    {
       title: '勤務管理',
       items: [
-        { page:'leave',          icon:'📋', label:'請假審批', href:'/leave.html' },
-        { page:'attendance',     icon:'⏱️', label:'出勤管理', href:'/attendance.html' },
-        { page:'schedule',       icon:'🗓️', label:'排班管理', href:'/schedule.html' },
-        { page:'holidays-admin', icon:'🎌', label:'國定假日', href:'/holidays-admin.html', gate: u => !!u && ['hr','admin'].includes(u.role) },
+        { page:'leave-admin',              icon:'✅', label:'請假審批',     href:'/leave-admin.html',              gate: isMgrOrHR },
+        { page:'schedule',                 icon:'📆', label:'排班管理',     href:'/schedule.html',                  gate: isMgrOrHR },
+        { page:'overtime-review',          icon:'👔', label:'加班審核',     href:'/overtime-review.html',          gate: isMgrOrCEO },
+        { page:'attendance-admin',         icon:'🛠️', label:'打卡管理',     href:'/attendance-admin.html',         gate: isHRish },
+        { page:'annual-leave-admin',       icon:'🏖️', label:'特休管理',     href:'/annual-leave-admin.html',       gate: isHRish },
+        { page:'comp-time-admin',          icon:'🌅', label:'補休管理',     href:'/comp-time-admin.html',          gate: isHRish },
+        { page:'overtime-admin',           icon:'⚙️', label:'加班管理',     href:'/overtime-admin.html',           gate: isHRish },
+        { page:'attendance-penalty-admin', icon:'⚖️', label:'出勤獎懲後台', href:'/attendance-penalty-admin.html', gate: isHRish },
+        { page:'holidays-admin',           icon:'🎌', label:'假日管理',     href:'/holidays-admin.html',           gate: isHRish },
       ]
     },
     {
       title: '薪資管理',
       items: [
-        { page:'salary',    icon:'💰', label:'薪資管理', href:'/salary.html' },
-        { page:'insurance', icon:'🏥', label:'勞健保',   href:'/insurance.html' },
+        { page:'employee-salary', icon:'💵', label:'我的薪資', href:'/employee-salary.html' },
+        { page:'salary',          icon:'💰', label:'薪資管理', href:'/salary.html', gate: isHRish },
+        { page:'insurance',       icon:'🏥', label:'勞健保',   href:'/insurance.html' },
       ]
     },
     {
@@ -92,19 +111,24 @@
   const avatarChar = currentUser?.avatar || userName[0];
 
   const isAdmin = window.Roles?.canAccessBackoffice(currentUser);
-  const navHTML = navGroups.map(g => `
+  const visibleItem = n => {
+    if (typeof n.gate === 'function') return n.gate(currentUser);
+    if (n.adminOnly) return isAdmin;
+    return true;
+  };
+  const navHTML = navGroups.map(g => {
+    const visible = g.items.filter(visibleItem);
+    if (visible.length === 0) return '';
+    return `
     <div class="nav-section">
       <div class="nav-section-title">${g.title}</div>
-      ${g.items.filter(n => {
-        if (typeof n.gate === 'function') return n.gate(currentUser);
-        if (n.adminOnly) return isAdmin;
-        return true;
-      }).map(n => `
+      ${visible.map(n => `
         <a class="nav-item ${page === n.page ? 'active' : ''}" href="${n.href}">
           <span class="nav-icon">${n.icon}</span> ${n.label}
           ${n.page === 'notifications' ? `<span id="notif-badge" style="display:none;margin-left:auto;background:#F87171;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px"></span>` : ''}
         </a>`).join('')}
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   sidebar.innerHTML = `
     <div class="logo">

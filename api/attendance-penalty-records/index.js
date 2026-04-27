@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   if (!caller) return;
 
   const { employee_id, year, month, status } = req.query;
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
   const repo = makeAttendancePenaltyRepo();
 
   // 員工只能看自己

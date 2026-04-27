@@ -39,11 +39,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'invalid id' });
   }
 
-  const caller = await requireRoleOrPass(req, res, ['hr', 'admin']);
+  const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
   if (!caller) return;
 
   // 權限:HR / admin 才能改打卡紀錄
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
   if (!isHR) return res.status(403).json({ error: 'HR / admin only' });
 
   const { data: existing, error: gErr } = await supabase

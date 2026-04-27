@@ -116,7 +116,7 @@ export default async function handler(req, res) {
   // PUT(legacy 審核)
   if (req.method === 'PUT') {
     if (!id) return res.status(400).json({ error: '缺少 id' });
-    const caller = await requireRole(req, res, ['hr', 'admin'], { allowManager: true });
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo'], { allowManager: true });
     if (!caller) return;
     const { status, handler_note } = req.body;
     if (!['approved', 'rejected'].includes(status))
@@ -188,7 +188,7 @@ async function handleNewGet(req, res) {
 }
 
 async function handleNewPost(req, res) {
-  const caller = await requireRole(req, res, ['hr', 'admin'], { allowManager: true });
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo'], { allowManager: true });
   if (!caller) return;
 
   const { leave_type, start_at, end_at, reason } = req.body;

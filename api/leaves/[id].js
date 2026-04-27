@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'leave id required' });
 
-  const caller = await requireRole(req, res, ['hr', 'admin'], { allowManager: true });
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo'], { allowManager: true });
   if (!caller) return;
   const callerId = caller.id;
 

@@ -111,7 +111,7 @@ async function load(retries = 0) {
     return;
   }
   const u = window.currentUser;
-  const allowed = u && ['hr', 'admin'].includes(u.role);
+  const allowed = u && ['hr', 'admin', 'ceo'].includes(u.role);
   if (u && !allowed) {
     document.getElementById('main-content').style.display = 'none';
     document.getElementById('gate-blocked').style.display = '';

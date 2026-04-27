@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   if (!caller) return;
 
   const { employee_id } = req.query;
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
 
   // 員工自己 / HR 看別人
   if (employee_id && (employee_id === caller.id || isHR)) {

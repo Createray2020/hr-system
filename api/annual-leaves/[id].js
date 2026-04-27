@@ -22,9 +22,9 @@ export default async function handler(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'record id required' });
 
-  const caller = await requireRole(req, res, ['hr', 'admin']);
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
   if (!caller) return;
-  if (!['hr', 'admin'].includes(caller.role || '')) {
+  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
     return res.status(403).json({ error: 'HR / admin only' });
   }
 

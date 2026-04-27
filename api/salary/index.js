@@ -82,7 +82,7 @@ export default async function handler(req, res) {
 
   // ── Legacy POST ?_action=batch ──────────────────────────
   if (req.method === 'POST' && req.query._action === 'batch') {
-    const caller = await requireRole(req, res, ['hr', 'admin']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
     if (!caller) return;
     const { year, month } = req.body || {};
     if (!Number.isInteger(year) || !Number.isInteger(month)) {
@@ -119,7 +119,7 @@ async function handleNewGet(req, res) {
   const caller = await requireRoleOrPass(req, res, []);
   if (!caller) return;
   const { year, month, employee_id, status } = req.query;
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
 
   const queryEmpId = employee_id || (isHR ? null : caller.id);
   if (employee_id && employee_id !== caller.id && !isHR) {
@@ -153,9 +153,9 @@ async function handleNewGet(req, res) {
 }
 
 async function handleNewBatch(req, res) {
-  const caller = await requireRole(req, res, ['hr', 'admin']);
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
   if (!caller) return;
-  if (!['hr', 'admin'].includes(caller.role || '')) {
+  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
     return res.status(403).json({ error: 'HR / admin only' });
   }
 

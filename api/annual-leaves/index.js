@@ -25,7 +25,7 @@ async function handleGet(req, res) {
   if (!caller) return;
 
   const { employee_id, status } = req.query;
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
 
   // 員工查自己餘額(快速路徑)
   if (employee_id && (employee_id === caller.id || isHR)) {
@@ -64,9 +64,9 @@ async function handleGet(req, res) {
 }
 
 async function handlePost(req, res) {
-  const caller = await requireRole(req, res, ['hr', 'admin']);
+  const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
   if (!caller) return;
-  if (!['hr', 'admin'].includes(caller.role || '')) {
+  if (!['hr', 'admin', 'ceo'].includes(caller.role || '')) {
     return res.status(403).json({ error: 'HR / admin only' });
   }
 

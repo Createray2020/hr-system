@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   if (!id) return res.status(400).json({ error: 'id required' });
 
   if (req.method === 'PUT') {
-    const caller = await requireRoleOrPass(req, res, ['hr', 'admin']);
+    const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
     if (!caller) return;
 
     const allowed = ['date', 'holiday_type', 'name', 'description', 'pay_multiplier'];
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const caller = await requireRoleOrPass(req, res, ['hr', 'admin']);
+    const caller = await requireRoleOrPass(req, res, ['hr', 'admin', 'ceo']);
     if (!caller) return;
 
     const { error } = await supabase.from('holidays').delete().eq('id', id);

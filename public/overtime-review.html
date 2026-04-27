@@ -113,7 +113,7 @@ async function load(retries=0){
     if (u.is_manager === true) {
       const r1 = await api(`/api/overtime-requests?scope=subordinates&status=pending`);
       mgrPending = r1.requests || [];
-    } else if (['hr','admin'].includes(u.role)) {
+    } else if (['hr','admin','ceo'].includes(u.role)) {
       const r1 = await api(`/api/overtime-requests?status=pending`);
       mgrPending = r1.requests || [];
     } else mgrPending = [];

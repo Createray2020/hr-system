@@ -36,7 +36,7 @@ async function handleGet(req, res, caller) {
   const { employee_id, status, year, month, scope } = req.query;
   const repo = makeOvertimeRepo();
 
-  const isHR = ['hr', 'admin'].includes(caller.role || '');
+  const isHR = ['hr', 'admin', 'ceo'].includes(caller.role || '');
   const isManager = caller.is_manager === true;
 
   try {

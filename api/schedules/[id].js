@@ -57,7 +57,7 @@ export default async function handler(req, res) {
     };
     const r = canManagerEditSchedule(period, manager, today);
     if (!r.ok) return res.status(403).json({ error: r.reason });
-    actorKind = ['hr', 'admin'].includes(caller.role || '') ? 'hr' : 'manager';
+    actorKind = ['hr', 'admin', 'ceo'].includes(caller.role || '') ? 'hr' : 'manager';
     isLateChange = !!r.isLateChange && existing.work_date === today;
   }
 

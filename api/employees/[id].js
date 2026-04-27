@@ -129,7 +129,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const caller = await requireRole(req, res, ['hr', 'admin']);
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo']);
     if (!caller) return;
     const { error } = await supabase.from('employees').update({ status: 'resigned' }).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
