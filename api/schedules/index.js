@@ -224,7 +224,7 @@ async function handleNewPost(req, res) {
 
   // 計算 scheduled_work_minutes
   const seg = parseInt(segment_no) || 1;
-  const cm = !!crosses_midnight || (start_time && end_time && end_time < start_time);
+  const cm = !!(crosses_midnight || (start_time && end_time && end_time < start_time));
   const minutes = calculateScheduleWorkMinutes(start_time, end_time, break_minutes, cm);
 
   const id = `S${employee_id}${work_date.replace(/-/g, '')}_${seg}`;
