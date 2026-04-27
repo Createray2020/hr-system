@@ -9,12 +9,15 @@
 import { supabase } from '../lib/supabase.js';
 import { runScheduleReminder } from '../lib/schedule/reminder.js';
 import { sendPushToEmployees, createNotification } from '../lib/push.js';
+import { requireCron } from '../lib/cron-auth.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!requireCron(req, res)) return;
 
   const today = (req.query?.today || new Date().toISOString()).slice(0, 10);
 
