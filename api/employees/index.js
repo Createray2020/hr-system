@@ -2,7 +2,7 @@
 // Also handles: GET|POST|PUT|DELETE /api/departments (via ?_resource=departments)
 // Also handles: POST /api/push (via ?_resource=push)
 import { createClient } from '@supabase/supabase-js';
-import { supabase } from '../../lib/supabase.js';
+import { supabase, supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 
@@ -56,7 +56,7 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Cannot subscribe for another employee' });
     }
 
-    const { error } = await supabase.from('push_subscriptions').upsert([{
+    const { error } = await supabaseAdmin.from('push_subscriptions').upsert([{
       id: 'PUSH_' + employee_id,
       employee_id,
       subscription: typeof subscription === 'string' ? subscription : JSON.stringify(subscription),
