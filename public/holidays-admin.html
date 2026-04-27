@@ -34,7 +34,8 @@
       </div>
       <div class="header-actions" style="display:flex;gap:8px;align-items:center">
         <select class="form-select" id="year-select" onchange="onYearChange()" style="width:120px"></select>
-        <button class="btn btn-ghost" onclick="confirmImport()">📥 從 data.gov.tw 匯入</button>
+        <input type="file" id="csv-input" accept=".csv,text/csv" style="display:none" onchange="handleCsvUpload()">
+        <button class="btn btn-ghost" onclick="document.getElementById('csv-input').click()" title="從 data.gov.tw dataset 14718 下載 CSV 後上傳">📥 上傳 CSV 匯入</button>
         <button class="btn btn-primary" onclick="openCreate()">＋ 新增假日</button>
       </div>
     </div>
@@ -250,23 +251,82 @@ async function deleteHoliday(id) {
   } catch(e) { toast('刪除失敗：' + e.message, 'error'); }
 }
 
-function confirmImport() {
-  const msg = `從 data.gov.tw 匯入 ${currentYear} 年度國定假日？\n\n注意：\n- 該年既有「匯入來源」資料會先被刪除再重匯\n- 「手動建立」的假日不會動\n- 若 data.gov.tw 該年度資料未公布，匯入會回 0 筆`;
-  if (!confirm(msg)) return;
-  doImport();
+// ── CSV 匯入 ─────────────────────────────────────────────────
+// HR 自己從 data.gov.tw dataset 14718（行政機關辦公日曆表）下載 CSV、
+// 上傳後本系統解析、upsert 進 holidays 表。
+// 之前是 fetch data.gov.tw API，URL 是 placeholder 從未驗證、改成 CSV upload。
+
+function handleCsvUpload() {
+  const input = document.getElementById('csv-input');
+  const file = input.files[0];
+  if (!file) return;
+
+  const msg = `從「${file.name}」匯入 ${currentYear} 年度國定假日？\n\n注意：\n- 該年既有「匯入來源」資料會先被刪除再重匯\n- 「手動建立」的假日不會動\n- 不屬於 ${currentYear} 年度的列會被自動忽略`;
+  if (!confirm(msg)) {
+    input.value = '';
+    return;
+  }
+  doCsvImport(file);
 }
 
-async function doImport() {
-  toast('匯入中…');
+async function doCsvImport(file) {
+  const input = document.getElementById('csv-input');
+  toast('解析 CSV…');
   try {
+    const text = await file.text();
+    const rows = parseCSV(text);
+    if (!rows.length) {
+      toast('CSV 沒有資料行', 'error');
+      return;
+    }
+
+    toast(`上傳 ${rows.length} 列…`);
     const r = await api('/api/holidays/import', {
-      method:'POST',
-      body: JSON.stringify({ year: currentYear }),
+      method: 'POST',
+      body: JSON.stringify({ year: currentYear, rows }),
     });
     toast(`匯入完成：新增 ${r.imported} 筆，刪除舊匯入 ${r.deleted} 筆`);
     if (r.warning) toast(r.warning, 'warn');
     loadHolidays();
-  } catch(e) { toast('匯入失敗：' + e.message, 'error'); }
+  } catch(e) {
+    toast('匯入失敗：' + e.message, 'error');
+  } finally {
+    input.value = '';
+  }
+}
+
+// 簡易 CSV parser：支援 quoted field 含逗號 / escaped quote ("")
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/);
+  const all = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const cells = [];
+    let cur = '', inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (inQuote) {
+        if (c === '"') {
+          if (line[i + 1] === '"') { cur += '"'; i++; }
+          else inQuote = false;
+        } else { cur += c; }
+      } else {
+        if (c === ',') { cells.push(cur); cur = ''; }
+        else if (c === '"') { inQuote = true; }
+        else { cur += c; }
+      }
+    }
+    cells.push(cur);
+    all.push(cells);
+  }
+  if (!all.length) return [];
+  // 移除 BOM、trim header
+  const headers = all[0].map(h => h.trim().replace(/^﻿/, ''));
+  return all.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = (row[i] ?? '').trim());
+    return obj;
+  });
 }
 
 // Init
