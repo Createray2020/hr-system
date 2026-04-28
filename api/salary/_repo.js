@@ -157,18 +157,6 @@ export function makeSalaryRepo() {
       return (leaves || []).map(l => ({ ...l, affects_attendance_bonus: map[l.leave_type] === true }));
     },
 
-    async getAbsentDayDeductionRate() {
-      const today = new Date().toISOString().slice(0, 10);
-      const { data } = await supabaseAdmin
-        .from('attendance_penalties').select('penalty_amount')
-        .eq('is_active', true).eq('trigger_type', 'absent')
-        .eq('penalty_type', 'deduct_attendance_bonus_pct')
-        .lte('effective_from', today).limit(1).maybeSingle();
-      if (!data || data.penalty_amount == null) return 0;
-      const raw = Number(data.penalty_amount);
-      return raw > 1 ? raw / 100 : raw;
-    },
-
     // ─── overtime_requests ──────────────────────────────────
     async findApprovedOvertimePayRequests({ employee_id, year, month }) {
       const { data, error } = await supabaseAdmin

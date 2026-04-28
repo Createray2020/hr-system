@@ -174,20 +174,6 @@ export function makeAttendancePenaltyRepo() {
       return distinct.size;
     },
 
-    async getAbsentDayDeductionRate() {
-      // 從 attendance_penalties 中 trigger_type='absent' 且 penalty_type='deduct_attendance_bonus_pct'
-      // 的活躍規則讀 penalty_amount(視為比例)
-      const today = new Date().toISOString().slice(0, 10);
-      const { data } = await supabaseAdmin
-        .from('attendance_penalties').select('penalty_amount')
-        .eq('is_active', true).eq('trigger_type', 'absent')
-        .eq('penalty_type', 'deduct_attendance_bonus_pct')
-        .lte('effective_from', today).limit(1).maybeSingle();
-      if (!data || data.penalty_amount == null) return 0;
-      const raw = Number(data.penalty_amount);
-      return raw > 1 ? raw / 100 : raw;
-    },
-
     async findAttendanceByEmployeeMonth({ employee_id, year, month }) {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();

@@ -154,9 +154,9 @@ function makeFullRepo(over = {}) {
     findAbsentDaysByEmployeeMonth: vi.fn(async () => 0),
 
     // attendance-bonus.js / lib/attendance/bonus.js 需要的
+    // (findHolidaysByMonth 已在上面 mock，bonus.js C 項用同一個)
     findPenaltyRecordsByEmployeeMonth: vi.fn(async () => []),
     findApprovedAttendanceBonusLeaves: vi.fn(async () => []),
-    getAbsentDayDeductionRate: vi.fn(async () => 0),
 
     // overtime-aggregator
     findApprovedOvertimePayRequests: vi.fn(async () => []),
