@@ -310,6 +310,7 @@
 
     <div class="modal-actions">
       <button class="btn btn-danger" id="btn-resign" onclick="resignEmployee()" style="margin-right:auto">離職</button>
+      <button class="btn btn-danger" id="btn-delete" onclick="deleteEmployee()" style="margin-right:8px;background:#7f1d1d">刪除</button>
       <button class="btn btn-warn btn-sm" id="btn-reset-pw" onclick="resetEmpPassword()" style="display:none" title="重設為預設密碼 123456">🔑 重設密碼</button>
       <button class="btn btn-ghost" onclick="closeModal('emp-modal')">取消</button>
       <button class="btn btn-primary" id="emp-save-btn" onclick="saveEmployee()">儲存</button>
@@ -691,6 +692,7 @@ function openAddModal() {
   document.getElementById('f-is-manager').disabled  = true;
   document.getElementById('f-seniority').textContent = '—';
   document.getElementById('btn-resign').style.display = 'none';
+  document.getElementById('btn-delete').style.display = 'none';
   document.getElementById('f-extra-allow').value      = '';
   document.getElementById('f-extra-allow-note').value = '';
   resetSalaryDisplay();
@@ -737,8 +739,9 @@ function openEditModal(id) {
   // Seniority
   document.getElementById('f-seniority').textContent = calcSeniority(e.hire_date);
 
-  // Resign button: only for active employees
+  // Resign / Delete buttons: only for active employees
   document.getElementById('btn-resign').style.display = e.status === 'active' ? '' : 'none';
+  document.getElementById('btn-delete').style.display = e.status === 'active' ? '' : 'none';
 
   // Reset-password button: only for hr/chairman/admin
   const adminRole = window.currentUser?.role;
@@ -939,6 +942,23 @@ async function resignEmployee() {
     await loadEmployees();
     toast('已標記為離職', 'success');
   } catch(e) { toast('操作失敗：' + e.message, 'error'); }
+}
+
+/* ── Delete (soft, status='deleted') ── */
+async function deleteEmployee() {
+  if (!editingId) return;
+  const emp = allEmployees.find(e => e.id === editingId);
+  const name = emp?.name || editingId;
+  if (!confirm(`確定刪除員工「${name}」？\n\n刪除後該員工將無法登入、系統不再顯示。\n原始資料保留在資料庫。\n此操作可以再透過資料庫修改 status 還原。`)) return;
+  try {
+    await api(`/api/employees/${editingId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'deleted' })
+    });
+    closeModal('emp-modal');
+    await loadEmployees();
+    toast(`已刪除「${name}」`, 'success');
+  } catch(e) { toast('刪除失敗：' + e.message, 'error'); }
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
