@@ -310,9 +310,12 @@ window.onload = async () => {
 async function loadEmployees() {
   const data = await api('/api/employees');
   allEmployees = data.filter(e => e.status === 'active');
-  const depts = [...new Set(allEmployees.map(e=>e.dept).filter(Boolean))].sort();
+  // 從 allEmployees 抽 dept_id → name map（跟 employees.html fallback 同 pattern）
+  const map = new Map();
+  allEmployees.forEach(e => { if (e.dept_id) map.set(e.dept_id, e.dept || e.dept_id); });
   document.getElementById('dept-filter').innerHTML =
-    '<option value="">全部部門</option>' + depts.map(d=>`<option value="${d}">${d}</option>`).join('');
+    '<option value="">全部部門</option>' +
+    [...map].map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
 }
 
 async function loadInsuranceData() {
@@ -367,10 +370,10 @@ function statusBadge(status) {
 /* ── Filter & Render ────────────────────────────────────────────────────── */
 function getFiltered() {
   const search = document.getElementById('search-input').value.toLowerCase();
-  const dept   = document.getElementById('dept-filter').value;
+  const deptId = document.getElementById('dept-filter').value;
   const isFil  = document.getElementById('ins-filter').value;
   return allEmployees.filter(e => {
-    if (dept && e.dept !== dept) return false;
+    if (deptId && e.dept_id !== deptId) return false;
     if (search && !(e.name||'').toLowerCase().includes(search)) return false;
     if (isFil) {
       const s = insStatus(e);
