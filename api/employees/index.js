@@ -193,7 +193,6 @@ export default async function handler(req, res) {
     let q = supabaseAdmin.from('employees').select(colsWithDept).order('name');
     if (status) q = q.eq('status', status);
     if (dept_id) q = q.eq('dept_id', dept_id);
-    else if (dept) q = q.eq('dept', dept);  // legacy: 前端送 name 字串、C0-3 後拔
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });

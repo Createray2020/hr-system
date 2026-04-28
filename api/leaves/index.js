@@ -62,7 +62,7 @@ export default async function handler(req, res) {
         .from('leave_requests').select('*').eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到假單' });
       const { data: emp } = await supabaseAdmin
-        .from('employees').select('name, dept, dept_id, position, avatar, departments(name)')
+        .from('employees').select('name, dept_id, position, avatar, departments(name)')
         .eq('id', leave.employee_id).single();
       addDeptNameSingle(emp);
       return res.status(200).json({
@@ -90,7 +90,7 @@ export default async function handler(req, res) {
 
     const empIds = [...new Set(leaves.map(l => l.employee_id))];
     const { data: emps, error: empErr } = await supabaseAdmin
-      .from('employees').select('id, name, dept, dept_id, position, avatar, departments(name)').in('id', empIds);
+      .from('employees').select('id, name, dept_id, position, avatar, departments(name)').in('id', empIds);
     if (empErr) return res.status(500).json({ error: empErr.message });
     addDeptName(emps);
 

@@ -76,7 +76,7 @@ export default async function handler(req, res) {
       if (attErr) return res.status(500).json({ error: attErr.message });
 
       // 取員工資料（一次全撈，在 JS 合併）
-      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept, dept_id, avatar, departments(name)');
+      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept_id, avatar, departments(name)');
       addDeptName(empData);
       const empMap = {};
       (empData || []).forEach(e => { empMap[e.id] = e; });

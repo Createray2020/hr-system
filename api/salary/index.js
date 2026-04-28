@@ -45,14 +45,13 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { year, month, dept, dept_id, status, employee_id } = req.query;
     let q = supabaseAdmin.from('salary_records')
-      .select(`*, employees!inner(name, dept, dept_id, avatar, role, is_manager, employment_type, departments(name))`)
+      .select(`*, employees!inner(name, dept_id, avatar, role, is_manager, employment_type, departments(name))`)
       .order('employee_id');
     if (year)        q = q.eq('year',        parseInt(year));
     if (month)       q = q.eq('month',       parseInt(month));
     if (status)      q = q.eq('status',      status);
     if (employee_id) q = q.eq('employee_id', employee_id);
     if (dept_id)     q = q.eq('employees.dept_id', dept_id);
-    else if (dept)   q = q.eq('employees.dept', dept);
 
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
@@ -142,7 +141,7 @@ async function handleNewGet(req, res) {
     let empMap = {};
     if (ids.length) {
       const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept').in('id', ids);
+        .from('employees').select('id, name, dept_id, departments(name)').in('id', ids);
       for (const e of (emps || [])) empMap[e.id] = e;
     }
     const enriched = records.map(r => ({

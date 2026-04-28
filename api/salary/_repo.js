@@ -12,7 +12,7 @@ export function makeSalaryRepo() {
     async findEmployeeForSalary(id) {
       const { data, error } = await supabaseAdmin
         .from('employees')
-        .select('id, name, base_salary, attendance_bonus, employment_type, manager_allowance, grade_allowance, dept')
+        .select('id, name, base_salary, attendance_bonus, employment_type, manager_allowance, grade_allowance, dept_id, departments(name)')
         .eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
@@ -30,7 +30,7 @@ export function makeSalaryRepo() {
 
     async listActiveEmployees() {
       const { data, error } = await supabaseAdmin
-        .from('employees').select('id, name, dept, base_salary, attendance_bonus, employment_type')
+        .from('employees').select('id, name, dept_id, departments(name), base_salary, attendance_bonus, employment_type')
         .eq('status', 'active').order('id');
       if (error) throw error;
       return data || [];

@@ -30,7 +30,7 @@ export default async function handler(req, res) {
       if (brackets === 'pending') {
         const { data, error } = await supabaseAdmin
           .from('insurance_change_requests')
-          .select('*, employees(name, dept, departments(name))')
+          .select('*, employees(name, departments(name))')
           .eq('status', 'pending')
           .order('created_at', { ascending: false });
         if (error) return res.status(500).json({ error: error.message });
@@ -39,7 +39,7 @@ export default async function handler(req, res) {
       }
       // Insurance settings list (join employees)
       let q = supabaseAdmin.from('insurance_settings')
-        .select('*, employees(name, emp_no, dept, position, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, has_insurance, employment_type, departments(name))');
+        .select('*, employees(name, emp_no, position, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, has_insurance, employment_type, departments(name))');
       if (employee_id) q = q.eq('employee_id', employee_id).single();
       const { data, error } = await q;
       if (error) return res.status(employee_id ? 404 : 500).json({ error: error.message });

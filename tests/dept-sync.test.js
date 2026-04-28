@@ -1,4 +1,4 @@
-// tests/dept-sync.test.js — lib/dept-sync.js 雙向同步覆蓋
+// tests/dept-sync.test.js — lib/dept-sync.js 的 dept_id lookup + body.dept 拔除
 import { describe, it, expect } from 'vitest';
 import { syncDeptFields } from '../lib/dept-sync.js';
 
@@ -26,52 +26,54 @@ function makeSb({ byId = {}, byName = {} } = {}) {
 }
 
 describe('syncDeptFields', () => {
-  it('1. 只有 dept_id → 補 dept name', async () => {
+  it('1. 只有 dept_id → 不查 departments、body.dept undefined', async () => {
     const sb = makeSb({ byId: { D1: { name: '研發部' } } });
     const body = { dept_id: 'D1' };
     await syncDeptFields(sb, body);
-    expect(body.dept).toBe('研發部');
     expect(body.dept_id).toBe('D1');
+    expect(body.dept).toBeUndefined();
   });
 
-  it('2. 只有 dept name → 補 dept_id', async () => {
+  it('2. 只有 dept name → 補 dept_id、body.dept deleted', async () => {
     const sb = makeSb({ byName: { '研發部': { id: 'D1' } } });
     const body = { dept: '研發部' };
     await syncDeptFields(sb, body);
     expect(body.dept_id).toBe('D1');
-    expect(body.dept).toBe('研發部');
+    expect(body.dept).toBeUndefined();
   });
 
-  it('3. 兩者並存 → dept_id 為主、覆寫 dept name 對齊', async () => {
+  it('3. 兩者並存 → dept_id 為主、body.dept deleted', async () => {
     const sb = makeSb({ byId: { D1: { name: '研發部' } } });
     const body = { dept_id: 'D1', dept: '舊部門名' };
     await syncDeptFields(sb, body);
-    expect(body.dept).toBe('研發部');
     expect(body.dept_id).toBe('D1');
+    expect(body.dept).toBeUndefined();
   });
 
-  it('4. 兩者皆無 → 不動 body', async () => {
+  it('4. 兩者皆無 → body unchanged (dept undefined)', async () => {
     const sb = makeSb();
     const body = { name: '陳小明' };
     await syncDeptFields(sb, body);
-    expect(body.dept).toBeUndefined();
     expect(body.dept_id).toBeUndefined();
+    expect(body.dept).toBeUndefined();
     expect(body.name).toBe('陳小明');
   });
 
-  it('5. 只有 dept name 但 departments 找不到 → dept_id NULL、保留 dept', async () => {
+  it('5. dept name 找不到 → dept_id null、body.dept deleted', async () => {
     const sb = makeSb();  // byName 空
     const body = { dept: '不存在的部門' };
     await syncDeptFields(sb, body);
     expect(body.dept_id).toBeNull();
-    expect(body.dept).toBe('不存在的部門');
+    expect(body.dept).toBeUndefined();
   });
 
-  it('6. dept_id 找不到對應 row → 保留前端送的 dept、dept_id 不動', async () => {
-    const sb = makeSb();  // byId 空
-    const body = { dept_id: 'D_GHOST', dept: '原始 dept' };
+  it('6. body 無 dept 屬性 → 不炸 (safety)', async () => {
+    const sb = makeSb();
+    const body = { name: '陳小明', email: 'test@test.com' };
     await syncDeptFields(sb, body);
-    expect(body.dept).toBe('原始 dept');
-    expect(body.dept_id).toBe('D_GHOST');
+    expect(body.name).toBe('陳小明');
+    expect(body.email).toBe('test@test.com');
+    expect(body.dept).toBeUndefined();
+    expect(body.dept_id).toBeUndefined();
   });
 });

@@ -68,7 +68,6 @@ export default async function handler(req, res) {
       if (start)       q = q.gte('work_date', start);
       if (end)         q = q.lte('work_date', end);
       if (employee_id) q = q.eq('employee_id', employee_id);
-      if (dept)        q = q.eq('dept', dept);
 
       const { data: schedules, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
@@ -77,7 +76,7 @@ export default async function handler(req, res) {
       // Two-step: fetch employees
       const empIds = [...new Set(schedules.map(s => s.employee_id))];
       const { data: emps, error: empErr } = await supabaseAdmin
-        .from('employees').select('id, name, dept, dept_id, avatar, departments(name)').in('id', empIds);
+        .from('employees').select('id, name, dept_id, avatar, departments(name)').in('id', empIds);
       if (empErr) return res.status(500).json({ error: empErr.message });
       addDeptName(emps);
 

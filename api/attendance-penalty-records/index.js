@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     let empMap = {};
     if (empIds.length) {
       const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept, dept_id, departments(name)').in('id', empIds);
+        .from('employees').select('id, name, dept_id, departments(name)').in('id', empIds);
       addDeptName(emps);
       for (const e of (emps || [])) empMap[e.id] = e;
     }

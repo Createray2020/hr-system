@@ -53,7 +53,7 @@ async function handleGet(req, res) {
   const empMap = {};
   if (empIds.length) {
     const { data: emps } = await supabaseAdmin
-      .from('employees').select('id, name, dept, dept_id, annual_leave_seniority_start, departments(name)').in('id', empIds);
+      .from('employees').select('id, name, dept_id, annual_leave_seniority_start, departments(name)').in('id', empIds);
     addDeptName(emps);
     for (const e of (emps || [])) empMap[e.id] = e;
   }
