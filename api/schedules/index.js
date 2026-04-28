@@ -106,7 +106,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const { employee_id, work_date, shift_type_id, start_time, end_time, note, dept, created_by } = req.body;
+      const { employee_id, work_date, shift_type_id, start_time, end_time, note, created_by } = req.body;
       if (!employee_id || !work_date || !shift_type_id)
         return res.status(400).json({ error: '缺少必填欄位' });
 
@@ -116,7 +116,6 @@ export default async function handler(req, res) {
         start_time:  start_time || null,
         end_time:    end_time   || null,
         note:        note       || '',
-        dept:        dept       || '',
         created_by:  created_by || null,
         updated_at:  new Date().toISOString(),
       }], { onConflict: 'employee_id,work_date' });
@@ -236,7 +235,6 @@ async function handleNewPost(req, res) {
     scheduled_work_minutes: minutes,
     segment_no: seg,
     note: note || '',
-    dept: period.dept || '',
     created_by: caller.id || null,
     updated_at: new Date().toISOString(),
   };

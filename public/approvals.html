@@ -450,7 +450,7 @@ function renderPending() {
       <div class="pc-body">
         <div class="pc-title">${r?.title||'—'}</div>
         <div class="pc-meta">
-          ${emp?.name||'—'} · ${emp?.dept||r?.dept||'—'} · ${emp?.position||'—'}
+          ${emp?.name||'—'} · ${emp?.dept_name||emp?.dept||r?.dept||'—'} · ${emp?.position||'—'}
           <span style="margin-left:8px;padding:1px 7px;background:rgba(91,141,239,.1);color:#7EB3FF;border-radius:10px;font-size:10px">${c?.type_name||r?.request_type}</span>
         </div>
         <div class="pc-meta">申請時間：${fmtDT(r?.created_at)} · 步驟 ${step.step_number}：${step.step_name}</div>
@@ -482,7 +482,7 @@ function renderAll() {
       <td><span style="font-size:15px">${c?.icon||'📋'}</span> <span style="font-size:12px">${c?.type_name||r.request_type}</span></td>
       <td style="font-weight:500">${r.title}</td>
       <td><div class="emp-cell"><div class="avatar" style="width:28px;height:28px;font-size:12px">${emp?.avatar||emp?.name?.[0]||'?'}</div><div class="emp-name" style="font-size:12px">${emp?.name||'—'}</div></div></td>
-      <td style="font-size:12px">${r.dept||emp?.dept||'—'}</td>
+      <td style="font-size:12px">${emp?.dept_name||r.dept||emp?.dept||'—'}</td>
       <td style="font-size:12px;color:var(--text-dim)">${fmtDate(r.created_at)}</td>
       <td>${stepDots(r.current_step, r.total_steps, r.status)}</td>
       <td>${statusBadge(r.status)}</td>
@@ -560,7 +560,7 @@ async function submitRequest() {
   try {
     await api('/api/approvals', { method:'POST', body: JSON.stringify({
       action: 'create', request_type: currentConfig.request_type,
-      applicant_id: window.currentUser?.id, dept: window.currentUser?.dept,
+      applicant_id: window.currentUser?.id,
       form_data, note,
     })});
     closeModal('new-form-modal');
@@ -595,7 +595,7 @@ function renderDetail(data) {
     <div class="avatar">${emp?.avatar||emp?.name?.[0]||'?'}</div>
     <div>
       <div style="font-weight:600">${emp?.name||'—'}</div>
-      <div style="font-size:12px;color:var(--text-dim)">${emp?.dept||data.dept||'—'} · ${emp?.position||'—'}</div>
+      <div style="font-size:12px;color:var(--text-dim)">${emp?.dept_name||emp?.dept||data.dept||'—'} · ${emp?.position||'—'}</div>
     </div>
     <div style="margin-left:auto;text-align:right;margin-right:8px">
       <div style="font-size:10px;color:var(--text-dim)">申請時間</div>

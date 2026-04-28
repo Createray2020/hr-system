@@ -83,7 +83,7 @@ export default async function handler(req, res) {
 
     // ── 建立新申請 ──────────────────────────────────────────────────────────
     if (body.action === 'create') {
-      const { request_type, applicant_id, form_data, note, attachments, dept } = body;
+      const { request_type, applicant_id, form_data, note, attachments } = body;
 
       const { data: config, error: cfgErr } = await supabaseAdmin
         .from('approval_flow_configs').select('*').eq('request_type', request_type).single();
@@ -97,7 +97,6 @@ export default async function handler(req, res) {
         request_type,
         title: config.type_name,
         applicant_id,
-        dept: dept || '',
         current_step: 1,
         total_steps: steps.length,
         status: 'pending',
