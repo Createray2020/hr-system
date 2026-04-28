@@ -310,8 +310,10 @@ function render() {
     let opHtml = '';
     if (periodStatus === 'submitted') {
       opHtml = `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="approvePeriod('${escHtml(period.id)}')">定案</button>`;
-    } else if (periodStatus === 'approved' || periodStatus === 'locked') {
-      opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已定案</span>`;
+    } else if (periodStatus === 'approved') {
+      opHtml = `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="publishPeriod('${escHtml(period.id)}')">公告</button>`;
+    } else if (periodStatus === 'published' || periodStatus === 'locked') {
+      opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已公告</span>`;
     } else if (periodStatus === 'draft') {
       opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(91,141,239,.15);color:#7FBBFF;border-radius:6px">員工標中</span>`;
     } else {
@@ -465,6 +467,16 @@ async function approvePeriod(periodId) {
     toast('已定案');
     await load();
   } catch(e) { toast('定案失敗：' + e.message,'error'); }
+}
+
+async function publishPeriod(periodId) {
+  if (!periodId) return;
+  if (!confirm('公告此員工的排班？公告後員工可開始打卡。')) return;
+  try {
+    await api(`/api/schedule-periods/${encodeURIComponent(periodId)}/publish`, { method:'POST' });
+    toast('已公告');
+    await load();
+  } catch(e) { toast('公告失敗：' + e.message,'error'); }
 }
 
 // Init

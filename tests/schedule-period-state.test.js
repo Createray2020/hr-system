@@ -78,10 +78,33 @@ describe('canTransition: 非法 transition 全擋', () => {
 });
 
 describe('export 常數正確', () => {
-  it('states 4 個', () => {
-    expect(SCHEDULE_PERIOD_STATES).toEqual(['draft', 'submitted', 'approved', 'locked']);
+  it('states 5 個（C12-2 加 published）', () => {
+    expect(SCHEDULE_PERIOD_STATES).toEqual(['draft', 'submitted', 'approved', 'published', 'locked']);
   });
-  it('actions 4 個', () => {
-    expect(SCHEDULE_PERIOD_ACTIONS).toEqual(['submit', 'approve', 'adjust', 'lock']);
+  it('actions 5 個（C12-2 加 publish）', () => {
+    expect(SCHEDULE_PERIOD_ACTIONS).toEqual(['submit', 'approve', 'publish', 'adjust', 'lock']);
+  });
+});
+
+describe('canTransition: C12-2 publish flow', () => {
+  it('approved + publish (manager) → published', () => {
+    const r = canTransition('approved', 'publish', manager);
+    expect(r.ok).toBe(true);
+    expect(r.nextState).toBe('published');
+  });
+  it('published + adjust (manager) → published', () => {
+    const r = canTransition('published', 'adjust', manager);
+    expect(r.ok).toBe(true);
+    expect(r.nextState).toBe('published');
+  });
+  it('published + lock (system) → locked', () => {
+    const r = canTransition('published', 'lock', sysActor);
+    expect(r.ok).toBe(true);
+    expect(r.nextState).toBe('locked');
+  });
+  it('submitted + publish 是非法（必須先 approve）', () => {
+    const r = canTransition('submitted', 'publish', manager);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ILLEGAL_TRANSITION');
   });
 });
