@@ -65,6 +65,7 @@
 
       <div style="display:flex;justify-content:flex-end;margin-top:18px;gap:10px">
         <button class="btn btn-ghost" id="btn-create-period" onclick="createPeriod()" style="display:none">建立此月排班</button>
+        <button class="btn btn-ghost" id="btn-apply-tpl" onclick="openTemplatePicker()" style="display:none">套用範本</button>
         <button class="btn btn-primary" id="btn-submit" onclick="submitPeriod()" style="display:none">送出主管確認</button>
       </div>
     </div>
@@ -105,6 +106,20 @@
     <div class="modal-actions" style="justify-content:flex-end;gap:8px">
       <button class="btn btn-ghost" onclick="closeDayModal()">取消</button>
       <button class="btn btn-primary" onclick="saveDay()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- C10 套用範本 modal -->
+<div class="modal-bg" id="tpl-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title">選擇要套用的範本</div>
+    <div style="margin-bottom:14px;color:var(--text-dim);font-size:13px;line-height:1.5">
+      套用後會覆蓋本月所有日子的排班、確定再點。
+    </div>
+    <div id="tpl-list" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:18px"></div>
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="closeTemplatePicker()">取消</button>
     </div>
   </div>
 </div>
@@ -183,8 +198,9 @@ function render() {
   const pill    = document.getElementById('status-pill');
   const btnSub  = document.getElementById('btn-submit');
   const btnNew  = document.getElementById('btn-create-period');
+  const btnApplyTpl = document.getElementById('btn-apply-tpl');
   banInfo.style.display = banWarn.style.display = banLock.style.display = 'none';
-  btnSub.style.display = 'none'; btnNew.style.display = 'none';
+  btnSub.style.display = 'none'; btnNew.style.display = 'none'; btnApplyTpl.style.display = 'none';
   pill.innerHTML = '';
 
   if (!period) {
@@ -202,6 +218,7 @@ function render() {
         banInfo.textContent = '可編輯。點任一格標記「希望早班 / 晚班 / 休假」、完成後請按下方「送出主管確認」。';
         banInfo.style.display = '';
         btnSub.style.display = '';
+        btnApplyTpl.style.display = '';
       }
     } else if (s === 'submitted') {
       banWarn.textContent = '已送出,等主管確認中。確認前不可編輯。';
@@ -368,6 +385,54 @@ async function clearDay() {
     await load();
   } catch(e) {
     toast('清除失敗：' + e.message, 'error');
+  }
+}
+
+// ── C10 套用範本 ──
+async function openTemplatePicker() {
+  if (!period) return;
+  const modal = document.getElementById('tpl-modal');
+  const list = document.getElementById('tpl-list');
+  list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">載入中…</div>';
+  modal.classList.add('open');
+
+  try {
+    const tpls = await api('/api/schedule-templates');
+    if (!tpls.length) {
+      list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px">尚無可用範本、請先到模板管理頁建立</div>';
+      return;
+    }
+    list.innerHTML = tpls.map(t => `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:background .12s"
+           onmouseover="this.style.background='rgba(91,141,239,.08)'"
+           onmouseout="this.style.background=''"
+           onclick="applyTemplate('${escHtml(t.id)}', '${escHtml(t.name)}')">
+        <div style="font-weight:600">${escHtml(t.name)}</div>
+        ${t.description ? `<div style="font-size:12px;color:var(--text-dim);margin-top:4px">${escHtml(t.description)}</div>` : ''}
+        ${t.is_shared ? '<span style="font-size:11px;color:#7FBBFF;margin-top:4px;display:inline-block">公開範本</span>' : ''}
+      </div>
+    `).join('');
+  } catch(e) {
+    list.innerHTML = `<div style="color:#F87171;padding:12px">載入失敗：${e.message}</div>`;
+  }
+}
+
+function closeTemplatePicker() {
+  document.getElementById('tpl-modal').classList.remove('open');
+}
+
+async function applyTemplate(templateId, templateName) {
+  if (!confirm(`套用範本「${templateName}」會覆蓋本月所有日子的排班、確定？`)) return;
+  try {
+    const r = await api(`/api/schedule-templates/${encodeURIComponent(templateId)}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ period_id: period.id }),
+    });
+    toast(`已套用範本「${templateName}」、${r.applied || 0} 天已填入`);
+    closeTemplatePicker();
+    await load();
+  } catch(e) {
+    toast('套用失敗：' + e.message, 'error');
   }
 }
 
