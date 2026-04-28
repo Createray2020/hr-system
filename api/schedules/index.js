@@ -205,7 +205,7 @@ async function handleNewPost(req, res) {
       is_manager: caller.is_manager === true,
       in_same_dept: inSameDept,
     };
-    const r = canManagerEditSchedule(period, manager, today);
+    const r = canManagerEditSchedule(period, manager, today, work_date);
     if (!r.ok) return res.status(403).json({ error: r.reason });
     allowed = true;
     actorKind = isHR ? 'hr' : 'manager';

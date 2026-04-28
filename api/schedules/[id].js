@@ -56,7 +56,7 @@ export default async function handler(req, res) {
       is_manager: caller.is_manager === true,
       in_same_dept: inSameDept,
     };
-    const r = canManagerEditSchedule(period, manager, today);
+    const r = canManagerEditSchedule(period, manager, today, existing.work_date);
     if (!r.ok) return res.status(403).json({ error: r.reason });
     actorKind = isBackofficeRole(caller) ? 'hr' : 'manager';
     isLateChange = !!r.isLateChange && existing.work_date === today;

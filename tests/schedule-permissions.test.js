@@ -145,4 +145,70 @@ describe('canManagerEditSchedule', () => {
     expect(r.ok).toBe(true);
     expect(r.isLateChange).toBe(false);
   });
+
+  // ===== C5：公告後主管不能改今天 + 過去 =====
+
+  it('C5: 主管 + approved + work_date 過去 → 403 MANAGER_LATE_DENIED', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'approved' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      '2026-04-20',  // 過去
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('C5: 主管 + approved + work_date today → 403 MANAGER_LATE_DENIED', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'approved' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      '2026-04-26',  // today
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('C5: 主管 + approved + work_date 未來 → ok', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'approved' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      '2026-04-27',  // tomorrow
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('C5: 主管 + locked + work_date 過去 → 403', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'locked' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      '2026-04-20',
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('C5: 主管 + locked + work_date today → 403', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'locked' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      '2026-04-26',
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('C5: HR + locked + work_date 過去 → ok（不限）', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'locked' }),
+      { id: 'HR1', role: 'hr', is_manager: false },
+      '2026-04-26',
+      '2026-04-20',
+    );
+    expect(r.ok).toBe(true);
+  });
 });
