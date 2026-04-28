@@ -71,25 +71,35 @@
   </main>
 </div>
 
-<!-- 編輯一天 modal（員工只能標休假意願、實際班別由主管定）-->
+<!-- 編輯一天 modal -->
 <div class="modal-bg" id="day-modal">
   <div class="modal" style="max-width:420px;width:95vw">
     <div class="modal-title" id="modal-title">編輯排班</div>
     <input type="hidden" id="f-date">
 
     <div style="margin-bottom:18px;color:var(--text-dim);font-size:13px;line-height:1.5">
-      員工自助只能標記休假意願、具體班別由主管定。
+      標記你的排班期望、最終班別由主管確認。
     </div>
 
     <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:18px">
       <label style="display:flex;gap:10px;align-items:center;cursor:pointer">
-        <input type="radio" name="mode" value="none" id="mode-none">
-        <span>沒意願（讓主管排）</span>
+        <input type="radio" name="mode" value="ST001" id="mode-st001">
+        <span>希望早班</span>
       </label>
       <label style="display:flex;gap:10px;align-items:center;cursor:pointer">
-        <input type="radio" name="mode" value="wish" id="mode-wish">
-        <span>我想休假</span>
+        <input type="radio" name="mode" value="ST002" id="mode-st002">
+        <span>希望晚班</span>
       </label>
+      <label style="display:flex;gap:10px;align-items:center;cursor:pointer">
+        <input type="radio" name="mode" value="ST003" id="mode-st003">
+        <span>希望休假</span>
+      </label>
+    </div>
+
+    <div id="clear-wish-row" style="display:none;margin-bottom:18px">
+      <button type="button" onclick="clearDay()" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;width:100%">
+        清除我的選擇（讓主管自由排）
+      </button>
     </div>
 
     <div class="modal-actions" style="justify-content:flex-end;gap:8px">
@@ -107,11 +117,14 @@ function toast(msg, type='success') {
 }
 function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
+// C9：員工 wish shift_type 顯示名（hard-code、與 supabase ST001/ST002/ST003 對應）
+const SHIFT_NAMES = { ST001: '希望早班', ST002: '希望晚班', ST003: '希望休假' };
+
 // ── State ──
 let currentYear, currentMonth;
 let period = null;       // schedule_periods row（null = 該月還沒建）
 let schedules = [];      // schedules rows
-let editing  = { date: null, mode: 'none' };  // 'none' = 沒意願、'wish' = 想休假
+let editing  = { date: null, mode: null };  // null = 沒選、'ST001'/'ST002'/'ST003' = 對應 shift_type
 
 // Default：下個月
 {
@@ -153,14 +166,14 @@ function isReadonly() {
   return false;
 }
 
-// ── 判定 segments 屬於誰 ──
-// 員工自標：shift_type_id='ST003' 或 note='__OFF__'
-// 主管已排：有 shift_type_id 但不是 ST003、且 note 也不是 __OFF__
-function isWishSeg(s) {
-  return s.shift_type_id === 'ST003' || s.note === '__OFF__';
+// ── 判定 segments 屬於誰（v2.5：靠 period.status 區分）──
+// draft 期間 = 員工 wish；submitted+ = 主管定案
+// 之前用 shift_type_id===ST003 判定錯了 v2.5 後員工可標 ST001/ST002 wish
+function isWishSeg(_s, periodStatus) {
+  return periodStatus === 'draft' || !periodStatus;
 }
-function isManagerSeg(s) {
-  return s.shift_type_id && s.shift_type_id !== 'ST003' && s.note !== '__OFF__';
+function isManagerSeg(_s, periodStatus) {
+  return !!periodStatus && periodStatus !== 'draft';
 }
 
 function render() {
@@ -186,7 +199,7 @@ function render() {
         banLock.textContent = '月份已開始,排班已凍結。請洽主管調整。';
         banLock.style.display = '';
       } else {
-        banInfo.textContent = '可編輯。點任一格標記「想休」或「沒意願」、完成後請按下方「送出主管確認」。';
+        banInfo.textContent = '可編輯。點任一格標記「希望早班 / 晚班 / 休假」、完成後請按下方「送出主管確認」。';
         banInfo.style.display = '';
         btnSub.style.display = '';
       }
@@ -232,22 +245,30 @@ function renderCalendar() {
     cell.className = 'cal-cell' + (inMonth ? '' : ' other-month') + (ro ? ' disabled' : '');
     if (inMonth) {
       const segs = segByDate[date] || [];
-      const isWish = segs.some(isWishSeg);
-      const hasManagerShift = segs.some(isManagerSeg);
+      const periodStatus = period?.status;
+      const hasSeg = segs.length > 0;
+      const isManager = hasSeg && segs.some(s => isManagerSeg(s, periodStatus));
+      const isWish    = hasSeg && segs.some(s => isWishSeg(s, periodStatus));
       let inner = `<div class="cal-day-num">${day}</div>`;
 
-      if (hasManagerShift) {
-        // 主管已排具體班別 → 顯示時段
+      if (isManager) {
+        // 主管已排（period.status 非 draft）→ 顯示時段或班別名
         cell.classList.add('has-shift');
-        const mgrSegs = segs.filter(isManagerSeg);
+        const mgrSegs = segs.filter(s => isManagerSeg(s, periodStatus));
         for (const s of mgrSegs.slice(0,2)) {
-          inner += `<div class="cal-shift-line">${escHtml(fmtTime(s.start_time))}–${escHtml(fmtTime(s.end_time))}</div>`;
+          if (s.start_time && s.end_time) {
+            inner += `<div class="cal-shift-line">${escHtml(fmtTime(s.start_time))}–${escHtml(fmtTime(s.end_time))}</div>`;
+          } else {
+            inner += `<div class="cal-shift-line">${escHtml(SHIFT_NAMES[s.shift_type_id] || s.shift_type_id || '')}</div>`;
+          }
         }
         if (mgrSegs.length > 2) inner += `<div class="cal-shift-line">+${mgrSegs.length-2} 段…</div>`;
       } else if (isWish) {
-        // 員工自標想休 → 顯示「想休」tag
-        inner += `<div class="cal-wish-tag">想休</div>`;
-        cell.classList.add('day-off');
+        // 員工自標 wish → 顯示對應名稱（早班/晚班/休假）
+        const seg1 = segs[0];
+        inner += `<div class="cal-wish-tag">${escHtml(SHIFT_NAMES[seg1?.shift_type_id] || '想休')}</div>`;
+        if (seg1?.shift_type_id === 'ST003') cell.classList.add('day-off');
+        else cell.classList.add('has-shift');
       }
 
       cell.innerHTML = inner;
@@ -268,21 +289,28 @@ function fmtTime(t) {
 // ── Day modal ──
 function openDayModal(date) {
   const segs = (schedules.filter(s => s.work_date === date) || []);
+  const periodStatus = period?.status;
 
-  // 主管已排定 → 員工不能改、跳 toast 不開 modal
-  if (segs.some(isManagerSeg)) {
+  // 主管已排定（period 非 draft）→ 員工不能改、跳 toast 不開 modal
+  if (segs.some(s => isManagerSeg(s, periodStatus))) {
     toast('主管已排定、如需調整請告知主管', 'warn');
     return;
   }
 
-  // 員工自標 ST003 / __OFF__ → mode='wish'；空白 → mode='none'
-  const isWish = segs.some(isWishSeg);
-  editing = { date, mode: isWish ? 'wish' : 'none' };
+  // pre-select：按 segment_no=1 的 shift_type_id 對應 radio
+  const seg = segs.find(s => s.segment_no === 1) || segs[0];
+  const currentMode = seg?.shift_type_id || null;
+  editing = { date, mode: currentMode };
 
   document.getElementById('modal-title').textContent = `編輯 ${date}`;
   document.getElementById('f-date').value = date;
-  document.getElementById('mode-none').checked = !isWish;
-  document.getElementById('mode-wish').checked = isWish;
+  document.getElementById('mode-st001').checked = (currentMode === 'ST001');
+  document.getElementById('mode-st002').checked = (currentMode === 'ST002');
+  document.getElementById('mode-st003').checked = (currentMode === 'ST003');
+
+  // 有 wish → 顯示「清除」按鈕；沒 wish → 隱藏
+  document.getElementById('clear-wish-row').style.display = currentMode ? 'block' : 'none';
+
   document.getElementById('day-modal').classList.add('open');
 }
 
@@ -290,34 +318,57 @@ function closeDayModal(){ document.getElementById('day-modal').classList.remove(
 
 async function saveDay() {
   const date = editing.date;
-  const mode = document.querySelector('input[name="mode"]:checked')?.value || 'none';
+  const mode = document.querySelector('input[name="mode"]:checked')?.value;
 
-  // 1. 先 DELETE 該日所有既有 segments（含員工舊 wish + 任何殘留）
+  // C9：必須選一個 radio（ST001/ST002/ST003）；想清除請按下方「清除」按鈕
+  if (!mode) {
+    toast('請選擇一個選項、或點「清除」讓主管自由排', 'warn');
+    return;
+  }
+
+  // 1. DELETE 既有 segments
   const existing = schedules.filter(s => s.work_date === date);
   for (const s of existing) {
     try { await api(`/api/schedules/${encodeURIComponent(s.id)}`, { method:'DELETE' }); } catch(_){}
   }
 
-  // 2. mode='wish' → POST 一筆 ST003；mode='none' → 不 POST（讓主管排）
-  if (mode === 'wish') {
-    try {
-      await api('/api/schedules', { method:'POST', body: JSON.stringify({
-        period_id: period.id,
-        employee_id: currentUser.id,
-        work_date: date,
-        shift_type_id: 'ST003',
-        segment_no: 1,
-        crosses_midnight: false,
-      })});
-    } catch(e) {
-      toast('儲存失敗:'+e.message, 'error');
-      return;
-    }
+  // 2. POST 對應 shift_type；ST003 自動帶 note='__OFF__'
+  const body = {
+    period_id: period.id,
+    employee_id: currentUser.id,
+    work_date: date,
+    shift_type_id: mode,
+    segment_no: 1,
+    crosses_midnight: false,
+  };
+  if (mode === 'ST003') body.note = '__OFF__';
+
+  try {
+    await api('/api/schedules', { method:'POST', body: JSON.stringify(body) });
+  } catch(e) {
+    toast('儲存失敗:'+e.message, 'error');
+    return;
   }
 
-  toast(mode === 'wish' ? '已標記想休假' : '已清除（讓主管排）');
+  toast(`已標記${SHIFT_NAMES[mode] || mode}`);
   closeDayModal();
   await load();
+}
+
+async function clearDay() {
+  const date = editing.date || document.getElementById('f-date').value;
+  if (!date) return;
+  const existing = schedules.filter(s => s.work_date === date);
+  try {
+    for (const s of existing) {
+      await api(`/api/schedules/${encodeURIComponent(s.id)}`, { method:'DELETE' });
+    }
+    toast('已清除（讓主管自由排）');
+    closeDayModal();
+    await load();
+  } catch(e) {
+    toast('清除失敗：' + e.message, 'error');
+  }
 }
 
 async function createPeriod() {
