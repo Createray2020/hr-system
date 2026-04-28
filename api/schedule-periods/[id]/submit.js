@@ -44,7 +44,7 @@ export default async function handler(req, res) {
   const now = new Date().toISOString();
   const { data: updated, error: uErr } = await supabaseAdmin
     .from('schedule_periods')
-    .update({ status: tr.nextState, submitted_at: now, updated_at: now })
+    .update({ status: tr.nextState, submitted_at: now })
     .eq('id', id).eq('status', 'draft') // optimistic：避免 race
     .select().maybeSingle();
   if (uErr) return res.status(500).json({ error: uErr.message });
