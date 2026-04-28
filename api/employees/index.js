@@ -78,9 +78,9 @@ export default async function handler(req, res) {
         if (error) return res.status(500).json({ error: error.message });
 
         const { data: emps } = await supabaseAdmin
-          .from('employees').select('dept').eq('status', 'active');
+          .from('employees').select('dept_id').eq('status', 'active');
         const countMap = {};
-        (emps || []).forEach(e => { countMap[e.dept] = (countMap[e.dept] || 0) + 1; });
+        (emps || []).forEach(e => { if (e.dept_id) countMap[e.dept_id] = (countMap[e.dept_id] || 0) + 1; });
 
         const managerIds = depts.map(d => d.manager_id).filter(Boolean);
         let managerMap = {};
@@ -92,7 +92,7 @@ export default async function handler(req, res) {
 
         return res.status(200).json(depts.map(d => ({
           ...d,
-          emp_count:    countMap[d.name] || 0,
+          emp_count:    countMap[d.id] || 0,
           manager_name: managerMap[d.manager_id] || null,
         })));
       } catch (e) {
@@ -152,13 +152,20 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: '缺少 id' });
 
       const { data: dept } = await supabaseAdmin
-        .from('departments').select('name, manager_id').eq('id', id).single();
+        .from('departments').select('manager_id').eq('id', id).single();
       if (!dept) return res.status(404).json({ error: '找不到部門' });
 
-      const { data: active } = await supabaseAdmin
-        .from('employees').select('id').eq('dept', dept.name).eq('status', 'active').limit(1);
-      if (active && active.length > 0)
-        return res.status(409).json({ error: '該部門仍有在職員工，無法刪除' });
+      // 用 dept_id 比對、擋 active + inactive、避免 FK violation
+      const { data: linked } = await supabaseAdmin
+        .from('employees').select('id, status').eq('dept_id', id).limit(5);
+      if (linked && linked.length > 0) {
+        const activeCnt   = linked.filter(e => e.status === 'active').length;
+        const inactiveCnt = linked.filter(e => e.status !== 'active').length;
+        const detail = activeCnt > 0
+          ? `該部門仍有 ${activeCnt} 位在職員工`
+          : `該部門有 ${inactiveCnt} 位歷史員工資料、無法刪除（可改名替代）`;
+        return res.status(409).json({ error: detail });
+      }
 
       const { error } = await supabaseAdmin.from('departments').delete().eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
@@ -173,7 +180,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const caller = await requireAuth(req, res);
     if (!caller) return;
-    const { status, dept, search } = req.query;
+    const { status, dept, dept_id, search } = req.query;
 
     // 員工互看用 16 欄位白名單（排除薪資/個資/系統欄位）；後台 (hr/admin/ceo/chairman) 看全欄位
     const PUBLIC_FIELDS = 'id, emp_no, name, dept, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
@@ -181,7 +188,8 @@ export default async function handler(req, res) {
 
     let q = supabaseAdmin.from('employees').select(cols).order('name');
     if (status) q = q.eq('status', status);
-    if (dept)   q = q.eq('dept', dept);
+    if (dept_id) q = q.eq('dept_id', dept_id);
+    else if (dept) q = q.eq('dept', dept);  // legacy: 前端送 name 字串、C0-3 後拔
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
