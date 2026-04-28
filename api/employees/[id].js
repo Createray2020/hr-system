@@ -2,6 +2,7 @@
 import { supabase, supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
+import { syncDeptFields } from '../../lib/dept-sync.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -43,6 +44,7 @@ export default async function handler(req, res) {
       if (!caller) return;
 
       const body = req.body;
+      await syncDeptFields(supabaseAdmin, body);
       // 前端負責計算薪資欄位後傳入，PUT 只負責寫入 employees 資料表
       const { error } = await supabaseAdmin
         .from('employees')

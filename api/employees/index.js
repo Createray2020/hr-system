@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
+import { syncDeptFields } from '../../lib/dept-sync.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -227,6 +228,7 @@ export default async function handler(req, res) {
       }
     }
 
+    await syncDeptFields(supabaseAdmin, body);
     const { error } = await supabaseAdmin.from('employees').insert([{ id, ...body }]);
     if (error) return res.status(500).json({ error: error.message });
 
