@@ -54,7 +54,7 @@ export default async function handler(req, res) {
   // update
   const { data: updated, error: uErr } = await supabaseAdmin
     .from('schedule_periods')
-    .update({ wish_deadline: newDeadline ?? null, updated_at: new Date().toISOString() })
+    .update({ wish_deadline: newDeadline ?? null })
     .eq('id', id)
     .select()
     .maybeSingle();
