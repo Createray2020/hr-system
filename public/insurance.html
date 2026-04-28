@@ -404,7 +404,7 @@ function renderTable() {
           ${canSel?'':'disabled style="opacity:.3"'} onchange="updateSelection()">
       </td>
       <td><div class="emp-cell"><div class="avatar">${emp.avatar||emp.name?.[0]||'?'}</div>
-        <div><div class="emp-name">${emp.name}</div><div class="emp-dept">${emp.dept||''}</div></div></div></td>
+        <div><div class="emp-name">${emp.name}</div><div class="emp-dept">${emp.dept_name || emp.dept || ''}</div></div></div></td>
       <td style="font-family:'DM Mono',monospace;font-size:12px">${isPt?`<span style="${dim}">時薪制</span>`:salary?fmt(salary):'—'}</td>
       <td>${statusBadge(status)}</td>
       <td style="font-family:'DM Mono',monospace;font-size:12px">${ins?.labor_ins_bracket?fmtN(ins.labor_ins_bracket):'—'}</td>
@@ -659,7 +659,7 @@ function openModal(empId) {
 
   document.getElementById('m-avatar').textContent   = emp.avatar || emp.name?.[0] || '?';
   document.getElementById('m-emp-name').textContent = emp.name;
-  document.getElementById('m-emp-info').textContent = `${emp.dept} · ${emp.position}`;
+  document.getElementById('m-emp-info').textContent = `${emp.dept_name || emp.dept || ''} · ${emp.position}`;
   document.getElementById('m-salary').textContent   = salary ? fmt(salary) : '時薪制';
 
   const isPt  = emp.employment_type === 'part_time';
@@ -782,7 +782,7 @@ async function loadPendingChanges() {
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:0.5px solid var(--border)">
         <div>
           <span style="font-weight:500">${c.employees?.name||'—'}</span>
-          <span style="font-size:12px;color:var(--text-dim);margin-left:8px">${c.employees?.dept||''}</span>
+          <span style="font-size:12px;color:var(--text-dim);margin-left:8px">${c.employees?.dept_name || c.employees?.dept || ''}</span>
           <div style="font-size:11px;color:var(--text-dim);margin-top:3px">
             新月薪 ${fmt(c.new_monthly_salary)} →
             勞保 ${fmtN(c.new_labor_bracket||0)} /

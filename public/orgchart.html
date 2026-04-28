@@ -424,7 +424,7 @@ function cardHTML(emp) {
       </div>
       <div class="node-info">
         <div class="node-name">${esc(emp.name)}</div>
-        <div class="node-pos">${esc(emp.position || emp.dept || '')}</div>
+        <div class="node-pos">${esc(emp.position || emp.dept_name || emp.dept || '')}</div>
         ${badge ? `<span class="node-badge" style="background:${color}22;color:${color}">${badge}</span>` : ''}
       </div>
     </div>`;
@@ -670,7 +670,7 @@ function openDetail(empId) {
       <div class="detail-dname">${esc(emp.name)}</div>
       <div class="detail-dpos">${esc(emp.position)}</div>
       <span class="detail-dept-chip" style="background:${color}22;color:${color}">
-        ${esc(emp.dept || '—')}
+        ${esc(emp.dept_name || emp.dept || '—')}
       </span>
     </div>
     <hr class="dp">

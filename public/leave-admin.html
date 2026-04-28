@@ -126,7 +126,7 @@ async function load(retries = 0) {
     allLeaves = rows || [];
     empMap = {};
     for (const l of allLeaves) {
-      if (l.emp_name) empMap[l.employee_id] = { name: l.emp_name, dept: l.dept };
+      if (l.emp_name) empMap[l.employee_id] = { name: l.emp_name, dept: l.dept, dept_name: l.dept_name };
     }
     render();
   } catch(e) { toast('載入失敗:'+e.message, 'error'); }
@@ -157,7 +157,7 @@ function render() {
     const hours = l.finalized_hours ?? l.hours ?? (l.days ? l.days * 8 : '—');
     return `
       <div class="l-row">
-        <div>${escHtml(l.emp_name || l.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(l.dept||'')}</div></div>
+        <div>${escHtml(l.emp_name || l.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(l.dept_name || l.dept || '')}</div></div>
         <div>${escHtml(tName)}</div>
         <div style="font-size:12px">${fmtDt(l.start_at || (l.start_date+'T00:00:00+08:00'))} ~ ${fmtDt(l.end_at || (l.end_date+'T00:00:00+08:00'))}</div>
         <div style="font-family:'DM Mono',monospace">${hours}h</div>

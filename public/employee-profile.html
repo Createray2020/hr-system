@@ -284,7 +284,7 @@ async function doLogout() {
   document.getElementById('profile-avatar').textContent = (u.avatar || u.name?.[0] || '?');
   document.getElementById('profile-name').textContent   = u.name    || '—';
   document.getElementById('profile-pos').textContent    = u.position || '—';
-  document.getElementById('profile-dept').textContent   = u.dept    || '—';
+  document.getElementById('profile-dept').textContent   = u.dept_name || u.dept || '—';
 
   const statusMap = { active:'在職', resigned:'離職', inactive:'停職' };
   const statusEl = document.getElementById('profile-status');
@@ -293,7 +293,7 @@ async function doLogout() {
 
   // 職務資料
   document.getElementById('i-empno').textContent    = u.emp_no || '—';
-  document.getElementById('i-dept').textContent     = u.dept   || '—';
+  document.getElementById('i-dept').textContent     = u.dept_name || u.dept || '—';
   document.getElementById('i-position').textContent = u.position || '—';
   const grade = [u.grade, u.grade_level ? `第 ${u.grade_level} 級` : null].filter(Boolean).join(' / ');
   document.getElementById('i-grade').textContent    = grade || '—';

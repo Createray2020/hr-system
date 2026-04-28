@@ -159,7 +159,7 @@ function render() {
       return `
         <tr class="${warn ? 'warn' : ''}">
           <td>${escHtml(e.emp_name||e.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(e.employee_id)}</div></td>
-          <td>${escHtml(e.dept||'')}</td>
+          <td>${escHtml(e.dept_name || e.dept || '')}</td>
           <td class="num" style="color:#4ADE80;font-weight:600">${e.total_remaining}h</td>
           <td class="num">${e.records.length} 筆</td>
           <td class="num">${escHtml(fmtDate(earliest))}${warn ? ` <span style="color:#F87171">(${d}天)</span>` : ''}</td>
