@@ -13,6 +13,7 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { getCompBalance } from '../../lib/comp-time/balance.js';
+import { addDeptName } from '../../lib/dept-name-mapper.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
 
 export default async function handler(req, res) {
@@ -47,7 +48,8 @@ export default async function handler(req, res) {
     let empMap = {};
     if (empIds.length) {
       const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept, dept_id').in('id', empIds);
+        .from('employees').select('id, name, dept, dept_id, departments(name)').in('id', empIds);
+      addDeptName(emps);
       for (const e of (emps || [])) empMap[e.id] = e;
     }
     // 按員工聚合
@@ -60,6 +62,7 @@ export default async function handler(req, res) {
           emp_name: empMap[eid]?.name || '',
           dept:     empMap[eid]?.dept || '',
           dept_id:  empMap[eid]?.dept_id || null,
+          dept_name: empMap[eid]?.dept_name || null,
           total_remaining: 0,
           records: [],
         };

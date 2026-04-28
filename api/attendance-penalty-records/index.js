@@ -8,6 +8,7 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { makeAttendancePenaltyRepo } from '../attendance-penalties/_repo.js';
+import { addDeptName } from '../../lib/dept-name-mapper.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -39,7 +40,8 @@ export default async function handler(req, res) {
     let empMap = {};
     if (empIds.length) {
       const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept, dept_id').in('id', empIds);
+        .from('employees').select('id, name, dept, dept_id, departments(name)').in('id', empIds);
+      addDeptName(emps);
       for (const e of (emps || [])) empMap[e.id] = e;
     }
     const enriched = records.map(r => ({
@@ -47,6 +49,7 @@ export default async function handler(req, res) {
       emp_name: empMap[r.employee_id]?.name || '',
       dept:     empMap[r.employee_id]?.dept || '',
       dept_id:  empMap[r.employee_id]?.dept_id || null,
+      dept_name: empMap[r.employee_id]?.dept_name || null,
     }));
     return res.status(200).json({ records: enriched });
   } catch (e) {

@@ -12,6 +12,7 @@ import { isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { calculateLegalDays, calculatePeriodBoundary } from '../../lib/leave/annual.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
+import { addDeptName } from '../../lib/dept-name-mapper.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -52,7 +53,8 @@ async function handleGet(req, res) {
   const empMap = {};
   if (empIds.length) {
     const { data: emps } = await supabaseAdmin
-      .from('employees').select('id, name, dept, dept_id, annual_leave_seniority_start').in('id', empIds);
+      .from('employees').select('id, name, dept, dept_id, annual_leave_seniority_start, departments(name)').in('id', empIds);
+    addDeptName(emps);
     for (const e of (emps || [])) empMap[e.id] = e;
   }
   const rows = (data || []).map(r => ({
@@ -60,6 +62,7 @@ async function handleGet(req, res) {
     emp_name: empMap[r.employee_id]?.name || '',
     dept:     empMap[r.employee_id]?.dept || '',
     dept_id:  empMap[r.employee_id]?.dept_id || null,
+    dept_name: empMap[r.employee_id]?.dept_name || null,
     seniority_start: empMap[r.employee_id]?.annual_leave_seniority_start || null,
   }));
   return res.status(200).json({ records: rows });

@@ -30,6 +30,7 @@ import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { submitLeaveRequest } from '../../lib/leave/request-flow.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from './_repo.js';
+import { addDeptName, addDeptNameSingle } from '../../lib/dept-name-mapper.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -61,11 +62,12 @@ export default async function handler(req, res) {
         .from('leave_requests').select('*').eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到假單' });
       const { data: emp } = await supabaseAdmin
-        .from('employees').select('name, dept, dept_id, position, avatar')
+        .from('employees').select('name, dept, dept_id, position, avatar, departments(name)')
         .eq('id', leave.employee_id).single();
+      addDeptNameSingle(emp);
       return res.status(200).json({
         ...leave,
-        emp_name: emp?.name, dept: emp?.dept, dept_id: emp?.dept_id, position: emp?.position, avatar: emp?.avatar,
+        emp_name: emp?.name, dept: emp?.dept, dept_id: emp?.dept_id, dept_name: emp?.dept_name, position: emp?.position, avatar: emp?.avatar,
       });
     }
 
@@ -88,13 +90,14 @@ export default async function handler(req, res) {
 
     const empIds = [...new Set(leaves.map(l => l.employee_id))];
     const { data: emps, error: empErr } = await supabaseAdmin
-      .from('employees').select('id, name, dept, dept_id, position, avatar').in('id', empIds);
+      .from('employees').select('id, name, dept, dept_id, position, avatar, departments(name)').in('id', empIds);
     if (empErr) return res.status(500).json({ error: empErr.message });
+    addDeptName(emps);
 
     const empMap = Object.fromEntries(emps.map(e => [e.id, e]));
     let rows = leaves.map(l => {
       const e = empMap[l.employee_id] || {};
-      return { ...l, emp_name: e.name, dept: e.dept, dept_id: e.dept_id, position: e.position, avatar: e.avatar };
+      return { ...l, emp_name: e.name, dept: e.dept, dept_id: e.dept_id, dept_name: e.dept_name, position: e.position, avatar: e.avatar };
     });
     if (dept_id)   rows = rows.filter(r => r.dept_id === dept_id);
     else if (dept) rows = rows.filter(r => r.dept === dept);

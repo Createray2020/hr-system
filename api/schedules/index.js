@@ -18,6 +18,7 @@ import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/sched
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
 import { sendPushToRoles, createNotificationsForRoles } from '../../lib/push.js';
+import { addDeptName } from '../../lib/dept-name-mapper.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -76,8 +77,9 @@ export default async function handler(req, res) {
       // Two-step: fetch employees
       const empIds = [...new Set(schedules.map(s => s.employee_id))];
       const { data: emps, error: empErr } = await supabaseAdmin
-        .from('employees').select('id, name, dept, dept_id, avatar').in('id', empIds);
+        .from('employees').select('id, name, dept, dept_id, avatar, departments(name)').in('id', empIds);
       if (empErr) return res.status(500).json({ error: empErr.message });
+      addDeptName(emps);
 
       const empMap = Object.fromEntries((emps || []).map(e => [e.id, e]));
 
@@ -87,6 +89,7 @@ export default async function handler(req, res) {
           ...s,
           emp_name:    emp.name    || '',
           emp_dept:    emp.dept    || s.dept || '',
+          emp_dept_name: emp.dept_name || emp.dept || '',
           avatar:      emp.avatar  || '',
           shift_name:  s.shift_types?.name        || '',
           shift_color: s.shift_types?.color       || '#5B8DEF',

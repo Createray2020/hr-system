@@ -28,6 +28,7 @@ import {
   clockIn, clockOut,
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
 } from '../../lib/attendance/clock.js';
+import { addDeptName } from '../../lib/dept-name-mapper.js';
 
 const WORK_START_HOUR = 9;
 
@@ -75,7 +76,8 @@ export default async function handler(req, res) {
       if (attErr) return res.status(500).json({ error: attErr.message });
 
       // 取員工資料（一次全撈，在 JS 合併）
-      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept, dept_id, avatar');
+      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept, dept_id, avatar, departments(name)');
+      addDeptName(empData);
       const empMap = {};
       (empData || []).forEach(e => { empMap[e.id] = e; });
 
