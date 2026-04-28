@@ -8,6 +8,7 @@ import { supabaseAdmin } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
 import { canTransition } from '../../../lib/schedule/period-state.js';
 import { logScheduleChange } from '../../../lib/schedule/change-logger.js';
+import { sendPushToEmployees, createNotifications, sendPushToRoles, createNotificationsForRoles } from '../../../lib/push.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -64,6 +65,39 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[schedule-periods/submit] logScheduleChange failed:', e.message);
+  }
+
+  // C7-1：notify 同部門主管 + HR/CEO 員工已送出 wish
+  try {
+    const { data: emp } = await supabaseAdmin
+      .from('employees').select('dept_id, name').eq('id', period.employee_id).maybeSingle();
+
+    if (emp?.dept_id) {
+      const { data: managers } = await supabaseAdmin
+        .from('employees')
+        .select('id')
+        .eq('dept_id', emp.dept_id)
+        .eq('is_manager', true)
+        .eq('status', 'active');
+      const managerIds = (managers || []).map(m => m.id);
+
+      const payload = {
+        type: 'schedule',
+        title: '員工已送出排班意願',
+        body: `${emp.name || period.employee_id} 已送出 ${period.period_start} 月排班意願、待您確認`,
+        url: '/schedule.html',
+        tag: `schedule-submit-${id}`,
+      };
+
+      Promise.allSettled([
+        managerIds.length ? sendPushToEmployees(managerIds, payload) : null,
+        managerIds.length ? createNotifications(managerIds, payload) : null,
+        sendPushToRoles(['hr', 'ceo', 'chairman'], payload),
+        createNotificationsForRoles(['hr', 'ceo', 'chairman'], payload),
+      ].filter(Boolean)).catch(() => {});
+    }
+  } catch (notifyErr) {
+    console.error('[submit] notify failed:', notifyErr);
   }
 
   return res.status(200).json({ period: updated });
