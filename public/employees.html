@@ -410,7 +410,7 @@ async function loadDepts() {
   try {
     const depts = await api('/api/departments');
     allDepts = depts;
-    const opts = depts.map(d => `<option value="${d.name}">${d.name}</option>`).join('');
+    const opts = depts.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
     document.getElementById('f-dept').innerHTML    = opts;
     document.getElementById('dept-filter').innerHTML =
       '<option value="">全部部門</option>' + opts;
@@ -429,7 +429,7 @@ async function loadEmployees() {
 function updateStats() {
   const active   = allEmployees.filter(e=>e.status==='active');
   const resigned = allEmployees.filter(e=>e.status==='resigned');
-  const depts    = [...new Set(allEmployees.map(e=>e.dept))];
+  const depts    = [...new Set(allEmployees.map(e=>e.dept_id).filter(Boolean))];
   const now = new Date();
   const newHires = active.filter(e => {
     const h = new Date(e.hire_date);
@@ -442,19 +442,21 @@ function updateStats() {
 }
 
 function fillDeptFilter() {
-  const depts = [...new Set(allEmployees.map(e=>e.dept))];
+  // fallback：當 /api/departments fail 時、從 allEmployees 抽 dept_id → name 對應
+  const map = new Map();
+  allEmployees.forEach(e => { if (e.dept_id) map.set(e.dept_id, e.dept || e.dept_id); });
   const sel = document.getElementById('dept-filter');
   sel.innerHTML = '<option value="">全部部門</option>' +
-    depts.map(d=>`<option value="${d}">${d}</option>`).join('');
+    [...map].map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
 }
 
 function getFiltered() {
   const search = document.getElementById('search-input').value.toLowerCase();
-  const dept   = document.getElementById('dept-filter').value;
+  const deptId = document.getElementById('dept-filter').value;
   const status = document.getElementById('status-filter').value;
   return allEmployees.filter(e => {
     if (status && e.status !== status) return false;
-    if (dept && e.dept !== dept) return false;
+    if (deptId && e.dept_id !== deptId) return false;
     if (search && !e.name.includes(search) && !(e.email||'').includes(search)) return false;
     return true;
   });
@@ -713,7 +715,7 @@ function openEditModal(id) {
   document.getElementById('f-id-num').value      = e.id_number   || '';
   document.getElementById('f-birth').value       = e.birth_date  || '';
   document.getElementById('f-address').value     = e.address     || '';
-  document.getElementById('f-dept').value        = e.dept        || '';
+  document.getElementById('f-dept').value        = e.dept_id     || '';
   document.getElementById('f-position').value    = e.position    || '';
   document.getElementById('f-role').value        = e.role        || 'employee';
   document.getElementById('f-hire').value        = e.hire_date   || '';
@@ -763,7 +765,7 @@ async function saveEmployee() {
     id_number:    document.getElementById('f-id-num').value.trim() || null,
     birth_date:   document.getElementById('f-birth').value         || null,
     address:      document.getElementById('f-address').value.trim()|| null,
-    dept:         document.getElementById('f-dept').value,
+    dept_id:      document.getElementById('f-dept').value || null,
     position:     document.getElementById('f-position').value.trim(),
     role:         document.getElementById('f-role').value,
     grade:             document.getElementById('f-grade').value         || null,
