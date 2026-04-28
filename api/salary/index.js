@@ -21,6 +21,7 @@ import { skipAttendanceBonus, isBackofficeRole, BACKOFFICE_ROLES } from '../../l
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { makeSalaryRepo } from './_repo.js';
+import { addDeptNameNested } from '../../lib/dept-name-mapper.js';
 
 function calcAttendanceBonus(emp) {
   if (!emp) return 0;
@@ -44,7 +45,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { year, month, dept, dept_id, status, employee_id } = req.query;
     let q = supabaseAdmin.from('salary_records')
-      .select(`*, employees!inner(name, dept, dept_id, avatar, role, is_manager, employment_type)`)
+      .select(`*, employees!inner(name, dept, dept_id, avatar, role, is_manager, employment_type, departments(name))`)
       .order('employee_id');
     if (year)        q = q.eq('year',        parseInt(year));
     if (month)       q = q.eq('month',       parseInt(month));
@@ -55,6 +56,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
+    addDeptNameNested(data, 'employees');
 
     const rows = data.map(r => {
       const emp = r.employees;
@@ -73,6 +75,7 @@ export default async function handler(req, res) {
         net_salary:     net,
         emp_name:       emp?.name,
         dept:           emp?.dept,
+        dept_name:      emp?.dept_name,
         avatar:         emp?.avatar,
         emp_role:       emp?.role,
         emp_is_manager: emp?.is_manager,

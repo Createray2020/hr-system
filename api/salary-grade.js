@@ -5,6 +5,7 @@
 // GET  /api/salary-grade?_resource=insurance&brackets=health → 健保級距表
 // POST /api/salary-grade?_resource=insurance     → upsert 員工設定
 import { supabaseAdmin } from '../lib/supabase.js';
+import { addDeptNameNested, addDeptNameSingle } from '../lib/dept-name-mapper.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -29,18 +30,22 @@ export default async function handler(req, res) {
       if (brackets === 'pending') {
         const { data, error } = await supabaseAdmin
           .from('insurance_change_requests')
-          .select('*, employees(name, dept)')
+          .select('*, employees(name, dept, departments(name))')
           .eq('status', 'pending')
           .order('created_at', { ascending: false });
         if (error) return res.status(500).json({ error: error.message });
+        addDeptNameNested(data, 'employees');
         return res.status(200).json(data || []);
       }
       // Insurance settings list (join employees)
       let q = supabaseAdmin.from('insurance_settings')
-        .select('*, employees(name, emp_no, dept, position, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, has_insurance, employment_type)');
+        .select('*, employees(name, emp_no, dept, position, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance, has_insurance, employment_type, departments(name))');
       if (employee_id) q = q.eq('employee_id', employee_id).single();
       const { data, error } = await q;
       if (error) return res.status(employee_id ? 404 : 500).json({ error: error.message });
+      // 二態處理:列表 = array、單一 = object
+      if (Array.isArray(data)) addDeptNameNested(data, 'employees');
+      else if (data?.employees) addDeptNameSingle(data.employees);
       return res.status(200).json(data);
     }
     if (req.method === 'POST') {
