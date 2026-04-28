@@ -113,34 +113,6 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;min-
   </div>
 </div>
 
-<!-- 版本選擇 Modal -->
-<div class="v-modal" id="version-modal">
-  <div class="v-card">
-    <div class="v-title">選擇介面版本</div>
-    <div class="v-sub">你可以隨時在「我的」頁面切換</div>
-
-    <button class="v-btn v-btn-desktop" onclick="chooseVersion('desktop')">
-      <span class="v-btn-icon">🖥️</span>
-      <div class="v-btn-text">
-        <div class="v-btn-label">電腦版（管理後台）</div>
-        <div class="v-btn-desc">完整人事管理功能</div>
-      </div>
-    </button>
-    <button class="v-btn v-btn-mobile" onclick="chooseVersion('mobile')">
-      <span class="v-btn-icon">📱</span>
-      <div class="v-btn-text">
-        <div class="v-btn-label">手機版（員工介面）</div>
-        <div class="v-btn-desc">打卡、班表、請假、薪資</div>
-      </div>
-    </button>
-
-    <label class="v-remember">
-      <input type="checkbox" id="remember-choice">
-      記住我的選擇，下次直接進入
-    </label>
-  </div>
-</div>
-
 <script>
 const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
@@ -154,23 +126,12 @@ function showError(msg) {
 function hideError() { document.getElementById('err-box').style.display = 'none'; }
 
 function redirectByRole(emp) {
+  localStorage.removeItem('preferred_version');
   if (!Roles.canAccessBackoffice(emp)) {
-    window.location.href = '/employee-app.html';
-    return;
-  }
-  const preferred = localStorage.getItem('preferred_version');
-  if (preferred) {
-    window.location.href = preferred === 'desktop' ? '/dashboard.html' : '/employee-app.html';
+    window.location.href = '/attendance.html';
   } else {
-    document.getElementById('version-modal').classList.add('open');
+    window.location.href = '/dashboard.html';
   }
-}
-
-function chooseVersion(v) {
-  if (document.getElementById('remember-choice').checked) {
-    localStorage.setItem('preferred_version', v);
-  }
-  window.location.href = v === 'desktop' ? '/dashboard.html' : '/employee-app.html';
 }
 
 // If already logged in, redirect
