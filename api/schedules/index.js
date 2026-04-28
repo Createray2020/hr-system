@@ -189,16 +189,9 @@ async function handleNewPost(req, res) {
     allowed = r.ok;
     if (!r.ok) return res.status(403).json({ error: r.reason });
 
-    // Phase C: 員工自助只能排「員工希望班」(ST003) 或「整天不排」(__OFF__)
-    // 主管之後可以調整成實際班別（其他 shift_type_id）
-    const isWishShift = shift_type_id === 'ST003';
-    const isOff = (note === '__OFF__');
-    if (!isWishShift && !isOff) {
-      return res.status(403).json({
-        error: 'EMPLOYEE_SHIFT_RESTRICTED',
-        detail: '員工自助排班只能選「員工希望班」(ST003) 或標記為休假 (__OFF__)。其他班別請洽主管調整。',
-      });
-    }
+    // Phase C 員工自助限制已移除（v2.5 改造）：
+    // 員工填什麼班別都是 wish（靠 period.status='draft' 區分）、不再擋班別。
+    // 主管在 schedule.html 公告才是正式班表。
   } else {
     const isHR = isBackofficeRole(caller);
     let manages = false;
