@@ -90,6 +90,14 @@
   background: var(--border);
 }
 
+/* Row of multiple managers (parallel under dept box) */
+.org-mgr-row {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: flex-start;
+}
+
 /* Row of employee cards under a manager */
 .org-emp-row {
   display: flex;
@@ -532,17 +540,23 @@ function renderTree() {
         const deptName = dept?.name || (deptId === '__unknown__' ? '未分組' : deptId);
         const bId      = `d${idx}`;
 
-        // 部門主管嚴格依 is_manager=true；無人時 mgrPlaceholderCard()
-        const mgr  = members.find(e => e.is_manager === true);
-        const emps = members.filter(e => e !== mgr);
+        // 部門主管嚴格依 is_manager=true；支援多主管（並排在部門框下）
+        const mgrs = members.filter(e => e.is_manager === true);
+        const emps = members.filter(e => e.is_manager !== true);
         const hasEmps = emps.length > 0;
+
+        const mgrBlock = mgrs.length === 0
+          ? mgrPlaceholderCard()
+          : mgrs.length === 1
+            ? cardHTML(mgrs[0])
+            : `<div class="org-mgr-row">${mgrs.map(m => cardHTML(m)).join('')}</div>`;
 
         return `
           <div class="org-branch">
             ${deptNodeCard(deptName, color, members.length)}
             <div class="org-branches">
               <div class="org-branch">
-                ${mgr ? cardHTML(mgr) : mgrPlaceholderCard()}
+                ${mgrBlock}
                 ${hasEmps ? `
                   <div class="org-connector-v" id="bcv-${bId}"></div>
                   <div class="org-emp-row" id="bemps-${bId}">
