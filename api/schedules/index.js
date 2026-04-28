@@ -17,7 +17,7 @@ import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
-import { sendPushToRoles, createNotificationsForRoles } from '../../lib/push.js';
+import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
 
 export default async function handler(req, res) {
@@ -273,6 +273,21 @@ async function handleNewPost(req, res) {
     Promise.allSettled([
       sendPushToRoles(['hr', 'ceo'], payload),
       createNotificationsForRoles(['hr', 'ceo'], payload),
+    ]).catch(() => {});
+  }
+
+  // C7-2:主管/HR 覆蓋員工 wish (ST003) → 通知員工
+  if (actorKind !== 'employee' && before?.shift_type_id === 'ST003' && data?.shift_type_id !== 'ST003') {
+    const wishPayload = {
+      type: 'schedule',
+      title: '主管已調整你的排班',
+      body: `你 ${work_date} 的休假意願已改為班別`,
+      url: '/employee-schedule.html',
+      tag: `wish-overridden-${id}`,
+    };
+    Promise.allSettled([
+      sendPushToEmployees([employee_id], wishPayload),
+      createNotifications([employee_id], wishPayload),
     ]).catch(() => {});
   }
 
