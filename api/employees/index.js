@@ -6,6 +6,7 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 import { syncDeptFields } from '../../lib/dept-sync.js';
+import { addDeptName } from '../../lib/dept-name-mapper.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -187,13 +188,16 @@ export default async function handler(req, res) {
     const PUBLIC_FIELDS = 'id, emp_no, name, dept, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
     const cols = isBackofficeRole(caller) ? '*' : PUBLIC_FIELDS;
 
-    let q = supabaseAdmin.from('employees').select(cols).order('name');
+    // C0-5a JOIN departments 補 dept_name
+    const colsWithDept = (cols === '*') ? '*, departments(name)' : `${cols}, departments(name)`;
+    let q = supabaseAdmin.from('employees').select(colsWithDept).order('name');
     if (status) q = q.eq('status', status);
     if (dept_id) q = q.eq('dept_id', dept_id);
     else if (dept) q = q.eq('dept', dept);  // legacy: 前端送 name 字串、C0-3 後拔
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
+    addDeptName(data);
     return res.status(200).json(data);
   }
 

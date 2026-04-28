@@ -3,6 +3,7 @@ import { supabase, supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 import { syncDeptFields } from '../../lib/dept-sync.js';
+import { addDeptNameSingle } from '../../lib/dept-name-mapper.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -16,10 +17,11 @@ export default async function handler(req, res) {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user) return res.status(401).json({ error: 'Invalid token' });
     const { data, error } = await supabaseAdmin
-      .from('employees').select('*').eq('email', user.email).single();
+      .from('employees').select('*, departments(name)').eq('email', user.email).single();
     if (error) {
       return res.status(200).json({ id: null, name: user.email.split('@')[0], email: user.email, role: 'employee' });
     }
+    addDeptNameSingle(data);
     return res.status(200).json(data);
   }
 
@@ -33,8 +35,11 @@ export default async function handler(req, res) {
     const PUBLIC_FIELDS = 'id, emp_no, name, dept, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
     const cols = (isSelf || isHR) ? '*' : PUBLIC_FIELDS;
 
-    const { data, error } = await supabaseAdmin.from('employees').select(cols).eq('id', id).single();
+    // C0-5a JOIN departments 補 dept_name
+    const colsWithDept = (cols === '*') ? '*, departments(name)' : `${cols}, departments(name)`;
+    const { data, error } = await supabaseAdmin.from('employees').select(colsWithDept).eq('id', id).single();
     if (error) return res.status(404).json({ error: '找不到員工' });
+    addDeptNameSingle(data);
     return res.status(200).json(data);
   }
 
