@@ -132,10 +132,26 @@ let currentWeekStart = null;     // ISO date string, 週日為起始
 let visibleEmps = [];            // 主管→同部門、HR→全部
 let allSchedules = {};           // { emp_id: [schedules] }
 let allPeriods = {};             // { emp_id: period }
+let holidayDates = new Set();    // C12-3:該年 holidays（不含 makeup_workday）
 let editing = { date: null, empId: null, segs: [], off: false };
 let currentEmp = null;
 let currentPeriod = null;
 let currentSchedules = [];
+
+// C12-3：算該月標準工時（工作日 × 8、扣週末 + holidays）
+function calcMonthMax(year, month, holidayDateSet) {
+  let workDays = 0;
+  const last = new Date(year, month, 0).getDate();
+  for (let d = 1; d <= last; d++) {
+    const date = new Date(year, month - 1, d);
+    const dow = date.getDay();
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = holidayDateSet.has(dateStr);
+    if (!isWeekend && !isHoliday) workDays++;
+  }
+  return workDays * 8;
+}
 
 // 計算當週日起始（週日=0、JS getDay）
 function getWeekStart(date) {
@@ -214,6 +230,19 @@ async function load(retries = 0) {
     } catch(_) {}
   }));
 
+  // C12-3：撈該週所跨年份的 holidays（按 year 撈、cache 整年）
+  holidayDates = new Set();
+  const years = new Set([weekStart.substring(0,4), weekEnd.substring(0,4)]);
+  await Promise.all([...years].map(async year => {
+    try {
+      const hs = await api(`/api/holidays?year=${year}`);
+      (hs || []).forEach(h => {
+        // 補行上班日不算 off、其他類型 (national/company/flexible) 都當 off
+        if (h.holiday_type !== 'makeup_workday') holidayDates.add(h.date);
+      });
+    } catch(_) {}
+  }));
+
   render();
 }
 
@@ -248,7 +277,7 @@ function render() {
     <tr style="background:rgba(255,255,255,0.04)">
       <th style="text-align:left;padding:10px 12px;width:140px;border-bottom:1px solid var(--border);font-weight:500;font-size:12px">員工</th>
       ${dates.map((d,i) => `<th style="padding:10px 4px;border-bottom:1px solid var(--border);font-weight:500;font-size:12px;color:${i===0||i===6?'var(--text-dim)':''}">${dayLabels[i]}<div style="font-family:'DM Mono',monospace;font-size:11px;font-weight:400;margin-top:2px;opacity:.7">${d.getMonth()+1}/${d.getDate()}</div></th>`).join('')}
-      <th style="padding:10px 8px;width:80px;border-bottom:1px solid var(--border);font-weight:500;text-align:center;font-size:12px">本週工時</th>
+      <th style="padding:10px 8px;width:90px;border-bottom:1px solid var(--border);font-weight:500;text-align:center;font-size:12px">工時<div style="font-size:10px;color:var(--text-dim);font-weight:400;margin-top:2px">本週 / 月</div></th>
       <th style="padding:10px 8px;width:100px;border-bottom:1px solid var(--border);font-weight:500;text-align:center;font-size:12px">操作</th>
     </tr>`;
 
@@ -298,13 +327,24 @@ function render() {
       return `<td class="week-cell ${cellClass}${wishClass}" onclick="openDayModal('${escHtml(emp.id)}','${dateStr}')">${escHtml(label)}${lateDot}</td>`;
     }).join('');
 
-    // 工時統計（僅本週）
+    // 工時統計（本週）
     const weekMinutes = schs.reduce((sum, s) => {
       const inWeek = s.work_date >= weekStartStr && s.work_date <= weekEndStr;
       return inWeek ? sum + (s.scheduled_work_minutes || 0) : sum;
     }, 0);
     const weekHours = (weekMinutes / 60).toFixed(1);
     const weekColor = weekMinutes > 48*60 ? '#E24B4A' : weekMinutes > 40*60 ? '#FFB97B' : '#5BA68F';
+
+    // C12-3：本月工時 + 動態月上限（扣 weekend + holidays）
+    const weekMonth = weekStartStr.substring(0, 7); // 'YYYY-MM'
+    const monthMinutes = schs.reduce((sum, s) =>
+      s.work_date.substring(0, 7) === weekMonth ? sum + (s.scheduled_work_minutes || 0) : sum, 0);
+    const monthHours = (monthMinutes / 60).toFixed(0);
+    const [yr, mo] = weekMonth.split('-').map(Number);
+    const monthMax = calcMonthMax(yr, mo, holidayDates);
+    const monthColor = (monthMinutes/60) > monthMax * 1.1 ? '#E24B4A'
+                     : (monthMinutes/60) > monthMax       ? '#FFB97B'
+                     : '#5BA68F';
 
     // 操作欄
     let opHtml = '';
@@ -324,7 +364,10 @@ function render() {
       <tr>
         <td class="week-emp-name">${escHtml(emp.name || emp.id)}${emp.is_manager?'<div class="role-hint">主管</div>':''}</td>
         ${cells}
-        <td style="padding:10px 8px;border-bottom:1px solid var(--border);text-align:center;font-size:12px;font-family:'DM Mono',monospace"><span style="color:${weekColor};font-weight:600">${weekHours}h</span></td>
+        <td style="padding:10px 8px;border-bottom:1px solid var(--border);text-align:center;font-size:12px;font-family:'DM Mono',monospace">
+          <div style="color:${weekColor};font-weight:600">${weekHours}h</div>
+          <div style="color:${monthColor};font-size:11px;margin-top:2px;opacity:.85">月 ${monthHours}/${monthMax}h</div>
+        </td>
         <td style="padding:10px 8px;border-bottom:1px solid var(--border);text-align:center">${opHtml}</td>
       </tr>`;
   }).join('');
