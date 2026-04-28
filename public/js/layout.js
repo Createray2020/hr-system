@@ -72,6 +72,7 @@
       items: [
         { page:'leave-admin',              icon:'✅', label:'請假審批',     href:'/leave-admin.html',              gate: isMgrOrHR },
         { page:'schedule',                 icon:'📆', label:'排班管理',     href:'/schedule.html',                  gate: isMgrOrHR },
+        { page:'schedule-templates',       icon:'🗓️', label:'班表範本',     href:'/schedule-templates.html',        gate: isMgrOrHR },
         { page:'overtime-review',          icon:'👔', label:'加班審核',     href:'/overtime-review.html',          gate: isMgrOrCEO },
         { page:'attendance-admin',         icon:'🛠️', label:'打卡管理',     href:'/attendance-admin.html',         gate: isHRish },
         { page:'annual-leave-admin',       icon:'🏖️', label:'特休管理',     href:'/annual-leave-admin.html',       gate: isHRish },

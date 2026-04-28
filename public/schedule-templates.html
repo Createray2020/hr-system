@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>班表範本 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .tpl-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;transition:border-color .12s}
+  .tpl-card:hover{border-color:rgba(91,141,239,.4)}
+  .tpl-name{font-size:16px;font-weight:500}
+  .tpl-desc{font-size:13px;color:var(--text-dim);line-height:1.4}
+  .tpl-badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:6px;background:rgba(91,141,239,.15);color:#7FBBFF}
+  .tpl-owner{font-size:11px;color:var(--text-dim)}
+  .tpl-pattern{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin:6px 0}
+  .tpl-day{padding:6px 0;text-align:center;font-size:11px;border-radius:4px;font-family:'DM Mono',monospace}
+  .tpl-day-st001{background:rgba(91,141,239,.18);color:#7FBBFF}
+  .tpl-day-st002{background:rgba(250,167,39,.18);color:#FFB97B}
+  .tpl-day-st003{background:rgba(120,120,120,.10);color:var(--text-dim)}
+  .tpl-day-st004{background:rgba(74,222,128,.10);color:#4ADE80}
+  .tpl-day-off{background:rgba(120,120,120,.05);color:var(--text-dim)}
+  .tpl-actions{display:flex;gap:8px;margin-top:auto}
+  .pattern-row{display:grid;grid-template-columns:60px 1fr;gap:10px;align-items:center;margin-bottom:8px}
+  .pattern-row label{font-size:13px;color:var(--text-dim);font-family:'DM Mono',monospace}
+</style>
+</head>
+<body data-page="schedule-templates">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">班表範本</div>
+        <div class="page-sub">管理常用排班範本、員工可一鍵套用</div>
+      </div>
+      <div class="header-actions" style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onclick="openTplEditor()">+ 新增範本</button>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面（限主管 / HR / admin）</div>
+    </div>
+
+    <div id="main-content">
+      <div id="empty-list" class="empty-state" style="display:none">
+        <div class="icon">📋</div>
+        <div>尚無範本</div>
+        <div style="margin-top:8px;color:var(--text-dim);font-size:13px">點上方「+ 新增範本」開始建立</div>
+      </div>
+      <div id="tpl-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px"></div>
+    </div>
+  </main>
+</div>
+
+<!-- 編輯 modal -->
+<div class="modal-bg" id="tpl-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title" id="tpl-modal-title">新增範本</div>
+    <input type="hidden" id="f-tpl-id">
+
+    <div class="form-row">
+      <label class="form-label">範本名稱</label>
+      <input type="text" class="form-input" id="f-tpl-name" placeholder="例：早晚班輪替" maxlength="60">
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">說明（選填）</label>
+      <textarea class="form-input" id="f-tpl-desc" rows="2" placeholder="例：週一三五早班、週二四晚班、週末休"></textarea>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">每週班別</label>
+      <div id="pattern-edit"></div>
+    </div>
+
+    <div class="form-row">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="f-tpl-shared">
+        <span>公開給其他主管 / 員工套用</span>
+      </label>
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between">
+      <div>
+        <button class="btn" id="btn-tpl-delete" onclick="deleteTpl()" style="background:transparent;border:1px solid rgba(248,113,113,.4);color:#F87171;display:none">刪除</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeTplEditor()">取消</button>
+        <button class="btn btn-primary" onclick="saveTpl()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+const SHIFT_LABELS = { ST001:'早班', ST002:'晚班', ST003:'休假', ST004:'例假', OFF:'無' };
+const DAY_LABELS = ['週日','週一','週二','週三','週四','週五','週六'];
+
+let templates = [];
+let editing = null;  // null = 新建、{...} = 編輯中的 template
+
+async function load(retries = 0) {
+  if (!window.api || !window.currentUser) {
+    if (retries < 25) return setTimeout(()=>load(retries+1), 200);
+    return;
+  }
+  const u = window.currentUser;
+  const isMgrOrHR = u.is_manager || ['hr','admin','ceo','chairman'].includes(u.role);
+  if (!isMgrOrHR) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  try {
+    templates = await api('/api/schedule-templates') || [];
+    render();
+  } catch(e) {
+    toast('載入失敗：' + e.message, 'error');
+  }
+}
+
+function isHR() {
+  const u = window.currentUser;
+  return !!u && ['hr','admin','ceo','chairman'].includes(u.role);
+}
+
+function render() {
+  const grid = document.getElementById('tpl-grid');
+  const empty = document.getElementById('empty-list');
+  if (!templates.length) {
+    grid.style.display = 'none';
+    empty.style.display = '';
+    return;
+  }
+  grid.style.display = 'grid';
+  empty.style.display = 'none';
+
+  const u = window.currentUser;
+  const hr = isHR();
+
+  grid.innerHTML = templates.map(t => {
+    const isOwner = t.owner_id === u.id;
+    const canEdit = isOwner || hr;
+    const shifts = t.pattern?.shifts || {};
+    const patternHtml = DAY_LABELS.map((lbl, i) => {
+      const v = shifts[String(i)] || 'OFF';
+      const cls = v === 'OFF' ? 'tpl-day-off' : `tpl-day-${v.toLowerCase()}`;
+      const txt = v === 'OFF' ? '—' : SHIFT_LABELS[v]?.charAt(0) || '?';
+      return `<div class="tpl-day ${cls}" title="${lbl}：${SHIFT_LABELS[v]||v}">${txt}</div>`;
+    }).join('');
+
+    return `
+      <div class="tpl-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div class="tpl-name">${escHtml(t.name)}</div>
+          ${t.is_shared ? '<span class="tpl-badge">公開</span>' : ''}
+        </div>
+        ${t.description ? `<div class="tpl-desc">${escHtml(t.description)}</div>` : ''}
+        <div class="tpl-pattern">${patternHtml}</div>
+        ${!isOwner ? `<div class="tpl-owner">擁有者：${escHtml(t.owner_id)}</div>` : ''}
+        <div class="tpl-actions">
+          <button class="btn btn-ghost" style="font-size:12px;padding:6px 12px;flex:1" onclick="openTplEditor('${escHtml(t.id)}')">${canEdit ? '編輯' : '查看'}</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function openTplEditor(tplId) {
+  const u = window.currentUser;
+  const hr = isHR();
+
+  if (tplId) {
+    editing = templates.find(t => t.id === tplId);
+    if (!editing) return;
+    const canEdit = (editing.owner_id === u.id) || hr;
+    document.getElementById('tpl-modal-title').textContent = canEdit ? '編輯範本' : '查看範本';
+    document.getElementById('f-tpl-id').value = editing.id;
+    document.getElementById('f-tpl-name').value = editing.name || '';
+    document.getElementById('f-tpl-desc').value = editing.description || '';
+    document.getElementById('f-tpl-shared').checked = !!editing.is_shared;
+    document.getElementById('btn-tpl-delete').style.display = canEdit ? '' : 'none';
+  } else {
+    editing = null;
+    document.getElementById('tpl-modal-title').textContent = '新增範本';
+    document.getElementById('f-tpl-id').value = '';
+    document.getElementById('f-tpl-name').value = '';
+    document.getElementById('f-tpl-desc').value = '';
+    document.getElementById('f-tpl-shared').checked = false;
+    document.getElementById('btn-tpl-delete').style.display = 'none';
+  }
+
+  renderPatternEdit(editing?.pattern?.shifts || {});
+  document.getElementById('tpl-modal').classList.add('open');
+}
+
+function renderPatternEdit(shifts) {
+  const wrap = document.getElementById('pattern-edit');
+  wrap.innerHTML = DAY_LABELS.map((lbl, i) => {
+    const v = shifts[String(i)] || 'OFF';
+    return `
+      <div class="pattern-row">
+        <label>${lbl}</label>
+        <select class="form-input" id="f-pattern-${i}">
+          <option value="OFF" ${v==='OFF'?'selected':''}>無（不上班）</option>
+          <option value="ST001" ${v==='ST001'?'selected':''}>早班</option>
+          <option value="ST002" ${v==='ST002'?'selected':''}>晚班</option>
+          <option value="ST003" ${v==='ST003'?'selected':''}>休假</option>
+          <option value="ST004" ${v==='ST004'?'selected':''}>例假</option>
+        </select>
+      </div>`;
+  }).join('');
+}
+
+function closeTplEditor() {
+  document.getElementById('tpl-modal').classList.remove('open');
+  editing = null;
+}
+
+async function saveTpl() {
+  const name = document.getElementById('f-tpl-name').value.trim();
+  if (!name) { toast('請輸入範本名稱', 'warn'); return; }
+
+  const description = document.getElementById('f-tpl-desc').value.trim();
+  const is_shared = document.getElementById('f-tpl-shared').checked;
+  const shifts = {};
+  for (let i = 0; i < 7; i++) {
+    shifts[String(i)] = document.getElementById(`f-pattern-${i}`).value;
+  }
+  const pattern = { type: 'weekly', shifts };
+  const body = { name, description, pattern, is_shared };
+
+  try {
+    if (editing) {
+      await api(`/api/schedule-templates/${encodeURIComponent(editing.id)}`, { method:'PUT', body: JSON.stringify(body) });
+      toast('已更新');
+    } else {
+      await api('/api/schedule-templates', { method:'POST', body: JSON.stringify(body) });
+      toast('已建立');
+    }
+    closeTplEditor();
+    await load();
+  } catch(e) {
+    toast('儲存失敗：' + e.message, 'error');
+  }
+}
+
+async function deleteTpl() {
+  if (!editing) return;
+  if (!confirm(`確定刪除範本「${editing.name}」？`)) return;
+  try {
+    await api(`/api/schedule-templates/${encodeURIComponent(editing.id)}`, { method:'DELETE' });
+    toast('已刪除');
+    closeTplEditor();
+    await load();
+  } catch(e) {
+    toast('刪除失敗：' + e.message, 'error');
+  }
+}
+
+load();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>
