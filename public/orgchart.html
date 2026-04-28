@@ -396,7 +396,7 @@ window.onload = async () => {
       api('/api/departments'),
     ]);
     deptColorMap = {};
-    allDepts.forEach(d => { deptColorMap[d.name] = d.color || '#5B8DEF'; });
+    allDepts.forEach(d => { deptColorMap[d.id] = d.color || '#5B8DEF'; });
     renderTree();
     renderDeptCards();
   } catch(e) {
@@ -411,7 +411,7 @@ window.onload = async () => {
    (no children, no connectors)
 ════════════════════════════════════════════ */
 function cardHTML(emp) {
-  const color  = deptColorMap[emp.dept] || '#5B8DEF';
+  const color  = deptColorMap[emp.dept_id] || '#5B8DEF';
   const isTop  = emp.role === 'chairman' || emp.role === 'ceo';
   const badge  = ROLE_LABEL[emp.role];
   return `
@@ -500,9 +500,9 @@ function renderTree() {
 
   // Group by dept, preserving allDepts order then appending unknown depts
   const deptMap = new Map();
-  allDepts.forEach(d => deptMap.set(d.name, []));
+  allDepts.forEach(d => deptMap.set(d.id, []));
   rest.forEach(emp => {
-    const key = emp.dept || '未分組';
+    const key = emp.dept_id || '__unknown__';
     if (!deptMap.has(key)) deptMap.set(key, []);
     deptMap.get(key).push(emp);
   });
@@ -526,9 +526,11 @@ function renderTree() {
   if (activeDepts.length) {
     html += `<div class="org-connector-v"></div>
     <div class="org-branches">
-      ${activeDepts.map(([deptName, members], idx) => {
-        const color   = deptColorMap[deptName] || '#5B8DEF';
-        const bId     = `d${idx}`;
+      ${activeDepts.map(([deptId, members], idx) => {
+        const color    = deptColorMap[deptId] || '#5B8DEF';
+        const dept     = allDepts.find(d => d.id === deptId);
+        const deptName = dept?.name || (deptId === '__unknown__' ? '未分組' : deptId);
+        const bId      = `d${idx}`;
 
         // 部門主管嚴格依 is_manager=true；無人時 mgrPlaceholderCard()
         const mgr  = members.find(e => e.is_manager === true);
@@ -592,7 +594,7 @@ function renderDeptCards() {
   }
   container.innerHTML = allDepts.map(dept => {
     const color   = dept.color || '#5B8DEF';
-    const members = allEmployees.filter(e => e.dept === dept.name)
+    const members = allEmployees.filter(e => e.dept_id === dept.id)
       .sort((a,b) => (ROLE_PRIORITY[a.role]||5)-(ROLE_PRIORITY[b.role]||5));
 
     const hasMgr = members.some(e => e.is_manager === true);
@@ -654,7 +656,7 @@ const ROLE_FULL = {
 function openDetail(empId) {
   const emp = allEmployees.find(e => e.id === empId);
   if (!emp) return;
-  const color = deptColorMap[emp.dept] || '#5B8DEF';
+  const color = deptColorMap[emp.dept_id] || '#5B8DEF';
 
   document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
   const card = document.querySelector(`.node-card[data-id="${empId}"]`);
