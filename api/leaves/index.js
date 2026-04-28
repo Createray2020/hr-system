@@ -24,8 +24,8 @@
 // api/attendance/{[id].js, anomaly.js, index.js} precedent,Vercel 靜態檔名優先 dynamic route。
 
 import { supabaseAdmin } from '../../lib/supabase.js';
-import { requireRole } from '../../lib/auth.js';
-import { BACKOFFICE_ROLES } from '../../lib/roles.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
+import { BACKOFFICE_ROLES, canAccessBackoffice } from '../../lib/roles.js';
 import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { submitLeaveRequest } from '../../lib/leave/request-flow.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
@@ -83,6 +83,11 @@ export default async function handler(req, res) {
     let q = supabaseAdmin.from('leave_requests').select('*').order('applied_at', { ascending: false });
     if (status) q = q.eq('status',     status);
     if (type)   q = q.eq('leave_type', type);
+
+    // 員工只能看自己已核准/送審的假;主管/HR 看全公司(leave-admin 等頁面靠 dept_id 再篩)
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+    if (!canAccessBackoffice(caller) && caller.id) q = q.eq('employee_id', caller.id);
 
     const { data: leaves, error } = await q;
     if (error) return res.status(500).json({ error: error.message });

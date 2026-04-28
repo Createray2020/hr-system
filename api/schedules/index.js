@@ -56,9 +56,12 @@ export default async function handler(req, res) {
   if (isNewGet)  return handleNewGet(req, res);
   if (isNewPost) return handleNewPost(req, res);
 
-  // ── Schedules（legacy，原邏輯一行不動）──
+  // ── Schedules（legacy）──
   if (req.method === 'GET') {
     try {
+      const caller = await requireAuth(req, res);
+      if (!caller) return;
+
       const { dept, start, end, employee_id } = req.query;
 
       let q = supabaseAdmin
@@ -68,6 +71,9 @@ export default async function handler(req, res) {
       if (start)       q = q.gte('work_date', start);
       if (end)         q = q.lte('work_date', end);
       if (employee_id) q = q.eq('employee_id', employee_id);
+
+      // 員工只能看自己;主管/HR 看全部(calendar 員工視角過濾)
+      if (!canAccessBackoffice(caller) && caller.id) q = q.eq('employee_id', caller.id);
 
       const { data: schedules, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
