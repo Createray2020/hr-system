@@ -9,6 +9,7 @@ import { requireAuth } from '../../../lib/auth.js';
 import { isBackofficeRole } from '../../../lib/roles.js';
 import { canTransition } from '../../../lib/schedule/period-state.js';
 import { logScheduleChange } from '../../../lib/schedule/change-logger.js';
+import { sendPushToEmployees, createNotifications } from '../../../lib/push.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -62,6 +63,23 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[schedule-periods/approve] logScheduleChange failed:', e.message);
+  }
+
+  // C7-3:approve period → 通知員工本人
+  try {
+    const wishPayload = {
+      type: 'schedule',
+      title: '你的排班已公告',
+      body: `${period.period_start} 月份排班已確認、可開始打卡`,
+      url: '/employee-schedule.html',
+      tag: `schedule-approved-${id}`,
+    };
+    Promise.allSettled([
+      sendPushToEmployees([period.employee_id], wishPayload),
+      createNotifications([period.employee_id], wishPayload),
+    ]).catch(() => {});
+  } catch (notifyErr) {
+    console.error('[approve] notify failed:', notifyErr);
   }
 
   return res.status(200).json({ period: updated });
