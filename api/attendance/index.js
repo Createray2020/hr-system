@@ -62,7 +62,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ date: today, punch_in: fmtTime(data.clock_in), punch_out: fmtTime(data.clock_out), status: data.status, work_hours: data.work_hours });
     }
 
-    const { employee_id, month, date, status, all: allRecords, start, end, dept } = req.query;
+    const { employee_id, month, date, status, all: allRecords, start, end, dept, dept_id } = req.query;
 
     // ── GET all employees' records (管理者用，JS 合併員工資料) ─────────────
     if (allRecords === 'true') {
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
       if (attErr) return res.status(500).json({ error: attErr.message });
 
       // 取員工資料（一次全撈，在 JS 合併）
-      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept, avatar');
+      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept, dept_id, avatar');
       const empMap = {};
       (empData || []).forEach(e => { empMap[e.id] = e; });
 
@@ -84,7 +84,8 @@ export default async function handler(req, res) {
         employees: empMap[r.employee_id] || null,
       }));
 
-      if (dept) rows = rows.filter(r => r.employees?.dept === dept);
+      if (dept_id)   rows = rows.filter(r => r.employees?.dept_id === dept_id);
+      else if (dept) rows = rows.filter(r => r.employees?.dept === dept);
       return res.status(200).json(rows);
     }
 

@@ -61,11 +61,11 @@ export default async function handler(req, res) {
         .from('leave_requests').select('*').eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到假單' });
       const { data: emp } = await supabaseAdmin
-        .from('employees').select('name, dept, position, avatar')
+        .from('employees').select('name, dept, dept_id, position, avatar')
         .eq('id', leave.employee_id).single();
       return res.status(200).json({
         ...leave,
-        emp_name: emp?.name, dept: emp?.dept, position: emp?.position, avatar: emp?.avatar,
+        emp_name: emp?.name, dept: emp?.dept, dept_id: emp?.dept_id, position: emp?.position, avatar: emp?.avatar,
       });
     }
 
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
       return res.status(200).json(stats);
     }
 
-    const { status, dept, type, search } = req.query;
+    const { status, dept, dept_id, type, search } = req.query;
     let q = supabaseAdmin.from('leave_requests').select('*').order('applied_at', { ascending: false });
     if (status) q = q.eq('status',     status);
     if (type)   q = q.eq('leave_type', type);
@@ -88,15 +88,16 @@ export default async function handler(req, res) {
 
     const empIds = [...new Set(leaves.map(l => l.employee_id))];
     const { data: emps, error: empErr } = await supabaseAdmin
-      .from('employees').select('id, name, dept, position, avatar').in('id', empIds);
+      .from('employees').select('id, name, dept, dept_id, position, avatar').in('id', empIds);
     if (empErr) return res.status(500).json({ error: empErr.message });
 
     const empMap = Object.fromEntries(emps.map(e => [e.id, e]));
     let rows = leaves.map(l => {
       const e = empMap[l.employee_id] || {};
-      return { ...l, emp_name: e.name, dept: e.dept, position: e.position, avatar: e.avatar };
+      return { ...l, emp_name: e.name, dept: e.dept, dept_id: e.dept_id, position: e.position, avatar: e.avatar };
     });
-    if (dept)   rows = rows.filter(r => r.dept === dept);
+    if (dept_id)   rows = rows.filter(r => r.dept_id === dept_id);
+    else if (dept) rows = rows.filter(r => r.dept === dept);
     if (search) rows = rows.filter(r => (r.emp_name || '').includes(search));
     return res.status(200).json(rows);
   }
