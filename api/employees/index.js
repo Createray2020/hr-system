@@ -185,7 +185,7 @@ export default async function handler(req, res) {
     const { status, dept, dept_id, search } = req.query;
 
     // 員工互看用 16 欄位白名單（排除薪資/個資/系統欄位）；後台 (hr/admin/ceo/chairman) 看全欄位
-    const PUBLIC_FIELDS = 'id, emp_no, name, dept, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
+    const PUBLIC_FIELDS = 'id, emp_no, name, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
     const cols = isBackofficeRole(caller) ? '*' : PUBLIC_FIELDS;
 
     // C0-5a JOIN departments 補 dept_name

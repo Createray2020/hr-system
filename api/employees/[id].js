@@ -32,7 +32,7 @@ export default async function handler(req, res) {
 
     const isSelf = caller.id === id;
     const isHR = isBackofficeRole(caller);
-    const PUBLIC_FIELDS = 'id, emp_no, name, dept, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
+    const PUBLIC_FIELDS = 'id, emp_no, name, dept_id, position, role, is_manager, status, avatar, email, phone, hire_date, manager_id, employment_type, birth_date';
     const cols = (isSelf || isHR) ? '*' : PUBLIC_FIELDS;
 
     // C0-5a JOIN departments 補 dept_name
