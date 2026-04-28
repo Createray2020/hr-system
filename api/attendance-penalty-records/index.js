@@ -47,7 +47,6 @@ export default async function handler(req, res) {
     const enriched = records.map(r => ({
       ...r,
       emp_name: empMap[r.employee_id]?.name || '',
-      dept:     empMap[r.employee_id]?.dept || '',
       dept_id:  empMap[r.employee_id]?.dept_id || null,
       dept_name: empMap[r.employee_id]?.dept_name || null,
     }));

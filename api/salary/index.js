@@ -21,7 +21,7 @@ import { skipAttendanceBonus, isBackofficeRole, BACKOFFICE_ROLES } from '../../l
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { makeSalaryRepo } from './_repo.js';
-import { addDeptNameNested } from '../../lib/dept-name-mapper.js';
+import { addDeptName, addDeptNameNested } from '../../lib/dept-name-mapper.js';
 
 function calcAttendanceBonus(emp) {
   if (!emp) return 0;
@@ -73,7 +73,6 @@ export default async function handler(req, res) {
         gross_salary:   gross,
         net_salary:     net,
         emp_name:       emp?.name,
-        dept:           emp?.dept,
         dept_name:      emp?.dept_name,
         avatar:         emp?.avatar,
         emp_role:       emp?.role,
@@ -142,12 +141,14 @@ async function handleNewGet(req, res) {
     if (ids.length) {
       const { data: emps } = await supabaseAdmin
         .from('employees').select('id, name, dept_id, departments(name)').in('id', ids);
+      addDeptName(emps);
       for (const e of (emps || [])) empMap[e.id] = e;
     }
     const enriched = records.map(r => ({
       ...r,
-      emp_name: empMap[r.employee_id]?.name || '',
-      dept:     empMap[r.employee_id]?.dept || '',
+      emp_name:  empMap[r.employee_id]?.name || '',
+      dept_id:   empMap[r.employee_id]?.dept_id || null,
+      dept_name: empMap[r.employee_id]?.dept_name || null,
     }));
     return res.status(200).json({ records: enriched });
   } catch (e) {

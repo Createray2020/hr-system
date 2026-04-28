@@ -87,8 +87,7 @@ export default async function handler(req, res) {
         return {
           ...s,
           emp_name:    emp.name    || '',
-          emp_dept:    emp.dept    || s.dept || '',
-          emp_dept_name: emp.dept_name || emp.dept || '',
+          emp_dept_name: emp.dept_name || '',
           avatar:      emp.avatar  || '',
           shift_name:  s.shift_types?.name        || '',
           shift_color: s.shift_types?.color       || '#5B8DEF',

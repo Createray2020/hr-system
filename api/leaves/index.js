@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       addDeptNameSingle(emp);
       return res.status(200).json({
         ...leave,
-        emp_name: emp?.name, dept: emp?.dept, dept_id: emp?.dept_id, dept_name: emp?.dept_name, position: emp?.position, avatar: emp?.avatar,
+        emp_name: emp?.name, dept_id: emp?.dept_id, dept_name: emp?.dept_name, position: emp?.position, avatar: emp?.avatar,
       });
     }
 
@@ -97,10 +97,9 @@ export default async function handler(req, res) {
     const empMap = Object.fromEntries(emps.map(e => [e.id, e]));
     let rows = leaves.map(l => {
       const e = empMap[l.employee_id] || {};
-      return { ...l, emp_name: e.name, dept: e.dept, dept_id: e.dept_id, dept_name: e.dept_name, position: e.position, avatar: e.avatar };
+      return { ...l, emp_name: e.name, dept_id: e.dept_id, dept_name: e.dept_name, position: e.position, avatar: e.avatar };
     });
     if (dept_id)   rows = rows.filter(r => r.dept_id === dept_id);
-    else if (dept) rows = rows.filter(r => r.dept === dept);
     if (search) rows = rows.filter(r => (r.emp_name || '').includes(search));
     return res.status(200).json(rows);
   }

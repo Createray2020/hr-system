@@ -87,7 +87,6 @@ export default async function handler(req, res) {
       }));
 
       if (dept_id)   rows = rows.filter(r => r.employees?.dept_id === dept_id);
-      else if (dept) rows = rows.filter(r => r.employees?.dept === dept);
       return res.status(200).json(rows);
     }
 

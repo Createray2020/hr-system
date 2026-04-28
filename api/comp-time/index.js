@@ -60,7 +60,6 @@ export default async function handler(req, res) {
         byEmp[eid] = {
           employee_id: eid,
           emp_name: empMap[eid]?.name || '',
-          dept:     empMap[eid]?.dept || '',
           dept_id:  empMap[eid]?.dept_id || null,
           dept_name: empMap[eid]?.dept_name || null,
           total_remaining: 0,

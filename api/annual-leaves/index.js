@@ -60,7 +60,6 @@ async function handleGet(req, res) {
   const rows = (data || []).map(r => ({
     ...r,
     emp_name: empMap[r.employee_id]?.name || '',
-    dept:     empMap[r.employee_id]?.dept || '',
     dept_id:  empMap[r.employee_id]?.dept_id || null,
     dept_name: empMap[r.employee_id]?.dept_name || null,
     seniority_start: empMap[r.employee_id]?.annual_leave_seniority_start || null,
