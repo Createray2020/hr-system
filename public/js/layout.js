@@ -43,9 +43,9 @@
     {
       title: '總覽',
       items: [
-        { page:'dashboard',     icon:'🏠', label:'總覽',   href:'/dashboard.html' },
+        { page:'dashboard',     icon:'🏠', label:'總覽',   href:'/dashboard.html', gate: isMgrOrHR },
         { page:'calendar',      icon:'📅', label:'行事曆', href:'/calendar.html' },
-        { page:'announcements', icon:'📢', label:'公告欄', href:'/announcements.html' },
+        { page:'announcements', icon:'📢', label:'公告欄', href:'/announcements.html', gate: isMgrOrHR },
       ]
     },
     {
