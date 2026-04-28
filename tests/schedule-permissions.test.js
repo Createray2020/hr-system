@@ -11,6 +11,7 @@ function period(overrides = {}) {
     status: 'draft',
     period_start: '2026-05-01',
     period_end:   '2026-05-31',
+    wish_deadline: null,  // C6:預設 null (不擋)、case override 補
     ...overrides,
   };
 }
@@ -53,6 +54,36 @@ describe('canEmployeeEditSchedule', () => {
 
   it('null period → NO_PERIOD', () => {
     expect(canEmployeeEditSchedule(null, 'E001', '2026-04-26').reason).toBe('NO_PERIOD');
+  });
+
+  // ===== C6：wish_deadline check =====
+
+  it('C6: 員工 + draft + wish_deadline 已過 → WISH_DEADLINE_PASSED', () => {
+    const r = canEmployeeEditSchedule(
+      period({ wish_deadline: '2026-04-25' }),
+      'E001',
+      '2026-04-26',  // 過了截止日
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('WISH_DEADLINE_PASSED');
+  });
+
+  it('C6: 員工 + draft + wish_deadline 當天 → ok（截止日當天還能改）', () => {
+    const r = canEmployeeEditSchedule(
+      period({ wish_deadline: '2026-04-25' }),
+      'E001',
+      '2026-04-25',  // 截止日當天
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('C6: 員工 + draft + wish_deadline NULL → ok（向後相容舊 period）', () => {
+    const r = canEmployeeEditSchedule(
+      period({ wish_deadline: null }),
+      'E001',
+      '2026-04-26',
+    );
+    expect(r.ok).toBe(true);
   });
 });
 
