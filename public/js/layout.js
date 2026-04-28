@@ -53,7 +53,7 @@
       items: [
         { page:'employees',          icon:'👥', label:'員工資料', href:'/employees.html', gate: u => window.Roles?.isBackofficeRole(u) },
         { page:'orgchart',           icon:'🗂️', label:'組織圖',   href:'/orgchart.html' },
-        { page:'departments',        icon:'🏢', label:'部門管理', href:'/departments.html' },
+        { page:'departments',        icon:'🏢', label:'部門管理', href:'/departments.html', gate: isHRish },
         { page:'announcement-admin', icon:'📝', label:'公告管理', href:'/announcement-admin.html', gate: u => window.Roles?.canManageAnnouncements(u) },
       ]
     },
@@ -87,13 +87,13 @@
       items: [
         { page:'employee-salary', icon:'💵', label:'我的薪資', href:'/employee-salary.html' },
         { page:'salary',          icon:'💰', label:'薪資管理', href:'/salary.html', gate: isHRish },
-        { page:'insurance',       icon:'🏥', label:'勞健保',   href:'/insurance.html' },
+        { page:'insurance',       icon:'🏥', label:'勞健保',   href:'/insurance.html', gate: isHRish },
       ]
     },
     {
       title: '行政管理',
       items: [
-        { page:'approvals',      icon:'✅', label:'審批管理',  href:'/approvals.html' },
+        { page:'approvals',      icon:'✅', label:'審批管理',  href:'/approvals.html', gate: isHRish },
         { page:'notifications',  icon:'🔔', label:'通知中心',  href:'/notifications.html' },
       ]
     },
