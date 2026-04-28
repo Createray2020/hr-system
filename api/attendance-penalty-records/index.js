@@ -39,13 +39,14 @@ export default async function handler(req, res) {
     let empMap = {};
     if (empIds.length) {
       const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept').in('id', empIds);
+        .from('employees').select('id, name, dept, dept_id').in('id', empIds);
       for (const e of (emps || [])) empMap[e.id] = e;
     }
     const enriched = records.map(r => ({
       ...r,
       emp_name: empMap[r.employee_id]?.name || '',
       dept:     empMap[r.employee_id]?.dept || '',
+      dept_id:  empMap[r.employee_id]?.dept_id || null,
     }));
     return res.status(200).json({ records: enriched });
   } catch (e) {

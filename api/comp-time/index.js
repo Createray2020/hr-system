@@ -47,7 +47,7 @@ export default async function handler(req, res) {
     let empMap = {};
     if (empIds.length) {
       const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept').in('id', empIds);
+        .from('employees').select('id, name, dept, dept_id').in('id', empIds);
       for (const e of (emps || [])) empMap[e.id] = e;
     }
     // 按員工聚合
@@ -59,6 +59,7 @@ export default async function handler(req, res) {
           employee_id: eid,
           emp_name: empMap[eid]?.name || '',
           dept:     empMap[eid]?.dept || '',
+          dept_id:  empMap[eid]?.dept_id || null,
           total_remaining: 0,
           records: [],
         };

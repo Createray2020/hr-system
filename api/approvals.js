@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     if (id) {
       const { data: reqData, error } = await supabaseAdmin
         .from('approval_requests')
-        .select('*, employees!applicant_id(name, dept, position, avatar)')
+        .select('*, employees!applicant_id(name, dept, dept_id, position, avatar)')
         .eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到申請' });
 
@@ -56,7 +56,7 @@ export default async function handler(req, res) {
       const stepNum = role === 'manager' ? 1 : role === 'ceo' || role === 'chairman' ? 2 : 3;
       const { data: steps, error } = await supabaseAdmin
         .from('approval_steps')
-        .select('*, approval_requests(*, employees!applicant_id(name, dept, position, avatar))')
+        .select('*, approval_requests(*, employees!applicant_id(name, dept, dept_id, position, avatar))')
         .eq('step_number', stepNum)
         .eq('approver_role', role === 'chairman' ? 'ceo' : role)
         .eq('status', 'in_progress')
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
     // ── 全部申請 ────────────────────────────────────────────────────────────
     const { data, error } = await supabaseAdmin
       .from('approval_requests')
-      .select('*, employees!applicant_id(name, dept, position, avatar)')
+      .select('*, employees!applicant_id(name, dept, dept_id, position, avatar)')
       .order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json(data);

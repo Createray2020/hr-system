@@ -76,7 +76,7 @@ export default async function handler(req, res) {
       // Two-step: fetch employees
       const empIds = [...new Set(schedules.map(s => s.employee_id))];
       const { data: emps, error: empErr } = await supabaseAdmin
-        .from('employees').select('id, name, dept, avatar').in('id', empIds);
+        .from('employees').select('id, name, dept, dept_id, avatar').in('id', empIds);
       if (empErr) return res.status(500).json({ error: empErr.message });
 
       const empMap = Object.fromEntries((emps || []).map(e => [e.id, e]));

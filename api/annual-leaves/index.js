@@ -52,13 +52,14 @@ async function handleGet(req, res) {
   const empMap = {};
   if (empIds.length) {
     const { data: emps } = await supabaseAdmin
-      .from('employees').select('id, name, dept, annual_leave_seniority_start').in('id', empIds);
+      .from('employees').select('id, name, dept, dept_id, annual_leave_seniority_start').in('id', empIds);
     for (const e of (emps || [])) empMap[e.id] = e;
   }
   const rows = (data || []).map(r => ({
     ...r,
     emp_name: empMap[r.employee_id]?.name || '',
     dept:     empMap[r.employee_id]?.dept || '',
+    dept_id:  empMap[r.employee_id]?.dept_id || null,
     seniority_start: empMap[r.employee_id]?.annual_leave_seniority_start || null,
   }));
   return res.status(200).json({ records: rows });
