@@ -229,6 +229,10 @@ export default async function handler(req, res) {
     }
 
     await syncDeptFields(supabaseAdmin, body);
+    // 預設 annual_leave_seniority_start = hire_date（跟 migration backfill 邏輯一致）
+    if (!body.annual_leave_seniority_start && body.hire_date) {
+      body.annual_leave_seniority_start = body.hire_date;
+    }
     const { error } = await supabaseAdmin.from('employees').insert([{ id, ...body }]);
     if (error) return res.status(500).json({ error: error.message });
 
