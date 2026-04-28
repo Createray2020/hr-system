@@ -87,19 +87,19 @@ describe('canManagerEditSchedule', () => {
     expect(r.isLateChange).toBe(true);
   });
 
-  it('部門主管 + 是該員工的主管 → ok', () => {
+  it('部門主管 + 同部門 → ok', () => {
     const r = canManagerEditSchedule(
       period(),
-      { id: 'M1', role: 'employee', is_manager: true, manages_employee_id: 'E001' },
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
       '2026-04-26',
     );
     expect(r.ok).toBe(true);
   });
 
-  it('部門主管但不是該員工的主管 → NOT_MANAGER_OR_HR', () => {
+  it('部門主管但不同部門 → NOT_MANAGER_OR_HR', () => {
     const r = canManagerEditSchedule(
       period(),
-      { id: 'M1', role: 'employee', is_manager: true, manages_employee_id: 'OTHER' },
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: false },
       '2026-04-26',
     );
     expect(r.ok).toBe(false);

@@ -45,16 +45,16 @@ export default async function handler(req, res) {
     const r = canEmployeeEditSchedule(period, existing.employee_id, today);
     if (!r.ok) return res.status(403).json({ error: r.reason });
   } else {
-    let manages = false;
-    if (caller.is_manager === true && caller.id) {
+    let inSameDept = false;
+    if (caller.is_manager === true && caller.dept_id) {
       const { data: emp } = await supabaseAdmin.from('employees')
-        .select('manager_id').eq('id', existing.employee_id).maybeSingle();
-      manages = !!emp && emp.manager_id === caller.id;
+        .select('dept_id').eq('id', existing.employee_id).maybeSingle();
+      inSameDept = !!emp && emp.dept_id === caller.dept_id;
     }
     const manager = {
       id: caller.id, role: caller.role,
       is_manager: caller.is_manager === true,
-      manages_employee_id: manages ? existing.employee_id : null,
+      in_same_dept: inSameDept,
     };
     const r = canManagerEditSchedule(period, manager, today);
     if (!r.ok) return res.status(403).json({ error: r.reason });

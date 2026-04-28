@@ -194,7 +194,7 @@ async function load(retries = 0) {
 
 function filterVisibleEmps(emps, user) {
   if (['hr','admin','ceo','chairman'].includes(user.role)) return emps;
-  if (user.is_manager) return emps.filter(e => e.manager_id === user.id);
+  if (user.is_manager) return emps.filter(e => e.dept_id === user.dept_id);
   return [];
 }
 

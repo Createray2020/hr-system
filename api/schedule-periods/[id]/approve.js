@@ -25,16 +25,16 @@ export default async function handler(req, res) {
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'period not found' });
 
-  // 必須是該員工的主管或 HR
+  // 必須是同部門主管或 HR
   const isHR = isBackofficeRole(caller);
-  let isDirectManager = false;
-  if (caller.is_manager === true && caller.id) {
+  let isInSameDept = false;
+  if (caller.is_manager === true && caller.dept_id) {
     const { data: emp } = await supabaseAdmin
-      .from('employees').select('manager_id').eq('id', period.employee_id).maybeSingle();
-    isDirectManager = !!emp && emp.manager_id === caller.id;
+      .from('employees').select('dept_id').eq('id', period.employee_id).maybeSingle();
+    isInSameDept = !!emp && emp.dept_id === caller.dept_id;
   }
-  if (!isHR && !isDirectManager) {
-    return res.status(403).json({ error: 'not manager or HR' });
+  if (!isHR && !isInSameDept) {
+    return res.status(403).json({ error: 'not in same dept or HR' });
   }
 
   const tr = canTransition(period.status, 'approve', { is_manager: true });
