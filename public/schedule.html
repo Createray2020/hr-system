@@ -63,7 +63,7 @@
         <span id="week-range" style="font-family:'DM Mono',monospace;font-size:14px;min-width:200px;text-align:center">--</span>
         <button class="btn btn-ghost" onclick="changeWeek(1)">→</button>
         <button class="btn btn-ghost" onclick="goThisWeek()">本週</button>
-        <button class="btn btn-ghost" onclick="exportScheduleExcel()" title="匯出當前月份的排班表">📤 匯出</button>
+        <button class="btn btn-ghost" onclick="openExportModal()" title="匯出排班（選範圍）">📤 匯出</button>
         <button class="btn btn-ghost" onclick="document.getElementById('import-file').click()" title="從 Excel 匯入排班">📥 匯入</button>
         <input type="file" id="import-file" accept=".xlsx,.xls" style="display:none" onchange="handleImportFile(event)">
       </div>
@@ -90,6 +90,76 @@
       </div>
     </div>
   </main>
+</div>
+
+<!-- 匯出範圍 Modal -->
+<div class="modal-bg" id="export-modal">
+  <div class="modal" style="max-width:600px;width:95vw;max-height:88vh;overflow:auto">
+    <div class="modal-title">匯出排班</div>
+
+    <!-- 時間範圍 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.5px;margin-bottom:8px">時間範圍</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex-wrap:wrap">
+          <input type="radio" name="ex-range-mode" value="month" checked onchange="renderExportModal()">
+          <span>單月</span>
+          <select id="ex-year" class="form-select" style="width:100px" onchange="updateExportPreview()"></select>
+          <span>年</span>
+          <select id="ex-month" class="form-select" style="width:80px" onchange="updateExportPreview()"></select>
+          <span>月</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="radio" name="ex-range-mode" value="custom" onchange="renderExportModal()">
+          <span>自訂區間</span>
+        </label>
+        <div id="ex-custom-row" style="display:none;margin-left:24px;gap:10px;align-items:center">
+          <span style="font-size:13px;color:var(--text-dim)">起</span>
+          <input type="date" id="ex-start" class="form-input" style="width:auto" onchange="updateExportPreview()">
+          <span style="font-size:13px;color:var(--text-dim);margin-left:8px">迄</span>
+          <input type="date" id="ex-end" class="form-input" style="width:auto" onchange="updateExportPreview()">
+        </div>
+      </div>
+    </div>
+
+    <!-- 人員範圍 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.5px;margin-bottom:8px">人員範圍</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="radio" name="ex-people-mode" value="all" checked onchange="renderExportModal()">
+          <span>全部員工 (<span id="ex-all-count">0</span> 人)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="radio" name="ex-people-mode" value="single-dept" onchange="renderExportModal()">
+          <span>單一部門</span>
+        </label>
+        <div id="ex-single-dept-row" style="display:none;margin-left:24px">
+          <select id="ex-single-dept" class="form-select" onchange="updateExportPreview()"></select>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="radio" name="ex-people-mode" value="multi-dept" onchange="renderExportModal()">
+          <span>多部門勾選</span>
+        </label>
+        <div id="ex-multi-dept-row" style="display:none;margin-left:24px;max-height:140px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:8px"></div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="radio" name="ex-people-mode" value="custom-emp" onchange="renderExportModal()">
+          <span>自訂員工勾選</span>
+        </label>
+        <div id="ex-custom-emp-row" style="display:none;margin-left:24px;max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px"></div>
+      </div>
+    </div>
+
+    <div style="padding:10px 12px;background:rgba(91,141,239,.08);border:1px solid rgba(91,141,239,.2);border-radius:6px;font-size:13px;margin-bottom:14px">
+      預估匯出：<b id="ex-emp-count">0</b> 員工、<b id="ex-month-count">0</b> 個月
+      <span id="ex-warn" style="color:#F87171;margin-left:8px;display:none">（區間無效）</span>
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="closeExportModal()">取消</button>
+      <button class="btn btn-primary" id="ex-confirm-btn" onclick="runExportConfirm()">匯出</button>
+    </div>
+  </div>
 </div>
 
 <!-- 匯入預覽 Modal -->
@@ -702,53 +772,208 @@ function _currentMonthKey() {
   return { year: y, month: m };
 }
 
-async function exportScheduleExcel() {
+function openExportModal() {
   if (!window.__excelBuilder || !window.XLSX) {
     toast('Excel 模組尚未載入、請稍候再試', 'error'); return;
   }
   if (!visibleEmps.length) { toast('無員工可匯出', 'error'); return; }
 
+  // 預填年月（當前週的月份）
   const { year, month } = _currentMonthKey();
+  const ySel = document.getElementById('ex-year');
+  const mSel = document.getElementById('ex-month');
+  const now = new Date().getFullYear();
+  ySel.innerHTML = '';
+  for (let y = now - 2; y <= now + 2; y++) {
+    ySel.innerHTML += `<option value="${y}"${y === year ? ' selected' : ''}>${y}</option>`;
+  }
+  mSel.innerHTML = '';
+  for (let m = 1; m <= 12; m++) {
+    mSel.innerHTML += `<option value="${m}"${m === month ? ' selected' : ''}>${m}</option>`;
+  }
+  // 自訂區間預設 = 該月起迄
+  const lastDay = window.__excelBuilder.daysInMonth(year, month);
+  document.getElementById('ex-start').value = `${year}-${String(month).padStart(2,'0')}-01`;
+  document.getElementById('ex-end').value   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
-  // 直接 fetch 整月、不依賴 allSchedules state（state 只 cache 當前週相關月份）
-  let schedules = [];
-  try {
-    const r = await api(`/api/schedule-periods?year=${year}&month=${month}`);
-    schedules = r?.schedules || [];
-  } catch(e) {
-    toast('匯出失敗：' + e.message, 'error'); return;
+  // 全部員工 radio reset
+  document.querySelector('[name=ex-range-mode][value=month]').checked = true;
+  document.querySelector('[name=ex-people-mode][value=all]').checked = true;
+  document.getElementById('ex-all-count').textContent = visibleEmps.length;
+
+  // 部門列表（從 visibleEmps 推導）
+  const deptMap = {};
+  for (const emp of visibleEmps) {
+    const id = emp.dept_id || '';
+    if (!deptMap[id]) deptMap[id] = { id, name: emp.dept_name || '(未指派)', emps: [] };
+    deptMap[id].emps.push(emp);
+  }
+  const depts = Object.values(deptMap).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  // 單一部門 select
+  const singleSel = document.getElementById('ex-single-dept');
+  singleSel.innerHTML = depts.map(d =>
+    `<option value="${escHtml(d.id)}">${escHtml(d.name)} (${d.emps.length} 人)</option>`
+  ).join('');
+
+  // 多部門 checkbox 列
+  document.getElementById('ex-multi-dept-row').innerHTML = depts.map(d => `
+    <label style="display:flex;gap:6px;align-items:center;cursor:pointer;padding:3px 0;font-size:13px">
+      <input type="checkbox" name="ex-multi-dept" value="${escHtml(d.id)}" onchange="updateExportPreview()">
+      <span>${escHtml(d.name)} (${d.emps.length} 人)</span>
+    </label>
+  `).join('');
+
+  // 自訂員工 — 按部門分組
+  document.getElementById('ex-custom-emp-row').innerHTML = depts.map(d => `
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.5px;margin-bottom:4px">${escHtml(d.name)}</div>
+      ${d.emps.map(e => `
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;padding:2px 0 2px 8px;font-size:13px">
+          <input type="checkbox" name="ex-custom-emp" value="${escHtml(e.id)}" onchange="updateExportPreview()">
+          <span>${escHtml(e.id)} ${escHtml(e.name || '')}</span>
+        </label>
+      `).join('')}
+    </div>
+  `).join('');
+
+  renderExportModal();
+  document.getElementById('export-modal').classList.add('open');
+}
+
+function closeExportModal() {
+  document.getElementById('export-modal').classList.remove('open');
+  const btn = document.getElementById('ex-confirm-btn');
+  if (btn) { btn.disabled = false; btn.textContent = '匯出'; }
+}
+
+function renderExportModal() {
+  const rangeMode = document.querySelector('[name=ex-range-mode]:checked').value;
+  document.getElementById('ex-custom-row').style.display = (rangeMode === 'custom') ? 'flex' : 'none';
+
+  const peopleMode = document.querySelector('[name=ex-people-mode]:checked').value;
+  document.getElementById('ex-single-dept-row').style.display = (peopleMode === 'single-dept') ? '' : 'none';
+  document.getElementById('ex-multi-dept-row').style.display  = (peopleMode === 'multi-dept')  ? '' : 'none';
+  document.getElementById('ex-custom-emp-row').style.display  = (peopleMode === 'custom-emp')  ? '' : 'none';
+
+  updateExportPreview();
+}
+
+function _getSelectedRange() {
+  const mode = document.querySelector('[name=ex-range-mode]:checked')?.value;
+  if (mode === 'month') {
+    const y = parseInt(document.getElementById('ex-year').value);
+    const m = parseInt(document.getElementById('ex-month').value);
+    if (!y || !m) return [];
+    return [{ year: y, month: m }];
+  }
+  // custom：用 start/end 取出涵蓋的所有月份
+  const start = document.getElementById('ex-start').value;
+  const end   = document.getElementById('ex-end').value;
+  if (!start || !end) return [];
+  if (start > end) return [];
+  const months = [];
+  let cur = new Date(start + 'T00:00:00Z');
+  const last = new Date(end + 'T00:00:00Z');
+  while (cur <= last) {
+    months.push({ year: cur.getUTCFullYear(), month: cur.getUTCMonth() + 1 });
+    cur.setUTCMonth(cur.getUTCMonth() + 1);
+    cur.setUTCDate(1);
+  }
+  return months;
+}
+
+function _getSelectedEmps() {
+  const mode = document.querySelector('[name=ex-people-mode]:checked')?.value;
+  if (mode === 'all') return visibleEmps.slice();
+  if (mode === 'single-dept') {
+    const deptId = document.getElementById('ex-single-dept').value;
+    return visibleEmps.filter(e => (e.dept_id || '') === deptId);
+  }
+  if (mode === 'multi-dept') {
+    const checked = [...document.querySelectorAll('[name=ex-multi-dept]:checked')].map(c => c.value);
+    return visibleEmps.filter(e => checked.includes(e.dept_id || ''));
+  }
+  if (mode === 'custom-emp') {
+    const checked = [...document.querySelectorAll('[name=ex-custom-emp]:checked')].map(c => c.value);
+    return visibleEmps.filter(e => checked.includes(e.id));
+  }
+  return [];
+}
+
+function updateExportPreview() {
+  const months = _getSelectedRange();
+  const emps   = _getSelectedEmps();
+  document.getElementById('ex-emp-count').textContent = emps.length;
+  document.getElementById('ex-month-count').textContent = months.length;
+
+  const rangeMode = document.querySelector('[name=ex-range-mode]:checked')?.value;
+  const warn = document.getElementById('ex-warn');
+  if (rangeMode === 'custom' && months.length === 0) {
+    warn.style.display = '';
+  } else {
+    warn.style.display = 'none';
   }
 
-  let monthEvents = [];
-  try {
-    const start = `${year}-${String(month).padStart(2,'0')}-01`;
-    const lastDay = window.__excelBuilder.daysInMonth(year, month);
-    const end = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
-    monthEvents = await api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`) || [];
-  } catch(_) { monthEvents = []; }
+  const btn = document.getElementById('ex-confirm-btn');
+  btn.disabled = emps.length === 0 || months.length === 0;
+}
 
-  const { sheetName, aoa, columnWidths } = window.__excelBuilder.buildScheduleAOA({
-    year, month,
-    employees: visibleEmps,
-    schedules,
-    shiftTypes,
-    gcalEvents: monthEvents,
-  });
+async function runExportConfirm() {
+  const months = _getSelectedRange();
+  const emps   = _getSelectedEmps();
+  if (!months.length || !emps.length) return;
+
+  const btn = document.getElementById('ex-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = `匯出中… 0 / ${months.length}`;
 
   const wb = window.XLSX.utils.book_new();
-  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
-  if (columnWidths?.length) ws['!cols'] = columnWidths.map(w => ({ wch: w }));
-  ws['!freeze'] = { xSplit: 3, ySplit: 5 };
-  window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  let i = 0;
+  for (const { year, month } of months) {
+    let schedules = [];
+    let monthEvents = [];
+    try {
+      const r = await api(`/api/schedule-periods?year=${year}&month=${month}`);
+      schedules = r?.schedules || [];
+    } catch(e) {
+      toast(`${year}/${month} 匯出失敗：${e.message}`, 'error');
+      btn.disabled = false; btn.textContent = '匯出';
+      return;
+    }
+    try {
+      const start = `${year}-${String(month).padStart(2,'0')}-01`;
+      const lastDay = window.__excelBuilder.daysInMonth(year, month);
+      const end = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+      monthEvents = await api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`) || [];
+    } catch(_) { /* GCal silent fail */ }
+
+    const { sheetName, aoa, columnWidths } = window.__excelBuilder.buildScheduleAOA({
+      year, month, employees: emps, schedules, shiftTypes, gcalEvents: monthEvents,
+    });
+    const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+    if (columnWidths?.length) ws['!cols'] = columnWidths.map(w => ({ wch: w }));
+    ws['!freeze'] = { xSplit: 3, ySplit: 5 };
+    window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+    i++;
+    btn.textContent = `匯出中… ${i} / ${months.length}`;
+  }
 
   const wbout = window.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${year}-${String(month).padStart(2,'0')}-排班.xlsx`;
+  const first = months[0], last = months[months.length - 1];
+  const fname = months.length === 1
+    ? `${first.year}-${String(first.month).padStart(2,'0')}-排班.xlsx`
+    : `${first.year}${String(first.month).padStart(2,'0')}-${last.year}${String(last.month).padStart(2,'0')}-排班.xlsx`;
+  a.download = fname;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  toast(`已匯出 ${year}/${month} 排班（${visibleEmps.length} 員 / ${schedules.length} 筆）`);
+
+  closeExportModal();
+  toast(`已匯出 ${months.length} 個月、${emps.length} 員工`);
 }
 
 async function handleImportFile(evt) {
