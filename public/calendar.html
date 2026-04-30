@@ -187,8 +187,18 @@ const state = {
 
 // Stop-gap：非 HR 角色只看自己部門的請假 / 班表。
 // null = HR / CEO / chairman / admin（不過濾、看全部）
-// Set = 非 HR、過濾用的本部門員工 id 集合
+// Set = 非 HR、過濾用的本部門員工 id 集合（含空 Set fail-safe）
 let myDeptEmpIds = null;
+
+// 輪詢等待 layout.js 設好 window.currentUser、避免 race
+async function waitForCurrentUser(maxMs = 5000) {
+  const step = 100;
+  for (let i = 0; i < maxMs / step; i++) {
+    if (window.currentUser) return window.currentUser;
+    await new Promise(r => setTimeout(r, step));
+  }
+  return null;
+}
 
 const WEEKDAYS = ['日','一','二','三','四','五','六'];
 const MONTHS   = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
@@ -208,16 +218,20 @@ window.onload = async () => {
 };
 
 // 建立本部門員工 id Set（給 fetchLeaves / fetchSchedules filter 用）
+// fail-safe：等不到 currentUser 或沒 dept_id 時設成空 Set、不要 return null
+// （null 在 fetchLeaves/fetchSchedules 等於 HR、會誤放全部）
 async function loadDeptScope() {
-  const u = window.currentUser;
-  if (!u) return;
+  const u = await waitForCurrentUser();
+  if (!u) {
+    myDeptEmpIds = new Set();
+    return;
+  }
   if (window.Roles?.isBackofficeRole(u)) {
     myDeptEmpIds = null; // HR+：全部看到
     return;
   }
   const deptId = u.dept_id;
   if (!deptId) {
-    // 員工沒部門 → 空集合（什麼都看不到）
     myDeptEmpIds = new Set();
     return;
   }

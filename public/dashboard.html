@@ -156,19 +156,30 @@ const LEAVE_TYPES  = {annual:'特休假',sick:'病假',personal:'事假',materni
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
   setWelcome();
-  applyRoleFilter();
+  await applyRoleFilter();
   try {
     await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
 
+// 輪詢等待 layout.js 設好 window.currentUser、避免 race
+async function waitForCurrentUser(maxMs = 5000) {
+  const step = 100;
+  for (let i = 0; i < maxMs / step; i++) {
+    if (window.currentUser) return window.currentUser;
+    await new Promise(r => setTimeout(r, step));
+  }
+  return null;
+}
+
 // Stop-gap：非 HR / CEO / chairman 隱藏薪資與員工資料區塊；
 // 主管與員工的「請假審批」卡也隱藏（連結指向錯頁、append query 沒意義）。
 // 用 display:none 而非 remove、保留子元素給 loadDashboard 寫入時 getElementById 可找到。
 // 真正的後端 role filter 在 5/1 後 backlog 處理。
-function applyRoleFilter() {
-  const u = window.currentUser;
-  const isHR = window.Roles?.isBackofficeRole(u);
+async function applyRoleFilter() {
+  // 等 currentUser 載入再判斷、否則 race 中 isBackofficeRole(undefined)=false 會誤隱藏 HR 元素
+  const u = await waitForCurrentUser();
+  const isHR = !!u && window.Roles?.isBackofficeRole(u);
   if (isHR) return;
   ['qc-leave', 'qc-employees', 'qc-salary', 'stat-salary-card', 'card-salary-overview']
     .forEach(id => {
