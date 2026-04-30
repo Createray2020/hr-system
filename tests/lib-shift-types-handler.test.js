@@ -51,6 +51,20 @@ describe('listShiftTypes', () => {
     expect(r.body.length).toBe(2);
     expect(sb.calls.from[0]).toBe('shift_types');
   });
+
+  it('includeInactive=true → 不過濾 is_active', async () => {
+    const sb = makeFakeSupabase({
+      shift_types: {
+        selectRows: [
+          { id: 'ST_inactive', is_active: false, sort_order: 99 },
+          { id: 'ST001',       is_active: true,  sort_order: 3 },
+        ],
+      },
+    });
+    const r = await listShiftTypes(sb, { includeInactive: true });
+    expect(r.status).toBe(200);
+    expect(r.body.length).toBe(2);
+  });
 });
 
 describe('createShiftType', () => {

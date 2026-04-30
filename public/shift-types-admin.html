@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>班別管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .color-dot{width:14px;height:14px;border-radius:50%;display:inline-block;vertical-align:middle;border:1px solid rgba(255,255,255,.1)}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace;display:inline-block}
+  .b-system{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .b-custom{background:rgba(120,120,120,.15);color:var(--text-dim)}
+  .b-active{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-inactive{background:rgba(248,113,113,.12);color:#F87171}
+  .b-off{background:rgba(120,120,120,.10);color:var(--text-dim)}
+  .b-cm{background:rgba(192,132,252,.15);color:#C084FC}
+  .form-row-inline{display:flex;gap:12px;align-items:center}
+  .form-row-inline > label{display:flex;gap:6px;align-items:center;cursor:pointer}
+  .system-hint{background:rgba(91,141,239,.08);border:1px solid rgba(91,141,239,.3);color:#7FBBFF;padding:8px 10px;border-radius:6px;font-size:12px;margin-bottom:14px;display:none}
+</style>
+</head>
+<body data-page="shift-types-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">班別管理</div>
+        <div class="page-sub">管理排班使用的班別、時段、顏色與順序</div>
+      </div>
+      <div class="header-actions" style="display:flex;gap:12px;align-items:center">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;color:var(--text-dim)">
+          <input type="checkbox" id="show-inactive" onchange="loadShiftTypes()">
+          <span>顯示已停用</span>
+        </label>
+        <button class="btn btn-primary" onclick="openCreate()">＋ 新增班別</button>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面（限 HR / admin）</div>
+    </div>
+
+    <div id="main-content">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:40px"></th>
+            <th>ID</th>
+            <th>名稱</th>
+            <th>時段</th>
+            <th style="text-align:center">跨日</th>
+            <th style="text-align:center">休息</th>
+            <th style="text-align:center">系統</th>
+            <th style="text-align:center">順序</th>
+            <th style="text-align:center">狀態</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody id="st-tbody">
+            <tr class="loading-row"><td colspan="10">載入中…</td></tr>
+          </tbody>
+        </table>
+        <div id="st-empty" class="empty-state" style="display:none">
+          <div class="icon">📅</div><div>尚無班別</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 新增 / 編輯 Modal -->
+<div class="modal-bg" id="st-modal">
+  <div class="modal" style="max-width:560px;width:95vw">
+    <div class="modal-title" id="modal-title">新增班別</div>
+    <input type="hidden" id="f-id">
+    <div id="system-hint" class="system-hint">系統班別（is_system=true）只能修改顏色、其他欄位已鎖定。</div>
+
+    <div class="form-row">
+      <label class="form-label">名稱 <span style="color:#F87171">*</span></label>
+      <input type="text" class="form-input" id="f-name" placeholder="例：中班">
+    </div>
+
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <label class="form-label">開始時間</label>
+        <input type="time" class="form-input" id="f-start">
+      </div>
+      <div>
+        <label class="form-label">結束時間</label>
+        <input type="time" class="form-input" id="f-end">
+      </div>
+    </div>
+
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <label class="form-label">休息分鐘</label>
+        <input type="number" class="form-input" id="f-break" min="0" max="480" value="60">
+      </div>
+      <div>
+        <label class="form-label">順序（小→大）</label>
+        <input type="number" class="form-input" id="f-sort" min="0" max="999" value="999">
+      </div>
+    </div>
+
+    <div class="form-row form-row-inline" style="margin-top:6px">
+      <label><input type="checkbox" id="f-cm"><span>跨日</span></label>
+      <label><input type="checkbox" id="f-off"><span>休息日（is_off）</span></label>
+      <label><input type="checkbox" id="f-active" checked><span>啟用</span></label>
+    </div>
+
+    <div class="form-row form-row-inline" style="margin-top:10px">
+      <label><span>顏色</span>
+        <input type="color" id="f-color" value="#5B8DEF" style="width:48px;height:32px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:transparent;margin-left:6px">
+      </label>
+      <span style="font-size:11px;color:var(--text-dim)">用於排班 cell 與 pill 識別</span>
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between;margin-top:16px">
+      <span style="font-size:11px;color:var(--text-dim)" id="meta-hint"></span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" id="btn-save" onclick="saveShift()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmtTime(t){if(!t)return '';const m=String(t).match(/^(\d{1,2}):(\d{2})/);return m?`${m[1].padStart(2,'0')}:${m[2]}`:t;}
+
+let allShiftTypes = [];
+
+async function loadShiftTypes(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadShiftTypes(retries + 1), 300);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  const showInactive = document.getElementById('show-inactive').checked;
+  try {
+    allShiftTypes = await api(`/api/shift-types${showInactive ? '?include_inactive=true' : ''}`) || [];
+    renderShiftTypes();
+  } catch(e) {
+    document.getElementById('st-tbody').innerHTML =
+      `<tr><td colspan="10" style="color:#F87171">載入失敗：${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderShiftTypes() {
+  const tbody = document.getElementById('st-tbody');
+  const empty = document.getElementById('st-empty');
+  if (!allShiftTypes.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = allShiftTypes.map(t => {
+    const range = (t.start_time && t.end_time)
+      ? `${fmtTime(t.start_time)}–${fmtTime(t.end_time)}`
+      : '<span style="color:var(--text-dim)">—</span>';
+    const cmBadge   = t.crosses_midnight ? '<span class="badge b-cm">跨</span>' : '<span style="color:var(--text-dim)">—</span>';
+    const offBadge  = t.is_off           ? ' <span class="badge b-off">休假</span>' : '';
+    const sysBadge  = t.is_system        ? '<span class="badge b-system">系統</span>' : '<span class="badge b-custom">自訂</span>';
+    const actBadge  = t.is_active        ? '<span class="badge b-active">啟用</span>' : '<span class="badge b-inactive">停用</span>';
+    const breakStr  = (t.break_minutes != null) ? `${t.break_minutes}` : '<span style="color:var(--text-dim)">—</span>';
+
+    // 自訂班別才顯示「刪除」
+    const opsHtml = t.is_system
+      ? `<button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(t.id)}')">編輯</button>`
+      : `<button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(t.id)}')">編輯</button>
+         <button class="btn btn-danger btn-sm" onclick="deleteShift('${escHtml(t.id)}')">刪除</button>`;
+
+    return `
+      <tr>
+        <td><span class="color-dot" style="background:${escHtml(t.color || '#5B8DEF')}"></span></td>
+        <td style="font-family:'DM Mono',monospace;font-size:12px">${escHtml(t.id)}</td>
+        <td>${escHtml(t.name)}${offBadge}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:12px">${range}</td>
+        <td style="text-align:center">${cmBadge}</td>
+        <td style="text-align:center;font-family:'DM Mono',monospace">${breakStr}</td>
+        <td style="text-align:center">${sysBadge}</td>
+        <td style="text-align:center;font-family:'DM Mono',monospace">${t.sort_order ?? ''}</td>
+        <td style="text-align:center">${actBadge}</td>
+        <td>${opsHtml}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function setFieldsDisabled(disabled) {
+  // 系統班別只允許改 color、其他欄位 lock
+  ['f-name','f-start','f-end','f-break','f-sort','f-cm','f-off','f-active'].forEach(id => {
+    document.getElementById(id).disabled = disabled;
+  });
+  document.getElementById('system-hint').style.display = disabled ? '' : 'none';
+}
+
+function openCreate() {
+  document.getElementById('modal-title').textContent = '新增班別';
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-start').value = '';
+  document.getElementById('f-end').value = '';
+  document.getElementById('f-break').value = '60';
+  document.getElementById('f-sort').value = '999';
+  document.getElementById('f-cm').checked = false;
+  document.getElementById('f-off').checked = false;
+  document.getElementById('f-active').checked = true;
+  document.getElementById('f-color').value = '#5B8DEF';
+  document.getElementById('meta-hint').textContent = '';
+  setFieldsDisabled(false);
+  document.getElementById('st-modal').classList.add('open');
+}
+
+function openEdit(id) {
+  const t = allShiftTypes.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('modal-title').textContent = `編輯：${t.name}`;
+  document.getElementById('f-id').value = t.id;
+  document.getElementById('f-name').value = t.name || '';
+  document.getElementById('f-start').value = t.start_time ? fmtTime(t.start_time) : '';
+  document.getElementById('f-end').value   = t.end_time   ? fmtTime(t.end_time)   : '';
+  document.getElementById('f-break').value = t.break_minutes ?? 60;
+  document.getElementById('f-sort').value  = t.sort_order ?? 999;
+  document.getElementById('f-cm').checked  = !!t.crosses_midnight;
+  document.getElementById('f-off').checked = !!t.is_off;
+  document.getElementById('f-active').checked = t.is_active !== false;
+  document.getElementById('f-color').value = t.color || '#5B8DEF';
+  document.getElementById('meta-hint').textContent = `id: ${t.id}`;
+  setFieldsDisabled(!!t.is_system);
+  document.getElementById('st-modal').classList.add('open');
+}
+
+function closeModal() { document.getElementById('st-modal').classList.remove('open'); }
+
+async function saveShift() {
+  const id = document.getElementById('f-id').value;
+  const isEdit = !!id;
+  const existing = isEdit ? allShiftTypes.find(t => t.id === id) : null;
+  const isSystem = existing?.is_system === true;
+
+  // 系統班別只送 color
+  let payload;
+  if (isSystem) {
+    payload = { color: document.getElementById('f-color').value };
+  } else {
+    const name = document.getElementById('f-name').value.trim();
+    if (!name) { toast('名稱必填', 'error'); return; }
+    const start = document.getElementById('f-start').value || null;
+    const end   = document.getElementById('f-end').value   || null;
+    const cmChecked = document.getElementById('f-cm').checked;
+    // 結束 < 開始 → 自動 crosses_midnight=true
+    const cmFinal = cmChecked || (start && end && end < start);
+    payload = {
+      name,
+      start_time: start,
+      end_time:   end,
+      break_minutes:    parseInt(document.getElementById('f-break').value) || 0,
+      sort_order:       parseInt(document.getElementById('f-sort').value)  || 999,
+      crosses_midnight: cmFinal,
+      is_off:           document.getElementById('f-off').checked,
+      is_active:        document.getElementById('f-active').checked,
+      color:            document.getElementById('f-color').value,
+    };
+  }
+
+  document.getElementById('btn-save').disabled = true;
+  try {
+    if (isEdit) {
+      await api(`/api/shift-types/${encodeURIComponent(id)}`, { method:'PATCH', body: JSON.stringify(payload) });
+      toast('已更新');
+    } else {
+      await api('/api/shift-types', { method:'POST', body: JSON.stringify(payload) });
+      toast('已新增');
+    }
+    closeModal();
+    loadShiftTypes();
+  } catch(e) {
+    toast('儲存失敗：' + e.message, 'error');
+  } finally {
+    document.getElementById('btn-save').disabled = false;
+  }
+}
+
+async function deleteShift(id) {
+  const t = allShiftTypes.find(x => x.id === id);
+  if (!t) return;
+  if (t.is_system) { toast('系統班別無法刪除', 'error'); return; }
+  if (!confirm(`確定刪除「${t.name}」？\n（如已被排班使用會失敗、可改為停用）`)) return;
+  try {
+    await api(`/api/shift-types/${encodeURIComponent(id)}`, { method:'DELETE' });
+    toast('已刪除');
+    loadShiftTypes();
+  } catch(e) {
+    toast('刪除失敗：' + e.message, 'error');
+  }
+}
+
+loadShiftTypes();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

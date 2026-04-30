@@ -30,7 +30,8 @@ export default async function handler(req, res) {
   // Detected by ?_resource=shift_types query param
   if (req.query._resource === 'shift_types') {
     if (req.method === 'GET') {
-      const r = await listShiftTypes(supabaseAdmin);
+      const includeInactive = req.query.include_inactive === 'true' || req.query.include_inactive === '1';
+      const r = await listShiftTypes(supabaseAdmin, { includeInactive });
       return res.status(r.status).json(r.body);
     }
     if (req.method === 'POST') {
