@@ -29,6 +29,16 @@
   .seg-row{display:grid;grid-template-columns:1fr 1fr 80px;gap:8px;align-items:end;margin-bottom:8px}
   .seg-rm{background:transparent;border:1px solid rgba(248,113,113,.4);color:#F87171;border-radius:5px;padding:6px;cursor:pointer;font-size:12px}
   .late-warn{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.4);color:#F87171;padding:10px 12px;border-radius:8px;font-size:13px;margin:10px 0}
+
+  /* pill bar (3-A 班別選擇器) */
+  .pill-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 4px;margin-bottom:12px}
+  .shift-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--border);cursor:pointer;font-size:13px;transition:all .15s;user-select:none}
+  .shift-pill:hover{background:rgba(255,255,255,.08)}
+  .shift-pill.active{border-color:#5B8DEF;background:rgba(91,141,239,.18);box-shadow:0 0 0 2px rgba(91,141,239,.3)}
+  .shift-pill .color-dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex-shrink:0}
+  .shift-pill-add{border-style:dashed;color:var(--text-dim)}
+  .pill-divider{width:1px;height:20px;background:var(--border);margin:0 4px}
+  .pill-hint{font-size:12px;color:var(--text-dim);margin-left:auto}
 </style>
 </head>
 <body data-page="schedule">
@@ -53,6 +63,7 @@
     </div>
 
     <div id="main-content">
+      <div id="pill-bar" class="pill-bar"></div>
       <div class="table-wrap" style="overflow:auto;background:var(--card);border-radius:12px;border:1px solid var(--border)">
         <table id="week-grid" style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">
           <thead id="week-grid-head"></thead>
@@ -68,6 +79,38 @@
       </div>
     </div>
   </main>
+</div>
+
+<!-- 快速新增班別 Modal（3-A） -->
+<div class="modal-bg" id="quick-add-modal">
+  <div class="modal" style="max-width:420px;width:95vw">
+    <div class="modal-title">新增班別</div>
+    <div class="form-row" style="margin-bottom:10px">
+      <label class="form-label">名稱 *</label>
+      <input class="form-input" id="qa-name" placeholder="例：中班">
+    </div>
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div><label class="form-label">開始</label><input type="time" class="form-input" id="qa-start"></div>
+      <div><label class="form-label">結束</label><input type="time" class="form-input" id="qa-end"></div>
+    </div>
+    <div class="form-row" style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="qa-cm">
+        <span>跨日</span>
+      </label>
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+        <span>顏色</span>
+        <input type="color" id="qa-color" value="#5B8DEF" style="width:40px;height:28px;border:1px solid var(--border);border-radius:4px;cursor:pointer;background:transparent">
+      </label>
+    </div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:14px">
+      休息分鐘預設 60 min、is_off 預設否、sort_order 自動。完整設定請至「班別管理」。
+    </div>
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="closeQuickAddModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveQuickAddShift()">儲存</button>
+    </div>
+  </div>
 </div>
 
 <!-- 編輯一天 Modal（主管視角:全可編輯）-->
@@ -138,6 +181,8 @@ let editing = { date: null, empId: null, segs: [], off: false };
 let currentEmp = null;
 let currentPeriod = null;
 let currentSchedules = [];
+let shiftTypes = [];             // 3-A:班別清單（fetch /api/shift-types）
+let selectedShiftTypeId = null;  // 3-A:目前選中的班別 pill
 
 // C13：判斷 GCal event 是否落在某日（處理全天 end exclusive）
 function isInDay(ev, dateStr) {
@@ -207,11 +252,16 @@ async function load(retries = 0) {
     return;
   }
 
-  // 員工列表
+  // 員工列表 + 班別清單（pill bar）
   try {
     const emps = await api('/api/employees');
     visibleEmps = filterVisibleEmps(emps || [], u);
   } catch(e) { toast('員工列表載入失敗：' + e.message, 'error'); return; }
+
+  try {
+    shiftTypes = await api('/api/shift-types') || [];
+  } catch(_) { shiftTypes = []; }
+  renderPillBar();
 
   // 部門資訊
   const deptName = visibleEmps[0]?.dept_name || visibleEmps[0]?.dept || '';
@@ -337,7 +387,7 @@ function render() {
       const seg1 = segs.find(s => s.segment_no === 1) || segs[0];
 
       if (!seg1) {
-        return `<td class="week-cell week-cell-empty" onclick="openDayModal('${escHtml(emp.id)}','${dateStr}')">-</td>`;
+        return `<td class="week-cell week-cell-empty" onclick="onCellClick('${escHtml(emp.id)}','${dateStr}')">-</td>`;
       }
 
       const stid = seg1.shift_type_id;
@@ -358,7 +408,7 @@ function render() {
 
       const isLate = isLateChangeFor(dateStr, periodStatus);
       const lateDot = isLate ? '<span class="late-dot"></span>' : '';
-      return `<td class="week-cell ${cellClass}${wishClass}" onclick="openDayModal('${escHtml(emp.id)}','${dateStr}')">${escHtml(label)}${lateDot}</td>`;
+      return `<td class="week-cell ${cellClass}${wishClass}" onclick="onCellClick('${escHtml(emp.id)}','${dateStr}')">${escHtml(label)}${lateDot}</td>`;
     }).join('');
 
     // 工時統計（本週）
@@ -440,6 +490,141 @@ function render() {
     </tr>`;
 
   body.innerHTML = empRows + summaryRows;
+}
+
+// ── 3-A：班別 pill bar + cell-click 套用 ──
+function renderPillBar() {
+  const bar = document.getElementById('pill-bar');
+  if (!bar) return;
+  const visible = (shiftTypes || [])
+    .filter(t => t.id !== 'ST002')                                // 過濾晚班（員工 wish 用）
+    .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999));
+
+  const html = [];
+  let lastWasSystem = null;
+  for (const t of visible) {
+    if (lastWasSystem === true && !t.is_system) html.push('<div class="pill-divider"></div>');
+    const active = selectedShiftTypeId === t.id ? ' active' : '';
+    const dot = `<span class="color-dot" style="background:${escHtml(t.color || '#5B8DEF')}"></span>`;
+    const offIcon = t.is_off ? ' <span style="opacity:.6;font-size:11px">休</span>' : '';
+    const range = (t.start_time && t.end_time)
+      ? `<span style="opacity:.55;font-size:11px;margin-left:4px">${escHtml(fmtTime(t.start_time))}-${escHtml(fmtTime(t.end_time))}</span>` : '';
+    html.push(`<div class="shift-pill${active}" onclick="selectPill('${escHtml(t.id)}')">${dot}<span>${escHtml(t.name)}</span>${offIcon}${range}</div>`);
+    lastWasSystem = t.is_system;
+  }
+  html.push(`<div class="shift-pill shift-pill-add" onclick="openQuickAddModal()">＋ 新增</div>`);
+  html.push(`<span class="pill-hint">${selectedShiftTypeId ? '點 cell 直接套用、再點同一 pill 取消選擇' : '選一個班別、點 cell 即可快速套用'}</span>`);
+  bar.innerHTML = html.join('');
+}
+
+function selectPill(id) {
+  selectedShiftTypeId = (selectedShiftTypeId === id) ? null : id;
+  renderPillBar();
+}
+
+function onCellClick(empId, dateStr) {
+  if (selectedShiftTypeId) return applyPillToCell(empId, dateStr);
+  return openDayModal(empId, dateStr);
+}
+
+async function applyPillToCell(empId, dateStr) {
+  const emp = visibleEmps.find(e => e.id === empId);
+  if (!emp) return;
+  const period = allPeriods[empId];
+  if (!period) {
+    toast('該員工此月尚未建立排班 period、請員工先建立或 HR 代建', 'error');
+    return;
+  }
+  const type = shiftTypes.find(t => t.id === selectedShiftTypeId);
+  if (!type) return;
+
+  const segs = (allSchedules[empId] || []).filter(s => s.work_date === dateStr);
+
+  if (segs.length > 1) {
+    if (!confirm(`此天有 ${segs.length} 段排班、套用「${type.name}」會清掉現有並改為單段。確定？`)) return;
+  }
+
+  const isLate = isLateChangeFor(dateStr, period.status);
+  let reason = null;
+  if (isLate) {
+    if (!confirm('此調整為「鎖定後當日異動」、儲存後將通知 HR + CEO。確定送出？')) return;
+    reason = prompt('調整原因（必填）：');
+    if (!reason) { toast('已取消（未填原因）', 'error'); return; }
+  }
+
+  // 1. DELETE 舊段
+  for (const s of segs) {
+    try {
+      await api(`/api/schedules/${encodeURIComponent(s.id)}`, {
+        method: 'DELETE', body: JSON.stringify({ reason }),
+      });
+    } catch(_) {}
+  }
+
+  // 2. POST 新段
+  const body = {
+    period_id: period.id, employee_id: empId, work_date: dateStr,
+    segment_no: 1, shift_type_id: type.id, reason,
+  };
+  if (type.is_off) {
+    body.note = '__OFF__';
+  } else {
+    body.start_time = type.start_time || null;
+    body.end_time   = type.end_time   || null;
+    body.crosses_midnight = !!type.crosses_midnight;
+    body.break_minutes = type.break_minutes ?? 60;
+  }
+  try {
+    await api('/api/schedules', { method: 'POST', body: JSON.stringify(body) });
+  } catch(e) {
+    toast('套用失敗：' + e.message, 'error');
+    return;
+  }
+  toast(`${emp.name || emp.id} ${dateStr} → ${type.name}`);
+  await load();
+}
+
+// ── 3-A：快速新增班別 modal ──
+function openQuickAddModal() {
+  document.getElementById('qa-name').value = '';
+  document.getElementById('qa-start').value = '';
+  document.getElementById('qa-end').value = '';
+  document.getElementById('qa-cm').checked = false;
+  document.getElementById('qa-color').value = '#5B8DEF';
+  document.getElementById('quick-add-modal').classList.add('open');
+}
+function closeQuickAddModal() {
+  document.getElementById('quick-add-modal').classList.remove('open');
+}
+async function saveQuickAddShift() {
+  const name = document.getElementById('qa-name').value.trim();
+  if (!name) { toast('名稱必填', 'error'); return; }
+  const start = document.getElementById('qa-start').value || null;
+  const end   = document.getElementById('qa-end').value   || null;
+  const cm    = document.getElementById('qa-cm').checked;
+  const color = document.getElementById('qa-color').value || '#5B8DEF';
+  // end<start 時自動標 crosses_midnight=true
+  const cmFinal = cm || (start && end && end < start);
+  try {
+    await api('/api/shift-types', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        start_time: start, end_time: end,
+        crosses_midnight: cmFinal,
+        color,
+        is_off: false,
+        break_minutes: 60,
+      }),
+    });
+  } catch(e) {
+    toast('新增失敗：' + e.message, 'error');
+    return;
+  }
+  toast('已新增班別');
+  closeQuickAddModal();
+  try { shiftTypes = await api('/api/shift-types') || []; } catch(_) {}
+  renderPillBar();
 }
 
 // ── Day modal ──
