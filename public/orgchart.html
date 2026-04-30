@@ -398,6 +398,11 @@ const ROLE_LABEL    = { chairman:'董事長', ceo:'執行長', manager:'主管',
 /* ── Init ── */
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
+  // Stop-gap：非 HR 角色全頁 redirect、組織圖是全公司視角、暫不開放主管 / 員工。
+  if (!window.Roles?.isBackofficeRole(window.currentUser)) {
+    window.location.replace('/dashboard.html');
+    return;
+  }
   try {
     [allEmployees, allDepts] = await Promise.all([
       api('/api/employees?status=active'),
