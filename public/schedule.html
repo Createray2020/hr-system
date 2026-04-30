@@ -702,17 +702,6 @@ function _currentMonthKey() {
   return { year: y, month: m };
 }
 
-function _filterSchedulesToMonth(year, month) {
-  const prefix = `${year}-${String(month).padStart(2,'0')}-`;
-  const out = [];
-  for (const empId of Object.keys(allSchedules)) {
-    for (const s of allSchedules[empId] || []) {
-      if (typeof s.work_date === 'string' && s.work_date.startsWith(prefix)) out.push(s);
-    }
-  }
-  return out;
-}
-
 async function exportScheduleExcel() {
   if (!window.__excelBuilder || !window.XLSX) {
     toast('Excel 模組尚未載入、請稍候再試', 'error'); return;
@@ -720,7 +709,15 @@ async function exportScheduleExcel() {
   if (!visibleEmps.length) { toast('無員工可匯出', 'error'); return; }
 
   const { year, month } = _currentMonthKey();
-  const schedules = _filterSchedulesToMonth(year, month);
+
+  // 直接 fetch 整月、不依賴 allSchedules state（state 只 cache 當前週相關月份）
+  let schedules = [];
+  try {
+    const r = await api(`/api/schedule-periods?year=${year}&month=${month}`);
+    schedules = r?.schedules || [];
+  } catch(e) {
+    toast('匯出失敗：' + e.message, 'error'); return;
+  }
 
   let monthEvents = [];
   try {
