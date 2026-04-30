@@ -1,4 +1,4 @@
-// lib/schedule/import-parser.js
+// public/js/schedule/import-parser.js
 //
 // 純 function：解析排班月表 AOA → schedule rows + errors。
 // 不依賴 XLSX 庫；caller 預先 XLSX.read + sheet_to_json with header:1 → AOA。

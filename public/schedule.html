@@ -12,6 +12,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+  // 把 lib pure functions 暴露給內聯 script 用（schedule.html 是 non-module、需要 window.X）
+  import { buildScheduleAOA, daysInMonth } from '/js/schedule/excel-builder.js';
+  import { parseScheduleAOA } from '/js/schedule/import-parser.js';
+  window.__excelBuilder = { buildScheduleAOA, daysInMonth };
+  window.__excelParser  = { parseScheduleAOA };
+</script>
 <style>
   /* C11 week grid styles */
   .week-cell { padding:10px 6px; text-align:center; cursor:pointer; border-bottom:1px solid var(--border); position:relative; font-size:12px; transition:filter .12s; }
@@ -55,6 +63,9 @@
         <span id="week-range" style="font-family:'DM Mono',monospace;font-size:14px;min-width:200px;text-align:center">--</span>
         <button class="btn btn-ghost" onclick="changeWeek(1)">→</button>
         <button class="btn btn-ghost" onclick="goThisWeek()">本週</button>
+        <button class="btn btn-ghost" onclick="exportScheduleExcel()" title="匯出當前月份的排班表">📤 匯出</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('import-file').click()" title="從 Excel 匯入排班">📥 匯入</button>
+        <input type="file" id="import-file" accept=".xlsx,.xls" style="display:none" onchange="handleImportFile(event)">
       </div>
     </div>
 
@@ -79,6 +90,60 @@
       </div>
     </div>
   </main>
+</div>
+
+<!-- 匯入預覽 Modal -->
+<div class="modal-bg" id="import-modal">
+  <div class="modal" style="max-width:720px;width:95vw;max-height:88vh;overflow:auto">
+    <div class="modal-title">匯入排班預覽</div>
+    <div id="import-month-label" style="font-size:12px;color:var(--text-dim);margin-bottom:14px"></div>
+
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <div style="flex:1;background:rgba(91,141,239,.08);border:1px solid rgba(91,141,239,.3);border-radius:8px;padding:12px;text-align:center">
+        <div id="im-total" style="font-size:24px;font-weight:700;font-family:'DM Mono',monospace;color:#7FBBFF">0</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:2px">讀取 row</div>
+      </div>
+      <div style="flex:1;background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.3);border-radius:8px;padding:12px;text-align:center">
+        <div id="im-write" style="font-size:24px;font-weight:700;font-family:'DM Mono',monospace;color:#4ADE80">0</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:2px">可寫入</div>
+      </div>
+      <div style="flex:1;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);border-radius:8px;padding:12px;text-align:center">
+        <div id="im-error" style="font-size:24px;font-weight:700;font-family:'DM Mono',monospace;color:#F87171">0</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:2px">錯誤</div>
+      </div>
+    </div>
+
+    <div id="im-error-block" style="display:none;background:rgba(248,113,113,.06);border:1px solid rgba(248,113,113,.3);border-radius:8px;padding:10px 12px;margin-bottom:14px;max-height:160px;overflow:auto">
+      <div style="font-size:11px;color:#F87171;font-family:'DM Mono',monospace;letter-spacing:.5px;margin-bottom:6px">錯誤明細</div>
+      <div id="im-error-list" style="font-size:12px;line-height:1.6"></div>
+    </div>
+
+    <div id="im-preview-block" style="display:none;margin-bottom:14px">
+      <div style="font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.5px;margin-bottom:6px">寫入預覽（前 8 筆）</div>
+      <div style="overflow:auto;max-height:240px;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="background:rgba(255,255,255,.04)">
+              <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text-dim);white-space:nowrap;border-bottom:1px solid var(--border)">員工編號</th>
+              <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text-dim);white-space:nowrap;border-bottom:1px solid var(--border)">姓名</th>
+              <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text-dim);white-space:nowrap;border-bottom:1px solid var(--border)">日期</th>
+              <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text-dim);white-space:nowrap;border-bottom:1px solid var(--border)">班別</th>
+              <th style="padding:7px 10px;text-align:left;font-size:10px;color:var(--text-dim);white-space:nowrap;border-bottom:1px solid var(--border)">寫入 status</th>
+            </tr>
+          </thead>
+          <tbody id="im-preview-body"></tbody>
+        </table>
+      </div>
+      <div id="im-more-hint" style="font-size:11px;color:var(--text-dim);margin-top:6px;text-align:right"></div>
+    </div>
+
+    <div id="im-empty-hint" style="display:none;text-align:center;padding:24px;color:var(--text-dim)">沒有可匯入的有效資料</div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="closeImportModal()">取消</button>
+      <button class="btn btn-primary" id="im-confirm-btn" onclick="runImportConfirm()">確認匯入</button>
+    </div>
+  </div>
 </div>
 
 <!-- 快速新增班別 Modal（3-A） -->
@@ -625,6 +690,233 @@ async function saveQuickAddShift() {
   closeQuickAddModal();
   try { shiftTypes = await api('/api/shift-types') || []; } catch(_) {}
   renderPillBar();
+}
+
+// ── Excel 匯出 / 匯入 ──
+let _pendingImportRows = [];
+
+function _currentMonthKey() {
+  // 用 currentWeekStart 的月份做匯出/匯入的 target month
+  const ws = currentWeekStart || fmtDate(getWeekStart(new Date()));
+  const [y, m] = ws.split('-').map(Number);
+  return { year: y, month: m };
+}
+
+function _filterSchedulesToMonth(year, month) {
+  const prefix = `${year}-${String(month).padStart(2,'0')}-`;
+  const out = [];
+  for (const empId of Object.keys(allSchedules)) {
+    for (const s of allSchedules[empId] || []) {
+      if (typeof s.work_date === 'string' && s.work_date.startsWith(prefix)) out.push(s);
+    }
+  }
+  return out;
+}
+
+async function exportScheduleExcel() {
+  if (!window.__excelBuilder || !window.XLSX) {
+    toast('Excel 模組尚未載入、請稍候再試', 'error'); return;
+  }
+  if (!visibleEmps.length) { toast('無員工可匯出', 'error'); return; }
+
+  const { year, month } = _currentMonthKey();
+  const schedules = _filterSchedulesToMonth(year, month);
+
+  let monthEvents = [];
+  try {
+    const start = `${year}-${String(month).padStart(2,'0')}-01`;
+    const lastDay = window.__excelBuilder.daysInMonth(year, month);
+    const end = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+    monthEvents = await api(`/api/calendar?_resource=events&start=${start}T00:00:00Z&end=${end}T23:59:59Z`) || [];
+  } catch(_) { monthEvents = []; }
+
+  const { sheetName, aoa, columnWidths } = window.__excelBuilder.buildScheduleAOA({
+    year, month,
+    employees: visibleEmps,
+    schedules,
+    shiftTypes,
+    gcalEvents: monthEvents,
+  });
+
+  const wb = window.XLSX.utils.book_new();
+  const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+  if (columnWidths?.length) ws['!cols'] = columnWidths.map(w => ({ wch: w }));
+  ws['!freeze'] = { xSplit: 3, ySplit: 5 };
+  window.XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+  const wbout = window.XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${year}-${String(month).padStart(2,'0')}-排班.xlsx`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast(`已匯出 ${year}/${month} 排班（${visibleEmps.length} 員 / ${schedules.length} 筆）`);
+}
+
+async function handleImportFile(evt) {
+  const input = evt.target;
+  const file = input.files?.[0];
+  input.value = ''; // 清掉、避免下次選同檔不觸發
+  if (!file) return;
+  if (!window.__excelParser || !window.XLSX) {
+    toast('Excel 模組尚未載入、請稍候再試', 'error'); return;
+  }
+
+  const { year, month } = _currentMonthKey();
+  let aoa;
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = window.XLSX.read(buf, { type: 'array' });
+    const firstSheetName = wb.SheetNames[0];
+    if (!firstSheetName) { toast('Excel 沒 sheet', 'error'); return; }
+    aoa = window.XLSX.utils.sheet_to_json(wb.Sheets[firstSheetName], { header: 1, defval: '' });
+  } catch(e) {
+    toast('Excel 解析失敗：' + e.message, 'error'); return;
+  }
+
+  const result = window.__excelParser.parseScheduleAOA({
+    aoa, year, month,
+    employees: visibleEmps,
+    shiftTypes,
+  });
+
+  // 補檢查 period 存在（parser 不知道 period）
+  const validRows = [];
+  const periodErrors = [];
+  for (const r of result.rows) {
+    const period = allPeriods[r.employee_id];
+    if (!period) {
+      periodErrors.push({
+        row: 0, col: 0,
+        message: `${r.employee_id} ${r.work_date}：該員工 ${year}/${month} 尚未建立 period、請先建`,
+      });
+      continue;
+    }
+    r.period_id = period.id;
+    validRows.push(r);
+  }
+
+  showImportPreviewModal({
+    year, month,
+    rows: validRows,
+    errors: [...result.errors, ...periodErrors],
+    total: result.total,
+  });
+}
+
+function showImportPreviewModal({ year, month, rows, errors, total }) {
+  _pendingImportRows = rows;
+
+  document.getElementById('import-month-label').textContent =
+    `目標月份：${year}/${month}（依目前週的月份）`;
+  document.getElementById('im-total').textContent = total;
+  document.getElementById('im-write').textContent = rows.length;
+  document.getElementById('im-error').textContent = errors.length;
+
+  // 錯誤明細
+  const errBlock = document.getElementById('im-error-block');
+  if (errors.length) {
+    errBlock.style.display = '';
+    document.getElementById('im-error-list').innerHTML = errors.map(e => {
+      const loc = (e.row && e.col) ? `第 ${e.row} 列 第 ${e.col} 欄：` : '';
+      return `<div style="color:#F87171;margin-bottom:2px">• ${escHtml(loc)}${escHtml(e.message)}</div>`;
+    }).join('');
+  } else {
+    errBlock.style.display = 'none';
+  }
+
+  // 預覽 (前 8 筆)
+  const previewBlock = document.getElementById('im-preview-block');
+  const moreHint = document.getElementById('im-more-hint');
+  const emptyHint = document.getElementById('im-empty-hint');
+  const confirmBtn = document.getElementById('im-confirm-btn');
+  if (rows.length) {
+    previewBlock.style.display = '';
+    emptyHint.style.display = 'none';
+    confirmBtn.style.display = '';
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = `確認匯入 ${rows.length} 筆`;
+    const empMap = Object.fromEntries(visibleEmps.map(e => [e.id, e]));
+    const stMap = Object.fromEntries(shiftTypes.map(t => [t.id, t]));
+    document.getElementById('im-preview-body').innerHTML = rows.slice(0, 8).map(r => `
+      <tr>
+        <td style="padding:6px 10px;border-bottom:1px solid rgba(42,48,72,.4);font-family:'DM Mono',monospace">${escHtml(r.employee_id)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid rgba(42,48,72,.4)">${escHtml(empMap[r.employee_id]?.name || '')}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid rgba(42,48,72,.4);font-family:'DM Mono',monospace">${escHtml(r.work_date)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid rgba(42,48,72,.4)">${escHtml(stMap[r.shift_type_id]?.name || r.shift_type_id)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid rgba(42,48,72,.4)"><span style="font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(74,222,128,.15);color:#4ADE80">confirmed</span></td>
+      </tr>
+    `).join('');
+    moreHint.textContent = rows.length > 8 ? `… 還有 ${rows.length - 8} 筆` : '';
+  } else {
+    previewBlock.style.display = 'none';
+    emptyHint.style.display = '';
+    confirmBtn.style.display = 'none';
+  }
+
+  document.getElementById('import-modal').classList.add('open');
+}
+
+function closeImportModal() {
+  document.getElementById('import-modal').classList.remove('open');
+  _pendingImportRows = [];
+}
+
+async function runImportConfirm() {
+  const rows = _pendingImportRows.slice();
+  if (!rows.length) return;
+
+  const btn = document.getElementById('im-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = `寫入中… 0 / ${rows.length}`;
+
+  const stMap = Object.fromEntries(shiftTypes.map(t => [t.id, t]));
+  let written = 0;
+  const writeErrors = [];
+
+  for (const r of rows) {
+    const type = stMap[r.shift_type_id];
+    // 1. 刪該員工那天現有的所有 segments（避免殘留多段）
+    const existing = (allSchedules[r.employee_id] || []).filter(s => s.work_date === r.work_date);
+    for (const s of existing) {
+      try { await api(`/api/schedules/${encodeURIComponent(s.id)}`, { method: 'DELETE' }); } catch(_) {}
+    }
+    // 2. POST 新段
+    const body = {
+      period_id: r.period_id,
+      employee_id: r.employee_id,
+      work_date: r.work_date,
+      segment_no: 1,
+      shift_type_id: r.shift_type_id,
+      status: 'confirmed',
+    };
+    if (r.is_off || type?.is_off) {
+      body.note = '__OFF__';
+    } else if (type) {
+      body.start_time = type.start_time || null;
+      body.end_time   = type.end_time   || null;
+      body.crosses_midnight = !!type.crosses_midnight;
+      body.break_minutes = type.break_minutes ?? 60;
+    }
+    try {
+      await api('/api/schedules', { method: 'POST', body: JSON.stringify(body) });
+      written++;
+    } catch(e) {
+      writeErrors.push(`${r.employee_id} ${r.work_date}：${e.message}`);
+      console.error('[schedule:import] write failed', r, e);
+    }
+    btn.textContent = `寫入中… ${written} / ${rows.length}`;
+  }
+
+  closeImportModal();
+
+  if (writeErrors.length) {
+    toast(`匯入完成、${written} 筆成功、${writeErrors.length} 筆失敗（看 console）`, 'error');
+  } else {
+    toast(`匯入完成、${written} 筆已寫入`);
+  }
+  await load();
 }
 
 // ── Day modal ──

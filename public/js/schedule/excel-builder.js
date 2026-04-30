@@ -1,4 +1,4 @@
-// lib/schedule/excel-builder.js
+// public/js/schedule/excel-builder.js
 //
 // 純 function：建立排班月表 AOA（2D array）+ metadata。
 // 不依賴 XLSX 庫；caller 用 XLSX.utils.aoa_to_sheet(result.aoa) 轉為 sheet。

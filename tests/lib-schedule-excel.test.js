@@ -12,8 +12,8 @@ import {
   HEADER_ROW_INDEX,
   FIRST_DATE_COL_INDEX,
   FIRST_DATA_ROW_INDEX,
-} from '../lib/schedule/excel-builder.js';
-import { parseScheduleAOA } from '../lib/schedule/import-parser.js';
+} from '../public/js/schedule/excel-builder.js';
+import { parseScheduleAOA } from '../public/js/schedule/import-parser.js';
 
 // 標準 shift_types fixture（與 prod DB 對齊）
 const SHIFT_TYPES = [

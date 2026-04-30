@@ -181,7 +181,7 @@ async function handleNewPost(req, res) {
   const {
     period_id, employee_id, work_date,
     shift_type_id, start_time, end_time, crosses_midnight,
-    break_minutes, segment_no, note,
+    break_minutes, segment_no, note, status,
   } = req.body || {};
 
   if (!period_id || !employee_id || !work_date) {
@@ -250,6 +250,7 @@ async function handleNewPost(req, res) {
     segment_no: seg,
     note: note || '',
     created_by: caller.id || null,
+    ...(status && ['draft','confirmed','locked'].includes(status) ? { status } : {}),
     updated_at: new Date().toISOString(),
   };
 
