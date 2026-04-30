@@ -391,6 +391,7 @@ function toast(msg, type='success') {
 let allEmployees = [];
 let allDepts     = [];
 let deptColorMap = {};
+let deptNameMap  = {}; // dept_id → name（新 endpoint 不回 dept_name、由 departments 推導）
 
 const ROLE_PRIORITY = { chairman:0, ceo:1, admin:2, hr:2, manager:3, employee:4 };
 const ROLE_LABEL    = { chairman:'董事長', ceo:'執行長', manager:'主管', hr:'人資', admin:'管理員' };
@@ -407,21 +408,35 @@ async function waitForCurrentUser(maxMs = 5000) {
 
 /* ── Init ── */
 window.onload = async () => {
-  // Stop-gap：非 HR 角色全頁 redirect、組織圖是全公司視角、暫不開放主管 / 員工。
-  // 必須等 currentUser 載入再判斷、否則 race 中 isBackofficeRole(undefined)=false
-  // 會把執行長 / HR 自己誤踢回 dashboard。
+  // 角色 redirect：
+  //   一般員工（非 backoffice 且 is_manager !== true）→ 踢回 dashboard
+  //   主管（is_manager=true）→ 看到自己部門 + 公司骨幹（後端 filter）
+  //   backoffice → 看全公司
+  // 必須等 currentUser 載入再判斷、否則 race 中誤判踢人。
   const u = await waitForCurrentUser();
-  if (!window.Roles?.isBackofficeRole(u)) {
+  const isHR = window.Roles?.isBackofficeRole(u);
+  const isMgr = u?.is_manager === true;
+  if (!isHR && !isMgr) {
     window.location.replace('/dashboard.html');
     return;
   }
+
+  // 非 backoffice：隱藏「部門卡片」切換按鈕、固定樹狀圖 view
+  if (!isHR) {
+    const dvBtn = document.getElementById('vb-dept');
+    if (dvBtn) dvBtn.style.display = 'none';
+  }
+
   try {
-    [allEmployees, allDepts] = await Promise.all([
-      api('/api/employees?status=active'),
-      api('/api/departments'),
-    ]);
+    const r = await api('/api/orgchart');
+    allEmployees = r.employees    || [];
+    allDepts     = r.departments  || [];
     deptColorMap = {};
-    allDepts.forEach(d => { deptColorMap[d.id] = d.color || '#5B8DEF'; });
+    deptNameMap  = {};
+    allDepts.forEach(d => {
+      deptColorMap[d.id] = d.color || '#5B8DEF';
+      deptNameMap[d.id]  = d.name;
+    });
     renderTree();
     renderDeptCards();
   } catch(e) {
@@ -449,7 +464,7 @@ function cardHTML(emp) {
       </div>
       <div class="node-info">
         <div class="node-name">${esc(emp.name)}</div>
-        <div class="node-pos">${esc(emp.position || emp.dept_name || emp.dept || '')}</div>
+        <div class="node-pos">${esc(emp.position || deptNameMap[emp.dept_id] || '')}</div>
         ${badge ? `<span class="node-badge" style="background:${color}22;color:${color}">${badge}</span>` : ''}
       </div>
     </div>`;
@@ -685,6 +700,10 @@ const ROLE_FULL = {
 };
 
 function openDetail(empId) {
+  // 主管 / 員工不開 detail panel（新 endpoint 不回 email/phone/hire_date、
+  // 開了也是空白；同時防 backoffice 才有的薪資洩漏 surface）
+  if (!window.Roles?.isBackofficeRole(window.currentUser)) return;
+
   const emp = allEmployees.find(e => e.id === empId);
   if (!emp) return;
   const color = deptColorMap[emp.dept_id] || '#5B8DEF';
@@ -701,7 +720,7 @@ function openDetail(empId) {
       <div class="detail-dname">${esc(emp.name)}</div>
       <div class="detail-dpos">${esc(emp.position)}</div>
       <span class="detail-dept-chip" style="background:${color}22;color:${color}">
-        ${esc(emp.dept_name || emp.dept || '—')}
+        ${esc(deptNameMap[emp.dept_id] || '—')}
       </span>
     </div>
     <hr class="dp">
@@ -709,7 +728,6 @@ function openDetail(empId) {
     ${dRow('📧','電子郵件', emp.email || '—')}
     ${dRow('📱','電話',    emp.phone || '—')}
     ${dRow('📅','到職日',  emp.hire_date || '—')}
-    ${emp.base_salary ? dRow('💰','底薪','$'+Number(emp.base_salary).toLocaleString()) : ''}
   `;
   document.getElementById('detail-panel').classList.add('open');
   document.getElementById('detail-overlay').classList.add('open');
