@@ -12,13 +12,16 @@
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
 
 import { supabaseAdmin } from '../../lib/supabase.js';
-import { requireAuth } from '../../lib/auth.js';
-import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
+import { canAccessBackoffice, isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
 import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
+import {
+  listShiftTypes, createShiftType, updateShiftType, deleteShiftType,
+} from '../../lib/shift-types/handler.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -27,24 +30,30 @@ export default async function handler(req, res) {
   // Detected by ?_resource=shift_types query param
   if (req.query._resource === 'shift_types') {
     if (req.method === 'GET') {
-      const { data, error } = await supabaseAdmin.from('shift_types').select('*').order('id');
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json(data);
+      const r = await listShiftTypes(supabaseAdmin);
+      return res.status(r.status).json(r.body);
     }
     if (req.method === 'POST') {
-      const { name, start_time, end_time, is_flexible, is_off, color } = req.body;
-      if (!name) return res.status(400).json({ error: '班別名稱為必填' });
-      const id = 'ST' + Date.now();
-      const { error } = await supabaseAdmin.from('shift_types').insert([{
-        id, name,
-        start_time:  start_time  || null,
-        end_time:    end_time    || null,
-        is_flexible: !!is_flexible,
-        is_off:      !!is_off,
-        color:       color || '#5B8DEF',
-      }]);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(201).json({ id, message: '班別已建立' });
+      const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
+      if (!caller) return;
+      const r = await createShiftType(supabaseAdmin, req.body || {});
+      return res.status(r.status).json(r.body);
+    }
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // ── /api/shift-types/:id routed here via vercel.json (PATCH / DELETE) ──
+  if (req.query._resource === 'shift_types_item') {
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
+    if (!caller) return;
+    const itemId = req.query.id;
+    if (req.method === 'PATCH') {
+      const r = await updateShiftType(supabaseAdmin, itemId, req.body || {});
+      return res.status(r.status).json(r.body);
+    }
+    if (req.method === 'DELETE') {
+      const r = await deleteShiftType(supabaseAdmin, itemId);
+      return res.status(r.status).json(r.body);
     }
     return res.status(405).json({ error: 'Method not allowed' });
   }

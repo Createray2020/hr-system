@@ -117,6 +117,40 @@ describe('分流：_resource=shift_types', () => {
   });
 });
 
+describe('分流：_resource=shift_types_item（PATCH/DELETE）', () => {
+  it('PATCH ?_resource=shift_types_item&id=ST_X → 第一個 from 是 "shift_types"', async () => {
+    const [req, res] = makeReqRes({
+      method: 'PATCH',
+      query: { _resource: 'shift_types_item', id: 'ST_X' },
+      body: { color: '#000' },
+    });
+    await handler(req, res);
+    expect(calls.fromTables[0]).toBe('shift_types');
+    // existing maybeSingle 預設 null → handler 回 404、不繼續 update
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('DELETE ?_resource=shift_types_item&id=ST_X → 第一個 from 是 "shift_types"', async () => {
+    const [req, res] = makeReqRes({
+      method: 'DELETE',
+      query: { _resource: 'shift_types_item', id: 'ST_X' },
+    });
+    await handler(req, res);
+    expect(calls.fromTables[0]).toBe('shift_types');
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('PATCH 缺 id → 400', async () => {
+    const [req, res] = makeReqRes({
+      method: 'PATCH',
+      query: { _resource: 'shift_types_item' },
+      body: { color: '#000' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('分流：legacy 舊路徑（employee-app.html / calendar.html 用）', () => {
   it('GET ?dept=X&start=Y&end=Z → 第一個 from 是 "schedules"（不是 employees,代表沒走 auth-first 新分支）', async () => {
     const [req, res] = makeReqRes({
