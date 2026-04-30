@@ -127,8 +127,6 @@ function fmtDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-const SHIFT_NAMES = { ST001: '早班', ST002: '晚班', ST003: '休假', ST004: '例假' };
-
 // ── State ──
 let currentWeekStart = null;     // ISO date string, 週日為起始
 let visibleEmps = [];            // 主管→同部門、HR→全部
@@ -343,7 +341,7 @@ function render() {
       }
 
       const stid = seg1.shift_type_id;
-      const isOff = stid === 'ST003' || stid === 'ST004' || seg1.note === '__OFF__';
+      const isOff = seg1.shift_types?.is_off === true || seg1.note === '__OFF__';
       const cellClass = isOff
         ? 'week-cell-off'
         : (stid === 'ST002' ? 'week-cell-shift2' : 'week-cell-shift1');
@@ -355,7 +353,7 @@ function render() {
       } else if (isManagerPhase && seg1.start_time && seg1.end_time) {
         label = `${fmtTime(seg1.start_time)}-${fmtTime(seg1.end_time)}`;
       } else {
-        label = (isManagerPhase ? '' : '想') + (SHIFT_NAMES[stid] || stid || '');
+        label = (isManagerPhase ? '' : '想') + (seg1.shift_types?.name || stid || '');
       }
 
       const isLate = isLateChangeFor(dateStr, periodStatus);
@@ -416,8 +414,7 @@ function render() {
       const segs = (allSchedules[emp.id] || []).filter(s => s.work_date === dateStr);
       const seg1 = segs.find(s => s.segment_no === 1) || segs[0];
       if (!seg1) return;
-      const stid = seg1.shift_type_id;
-      const isOff = stid === 'ST003' || stid === 'ST004' || seg1.note === '__OFF__';
+      const isOff = seg1.shift_types?.is_off === true || seg1.note === '__OFF__';
       if (isOff) off++; else on++;
     });
     return { on, off };

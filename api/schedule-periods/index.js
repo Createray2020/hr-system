@@ -52,10 +52,12 @@ async function handleGet(req, res, caller) {
   if (error) return res.status(500).json({ error: error.message });
   if (!periods || periods.length === 0) return res.status(200).json({ periods: [], schedules: [] });
 
-  // 一次撈所有相關 schedules
+  // 一次撈所有相關 schedules（JOIN shift_types 避免前端再 fetch / hard-code 名稱）
   const periodIds = periods.map(p => p.id);
   const { data: schedules, error: sErr } = await supabaseAdmin
-    .from('schedules').select('*').in('period_id', periodIds).order('work_date');
+    .from('schedules')
+    .select('*, shift_types(id, name, color, is_off, is_flexible, crosses_midnight)')
+    .in('period_id', periodIds).order('work_date');
   if (sErr) return res.status(500).json({ error: sErr.message });
 
   return res.status(200).json({ periods, schedules: schedules || [] });

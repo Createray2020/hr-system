@@ -132,9 +132,6 @@ function toast(msg, type='success') {
 }
 function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
-// C9：員工 wish shift_type 顯示名（hard-code、與 supabase ST001/ST002/ST003 對應）
-const SHIFT_NAMES = { ST001: '希望早班', ST002: '希望晚班', ST003: '希望休假' };
-
 // ── State ──
 let currentYear, currentMonth;
 let period = null;       // schedule_periods row（null = 該月還沒建）
@@ -276,15 +273,16 @@ function renderCalendar() {
           if (s.start_time && s.end_time) {
             inner += `<div class="cal-shift-line">${escHtml(fmtTime(s.start_time))}–${escHtml(fmtTime(s.end_time))}</div>`;
           } else {
-            inner += `<div class="cal-shift-line">${escHtml(SHIFT_NAMES[s.shift_type_id] || s.shift_type_id || '')}</div>`;
+            inner += `<div class="cal-shift-line">${escHtml(s.shift_types?.name || s.shift_type_id || '')}</div>`;
           }
         }
         if (mgrSegs.length > 2) inner += `<div class="cal-shift-line">+${mgrSegs.length-2} 段…</div>`;
       } else if (isWish) {
-        // 員工自標 wish → 顯示對應名稱（早班/晚班/休假）
+        // 員工自標 wish → 顯示「希望」+ shift_types.name
         const seg1 = segs[0];
-        inner += `<div class="cal-wish-tag">${escHtml(SHIFT_NAMES[seg1?.shift_type_id] || '想休')}</div>`;
-        if (seg1?.shift_type_id === 'ST003') cell.classList.add('day-off');
+        const wishLabel = seg1?.shift_types?.name ? '希望' + seg1.shift_types.name : '想休';
+        inner += `<div class="cal-wish-tag">${escHtml(wishLabel)}</div>`;
+        if (seg1?.shift_types?.is_off === true) cell.classList.add('day-off');
         else cell.classList.add('has-shift');
       }
 
@@ -367,7 +365,8 @@ async function saveDay() {
     return;
   }
 
-  toast(`已標記${SHIFT_NAMES[mode] || mode}`);
+  const lbl = document.querySelector(`input[name="mode"][value="${mode}"]`)?.nextElementSibling?.textContent || mode;
+  toast(`已標記${lbl}`);
   closeDayModal();
   await load();
 }
