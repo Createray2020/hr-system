@@ -978,7 +978,8 @@ const SHEET_COLS = [
     type:'select', opts:['full_time','part_time'],
     disp: v => v==='part_time' ? '<span class="cb-part">兼職</span>' : '<span class="cb-full">正職</span>',
     editVal: v => v },
-  { key:'dept',             label:'部門',     w:88,  type:'select-dept' },
+  { key:'dept',             label:'部門',     w:88,  type:'select-dept',
+    read: e => e.dept_name || e.dept || '' },
   { key:'position',         label:'職稱',     w:108 },
   { key:'grade',            label:'職等',     w:56,
     type:'select', opts:['','一等','二等','三等'] },
@@ -1017,6 +1018,7 @@ const SHEET_COLS = [
 
 function shtGetRaw(col, emp) {
   if (col.compute) return col.compute(emp);
+  if (col.read) return col.read(emp);
   return emp[col.key] ?? '';
 }
 
