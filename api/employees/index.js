@@ -69,6 +69,45 @@ export default async function handler(req, res) {
     return res.status(200).json({ message: '已訂閱推播通知' });
   }
 
+  // ── 組織圖 caller-aware filter ────────────────────────────────────────────
+  // GET /api/orgchart（vercel.json rewrite → _resource=orgchart）
+  // 角色：
+  //   BACKOFFICE (hr/ceo/chairman/admin) → 全公司員工
+  //   is_manager === true → chairman + ceo + hr/admin + 全公司主管 + caller 自己部門所有員工
+  //   其他（一般員工）→ 403（前端應擋住、後端兜底）
+  if (req.query._resource === 'orgchart') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    const isHR  = isBackofficeRole(caller);
+    const isMgr = caller.is_manager === true;
+    if (!isHR && !isMgr) return res.status(403).json({ error: 'Forbidden' });
+
+    const ORG_FIELDS = 'id, name, position, avatar, role, dept_id, is_manager';
+    const { data: all, error: eErr } = await supabaseAdmin
+      .from('employees').select(ORG_FIELDS).eq('status', 'active');
+    if (eErr) return res.status(500).json({ error: eErr.message });
+
+    let employees = all || [];
+    if (!isHR) {
+      // 員工數小、in-memory filter（避免複雜 OR query）
+      employees = employees.filter(e =>
+        e.role === 'chairman' || e.role === 'ceo' ||
+        e.role === 'hr'       || e.role === 'admin' ||
+        e.is_manager === true ||
+        (caller.dept_id && e.dept_id === caller.dept_id) ||
+        e.id === caller.id // 防禦性、確保自己一定在
+      );
+    }
+
+    const { data: depts, error: dErr } = await supabaseAdmin
+      .from('departments').select('id, name, color').order('name');
+    if (dErr) return res.status(500).json({ error: dErr.message });
+
+    return res.status(200).json({ employees, departments: depts || [] });
+  }
+
   // ── 部門管理（合併自 api/departments.js） ─────────────────────────────────
   if (req.query._resource === 'departments') {
     if (req.method === 'GET') {

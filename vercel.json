@@ -10,6 +10,10 @@
       "destination": "/api/employees?_resource=departments"
     },
     {
+      "source": "/api/orgchart",
+      "destination": "/api/employees?_resource=orgchart"
+    },
+    {
       "source": "/api/push",
       "destination": "/api/employees?_resource=push"
     },
