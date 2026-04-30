@@ -61,7 +61,9 @@ export function parseScheduleAOA({ aoa, year, month, employees, shiftTypes }) {
   for (let r = FIRST_DATA_ROW_INDEX; r < aoa.length; r++) {
     const row = aoa[r] || [];
     const empId = String(row[0] ?? '').trim();
-    if (!empId) continue; // 空 row 直接跳過、不報錯
+    // 空 row 直接跳過、不報錯
+    // 注意：「上班人數 / 休假人數」統計 row 也是 col A 為空、會在這裡自動跳過
+    if (!empId) continue;
 
     total++;
 

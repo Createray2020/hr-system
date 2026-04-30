@@ -103,13 +103,18 @@ describe('helpers', () => {
 // ─────────────────────────────────────────────────
 
 describe('buildScheduleAOA', () => {
-  it('員工 0 個 → 只有 5 個 header rows、無資料 row', () => {
+  it('員工 0 個 → 5 個 header rows + 2 統計 row（全 0）', () => {
     const r = buildScheduleAOA({
       year: 2026, month: 5,
       employees: [], schedules: [], shiftTypes: SHIFT_TYPES,
     });
-    expect(r.aoa.length).toBe(FIRST_DATA_ROW_INDEX); // 5
+    expect(r.aoa.length).toBe(FIRST_DATA_ROW_INDEX + 2); // 5 + 2 summary
     expect(r.sheetName).toBe('2026-05 班表');
+    expect(r.aoa[5][2]).toBe('上班人數');
+    expect(r.aoa[6][2]).toBe('休假人數');
+    // 0 員工 → 全 0
+    expect(r.aoa[5][3]).toBe(0);
+    expect(r.aoa[6][3]).toBe(0);
   });
 
   it('row 1 是 title、row 2 是 header、row 3 是 weekday', () => {
@@ -130,18 +135,20 @@ describe('buildScheduleAOA', () => {
     expect(r.aoa[2][5]).toBe('日');
   });
 
-  it('員工資料 row 起於 index 5、班型欄留空', () => {
+  it('員工資料 row 起於 index 5、班型欄留空、後 2 row 為統計', () => {
     const r = buildScheduleAOA({
       year: 2026, month: 5,
       employees: [{ id: 'E001', name: '小明' }, { id: 'E002', name: '小美' }],
       schedules: [], shiftTypes: SHIFT_TYPES,
     });
-    expect(r.aoa.length).toBe(FIRST_DATA_ROW_INDEX + 2);
+    expect(r.aoa.length).toBe(FIRST_DATA_ROW_INDEX + 2 + 2); // 5 header + 2 emp + 2 summary
     expect(r.aoa[5][0]).toBe('E001');
     expect(r.aoa[5][1]).toBe('小明');
     expect(r.aoa[5][2]).toBe(''); // 班型空、人工填
     expect(r.aoa[5][3]).toBe(''); // 5/1 沒排班
     expect(r.aoa[6][0]).toBe('E002');
+    expect(r.aoa[7][2]).toBe('上班人數');
+    expect(r.aoa[8][2]).toBe('休假人數');
   });
 
   it('員工順序保留呼叫端傳入的順序', () => {
@@ -263,6 +270,59 @@ describe('buildScheduleAOA', () => {
     });
     expect(r.aoa[1][3 + 27]).toBe('2/28');
     expect(r.aoa[1].length).toBe(3 + 28);
+  });
+
+  it('統計 row：N=2 員工、計算當日 on/off 數字正確', () => {
+    const r = buildScheduleAOA({
+      year: 2026, month: 5,
+      employees: [{ id: 'E001' }, { id: 'E002' }],
+      schedules: [
+        // 5/1：E001 一般日班、E002 休假 → on=1 / off=1
+        { employee_id: 'E001', work_date: '2026-05-01', shift_type_id: 'ST001',
+          shift_types: { name: '一般日班', is_off: false } },
+        { employee_id: 'E002', work_date: '2026-05-01', shift_type_id: 'ST003',
+          shift_types: { name: '休假', is_off: true } },
+        // 5/2：E001 休假、E002 沒 schedule → on=0 / off=1
+        { employee_id: 'E001', work_date: '2026-05-02', shift_type_id: 'ST003',
+          shift_types: { name: '休假', is_off: true } },
+        // 5/3：E001 用 note=__OFF__ 但 shift_type_id 沒 is_off → 仍判 off
+        { employee_id: 'E001', work_date: '2026-05-03', shift_type_id: 'ST001',
+          note: '__OFF__', shift_types: { name: '一般日班', is_off: false } },
+      ],
+      shiftTypes: SHIFT_TYPES,
+    });
+    // aoa: 5 header + 2 emp + 2 summary = 9
+    expect(r.aoa.length).toBe(9);
+    const onRow  = r.aoa[7];
+    const offRow = r.aoa[8];
+    expect(onRow[2]).toBe('上班人數');
+    expect(offRow[2]).toBe('休假人數');
+    // 5/1: on=1 (E001), off=1 (E002)
+    expect(onRow[3]).toBe(1);
+    expect(offRow[3]).toBe(1);
+    // 5/2: on=0, off=1 (E001)
+    expect(onRow[4]).toBe(0);
+    expect(offRow[4]).toBe(1);
+    // 5/3: __OFF__ note → off=1
+    expect(onRow[5]).toBe(0);
+    expect(offRow[5]).toBe(1);
+    // 5/4 沒人排 → 0/0
+    expect(onRow[6]).toBe(0);
+    expect(offRow[6]).toBe(0);
+  });
+
+  it('統計 row：fallback 用 stMap 查 is_off（schedule 沒帶 JOIN）', () => {
+    const r = buildScheduleAOA({
+      year: 2026, month: 5,
+      employees: [{ id: 'E001' }],
+      schedules: [
+        // 沒帶 shift_types JOIN、靠 shiftTypes 參數的 stMap[ST003].is_off=true 判斷
+        { employee_id: 'E001', work_date: '2026-05-01', shift_type_id: 'ST003' },
+      ],
+      shiftTypes: SHIFT_TYPES,
+    });
+    const offRow = r.aoa[r.aoa.length - 1];
+    expect(offRow[3]).toBe(1);
   });
 });
 
@@ -413,6 +473,18 @@ describe('parseScheduleAOA', () => {
     const r = parseScheduleAOA({ ...BASE_OPTS, aoa });
     expect(r.errors[0].row).toBe(6); // 員工 row 起於 index 5、人類看是 row 6
     expect(r.errors[0].col).toBe(4); // 5/1 在 index 3、人類看是 col 4
+  });
+
+  it('「上班人數 / 休假人數」統計 row → 自動跳過、不報錯也不算 total', () => {
+    const aoa = aoaWithEmpRows(2026, 5,
+      empRow('E001', '小明', { 1: '一般日班' }),
+      ['', '', '上班人數', 1, 0, 0],
+      ['', '', '休假人數', 0, 1, 1],
+    );
+    const r = parseScheduleAOA({ ...BASE_OPTS, aoa });
+    expect(r.errors).toEqual([]);
+    expect(r.rows.length).toBe(1);
+    expect(r.total).toBe(1); // 統計 row 不算
   });
 });
 

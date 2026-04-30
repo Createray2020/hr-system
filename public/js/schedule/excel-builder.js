@@ -165,6 +165,26 @@ export function buildScheduleAOA({ year, month, employees, schedules, shiftTypes
     aoa.push(row);
   }
 
+  // ── 統計 rows：上班人數 / 休假人數 ──
+  // 算法同 schedule.html 既有邏輯：is_off=true OR note='__OFF__' → off；否則 on。沒 schedule 不算。
+  const dailyOn  = new Array(days).fill(0);
+  const dailyOff = new Array(days).fill(0);
+  for (const emp of employees || []) {
+    for (let d = 1; d <= days; d++) {
+      const dateStr = fmtDate(year, month, d);
+      const segs = scheduleMap[`${emp.id}|${dateStr}`] || [];
+      if (segs.length === 0) continue;
+      const seg1 = segs.find(s => (s.segment_no || 1) === 1) || segs[0];
+      const isOff =
+        (seg1.shift_types?.is_off === true) ||
+        (stMap[seg1.shift_type_id]?.is_off === true) ||
+        (seg1.note === '__OFF__');
+      if (isOff) dailyOff[d - 1]++; else dailyOn[d - 1]++;
+    }
+  }
+  aoa.push(['', '', '上班人數', ...dailyOn]);
+  aoa.push(['', '', '休假人數', ...dailyOff]);
+
   // 欄寬：員工編號 12、姓名 10、班型 10、日期 6
   const columnWidths = [12, 10, 10, ...new Array(days).fill(6)];
 
