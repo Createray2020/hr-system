@@ -63,6 +63,7 @@
         <span id="week-range" style="font-family:'DM Mono',monospace;font-size:14px;min-width:200px;text-align:center">--</span>
         <button class="btn btn-ghost" onclick="changeWeek(1)">→</button>
         <button class="btn btn-ghost" onclick="goThisWeek()">本週</button>
+        <select id="dept-filter" class="form-select" style="width:auto;display:none" onchange="onDeptFilterChange()" title="部門過濾"></select>
         <button class="btn btn-ghost" onclick="openExportModal()" title="匯出排班（選範圍）">📤 匯出</button>
         <button class="btn btn-ghost" onclick="document.getElementById('import-file').click()" title="從 Excel 匯入排班">📥 匯入</button>
         <input type="file" id="import-file" accept=".xlsx,.xls" style="display:none" onchange="handleImportFile(event)">
@@ -307,7 +308,9 @@ function fmtDate(d) {
 
 // ── State ──
 let currentWeekStart = null;     // ISO date string, 週日為起始
-let visibleEmps = [];            // 主管→同部門、HR→全部
+let allEmps = [];                // 役色過濾後的完整 active 員工（HR=全公司、主管=同部門）
+let visibleEmps = [];            // allEmps 再套部門過濾後、實際渲染的員工
+let selectedDeptId = '';         // dept filter（'' = 全部、HR 專屬）
 let allSchedules = {};           // { emp_id: [schedules] }
 let allPeriods = {};             // { emp_id: period }
 let holidayDates = new Set();    // C12-3:該年 holidays（不含 makeup_workday）
@@ -390,7 +393,8 @@ async function load(retries = 0) {
   // 員工列表 + 班別清單（pill bar）
   try {
     const emps = await api('/api/employees');
-    visibleEmps = filterVisibleEmps(emps || [], u);
+    allEmps = filterVisibleEmps(emps || [], u);
+    applyDeptFilter();
   } catch(e) { toast('員工列表載入失敗：' + e.message, 'error'); return; }
 
   try {
@@ -398,11 +402,10 @@ async function load(retries = 0) {
   } catch(_) { shiftTypes = []; }
   renderPillBar();
 
-  // 部門資訊
-  const deptName = visibleEmps[0]?.dept_name || visibleEmps[0]?.dept || '';
+  // 部門 filter select（只 HR 看得到）+ 部門資訊
   const isHR = ['hr','admin','ceo','chairman'].includes(u.role);
-  document.getElementById('dept-info').textContent =
-    isHR ? `全公司 · ${visibleEmps.length} 人` : `${deptName} · ${visibleEmps.length} 人`;
+  renderDeptFilter(isHR);
+  updateDeptInfo(isHR);
 
   // 撈該週可能跨月的 periods + schedules
   allPeriods = {};
@@ -456,6 +459,55 @@ function filterVisibleEmps(emps, user) {
     return active.filter(e => e.dept_id === user.dept_id);
   }
   return [];
+}
+
+function applyDeptFilter() {
+  if (!selectedDeptId) {
+    visibleEmps = allEmps.slice();
+  } else {
+    visibleEmps = allEmps.filter(e => (e.dept_id || '') === selectedDeptId);
+  }
+}
+
+function renderDeptFilter(isHR) {
+  const sel = document.getElementById('dept-filter');
+  if (!isHR) { sel.style.display = 'none'; return; }
+  sel.style.display = '';
+  // 部門列表 + 人數（從 allEmps 推導、含未指派 dept 為空字串的人）
+  const deptCounts = {};
+  for (const emp of allEmps) {
+    const id = emp.dept_id || '';
+    if (!id) continue; // 未指派不列為過濾選項（仍在「全部」中顯示）
+    if (!deptCounts[id]) deptCounts[id] = { name: emp.dept_name || id, count: 0 };
+    deptCounts[id].count++;
+  }
+  const ids = Object.keys(deptCounts).sort((a, b) => deptCounts[a].name.localeCompare(deptCounts[b].name));
+  sel.innerHTML = `<option value="">全部（${allEmps.length} 人）</option>` +
+    ids.map(id => `<option value="${escHtml(id)}"${id === selectedDeptId ? ' selected' : ''}>${escHtml(deptCounts[id].name)}（${deptCounts[id].count} 人）</option>`).join('');
+}
+
+function updateDeptInfo(isHR) {
+  const el = document.getElementById('dept-info');
+  if (!isHR) {
+    const deptName = visibleEmps[0]?.dept_name || visibleEmps[0]?.dept || '';
+    el.textContent = `${deptName} · ${visibleEmps.length} 人`;
+    return;
+  }
+  if (!selectedDeptId) {
+    el.textContent = `全公司 · ${visibleEmps.length} 人`;
+  } else {
+    const name = visibleEmps[0]?.dept_name || selectedDeptId;
+    el.textContent = `${name} · ${visibleEmps.length} 人`;
+  }
+}
+
+function onDeptFilterChange() {
+  selectedDeptId = document.getElementById('dept-filter').value;
+  applyDeptFilter();
+  const u = window.currentUser;
+  const isHR = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  updateDeptInfo(isHR);
+  render();
 }
 
 function isLateChangeFor(date, periodStatus) {
