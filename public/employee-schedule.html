@@ -33,12 +33,21 @@
   .banner-info{background:rgba(91,141,239,.12);color:#7FBBFF;border:0.5px solid rgba(91,141,239,.3)}
   .banner-warn{background:rgba(251,191,36,.12);color:#FBBF24;border:0.5px solid rgba(251,191,36,.3)}
   .banner-lock{background:rgba(107,114,128,.12);color:#9CA3AF;border:0.5px solid rgba(107,114,128,.3)}
+
+  /* ── 無側欄時 main 解除 240px 左 margin ── */
+  .main.no-sidebar{margin-left:0}
+
+  /* ── 返回按鈕（員工從 mobile bottom nav 進來時用）── */
+  .back-btn{background:transparent;border:1px solid var(--border);color:var(--text-dim);
+            padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;
+            font-family:'Noto Sans TC',sans-serif;margin-bottom:14px;transition:border-color .15s}
+  .back-btn:hover{border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body data-page="employee-schedule">
 <div class="shell">
-  <aside class="sidebar" id="sidebar"></aside>
-  <main class="main">
+  <main class="main no-sidebar">
+    <button class="back-btn" onclick="history.length > 1 ? history.back() : (location.href='/employee-app.html')">← 返回</button>
     <div class="page-header">
       <div>
         <div class="page-title">我的排班</div>
