@@ -66,7 +66,7 @@
 
     <!-- Quick links -->
     <div class="quick-links">
-      <a class="quick-card" href="/leave.html">
+      <a class="quick-card" id="qc-leave" href="/leave.html">
         <div class="quick-icon">📋</div>
         <div class="quick-label">請假審批</div>
         <div class="quick-sub"><span id="ql-pending">—</span> 筆待審核</div>
@@ -76,12 +76,12 @@
         <div class="quick-label">出勤管理</div>
         <div class="quick-sub">打卡 & 出勤紀錄</div>
       </a>
-      <a class="quick-card" href="/employees.html">
+      <a class="quick-card" id="qc-employees" href="/employees.html">
         <div class="quick-icon">👥</div>
         <div class="quick-label">員工資料</div>
         <div class="quick-sub"><span id="ql-emp">—</span> 位在職員工</div>
       </a>
-      <a class="quick-card" href="/salary.html">
+      <a class="quick-card" id="qc-salary" href="/salary.html">
         <div class="quick-icon">💰</div>
         <div class="quick-label">薪資管理</div>
         <div class="quick-sub"><span id="ql-salary-draft">—</span> 份待確認</div>
@@ -93,7 +93,7 @@
       <div class="stat-card blue"><div class="stat-label">在職員工</div><div class="stat-value" id="st-emp">—</div><div class="stat-hint">人</div></div>
       <div class="stat-card orange"><div class="stat-label">待審假單</div><div class="stat-value" id="st-leave">—</div><div class="stat-hint">筆</div></div>
       <div class="stat-card red"><div class="stat-label">今日缺勤</div><div class="stat-value" id="st-absent">—</div><div class="stat-hint">人</div></div>
-      <div class="stat-card purple"><div class="stat-label">本月薪資</div><div class="stat-value" id="st-salary" style="font-size:20px">—</div><div class="stat-hint">實發總額</div></div>
+      <div class="stat-card purple" id="stat-salary-card"><div class="stat-label">本月薪資</div><div class="stat-value" id="st-salary" style="font-size:20px">—</div><div class="stat-hint">實發總額</div></div>
     </div>
 
     <div class="grid-2">
@@ -112,7 +112,7 @@
 
     <div class="grid-2">
       <!-- 本月薪資概況 -->
-      <div class="card">
+      <div class="card" id="card-salary-overview">
         <div class="section-title">本月薪資概況</div>
         <div id="salary-overview"><div style="color:var(--text-dim);font-size:13px">載入中…</div></div>
       </div>
@@ -156,10 +156,26 @@ const LEAVE_TYPES  = {annual:'特休假',sick:'病假',personal:'事假',materni
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
   setWelcome();
+  applyRoleFilter();
   try {
     await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
+
+// Stop-gap：非 HR / CEO / chairman 隱藏薪資與員工資料區塊；
+// 主管與員工的「請假審批」卡也隱藏（連結指向錯頁、append query 沒意義）。
+// 用 display:none 而非 remove、保留子元素給 loadDashboard 寫入時 getElementById 可找到。
+// 真正的後端 role filter 在 5/1 後 backlog 處理。
+function applyRoleFilter() {
+  const u = window.currentUser;
+  const isHR = window.Roles?.isBackofficeRole(u);
+  if (isHR) return;
+  ['qc-leave', 'qc-employees', 'qc-salary', 'stat-salary-card', 'card-salary-overview']
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+}
 
 function setWelcome() {
   const now  = new Date();
