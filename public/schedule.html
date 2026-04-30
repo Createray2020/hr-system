@@ -327,7 +327,7 @@ function render() {
   const weekStartStr = fmtDate(weekStart);
   const weekEndStr = fmtDate(weekEnd);
 
-  body.innerHTML = visibleEmps.map(emp => {
+  const empRows = visibleEmps.map(emp => {
     const schs = allSchedules[emp.id] || [];
     const period = allPeriods[emp.id];
     const periodStatus = period?.status;
@@ -407,6 +407,42 @@ function render() {
         <td style="padding:10px 8px;border-bottom:1px solid var(--border);text-align:center">${opHtml}</td>
       </tr>`;
   }).join('');
+
+  // 每日上班 / 休假人數（visibleEmps + allSchedules reduce per date）
+  const dailyCounts = dates.map(d => {
+    const dateStr = fmtDate(d);
+    let on = 0, off = 0;
+    visibleEmps.forEach(emp => {
+      const segs = (allSchedules[emp.id] || []).filter(s => s.work_date === dateStr);
+      const seg1 = segs.find(s => s.segment_no === 1) || segs[0];
+      if (!seg1) return;
+      const stid = seg1.shift_type_id;
+      const isOff = stid === 'ST003' || stid === 'ST004' || seg1.note === '__OFF__';
+      if (isOff) off++; else on++;
+    });
+    return { on, off };
+  });
+  const totalOn = dailyCounts.reduce((s, c) => s + c.on, 0);
+  const totalOff = dailyCounts.reduce((s, c) => s + c.off, 0);
+  const sumRowBg = 'background:rgba(255,255,255,0.03)';
+  const sumLabelStyle = `padding:10px 12px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-weight:600;font-size:12px`;
+  const sumCellStyle = `padding:10px 6px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);text-align:center;font-size:14px;font-weight:600;font-family:'DM Mono',monospace`;
+  const sumOpStyle = `padding:10px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);text-align:center;font-size:11px;color:var(--text-dim)`;
+  const summaryRows = `
+    <tr style="${sumRowBg}">
+      <td style="${sumLabelStyle}">上班人數</td>
+      ${dailyCounts.map(c => `<td style="${sumCellStyle};color:#7FBBFF">${c.on}</td>`).join('')}
+      <td style="${sumCellStyle.replace('font-size:14px','font-size:12px')};opacity:.5">—</td>
+      <td style="${sumOpStyle}">合計：上班 ${totalOn}</td>
+    </tr>
+    <tr style="${sumRowBg}">
+      <td style="${sumLabelStyle}">休假人數</td>
+      ${dailyCounts.map(c => `<td style="${sumCellStyle};color:var(--text-dim)">${c.off}</td>`).join('')}
+      <td style="${sumCellStyle.replace('font-size:14px','font-size:12px')};opacity:.5">—</td>
+      <td style="${sumOpStyle}">合計：休 ${totalOff}</td>
+    </tr>`;
+
+  body.innerHTML = empRows + summaryRows;
 }
 
 // ── Day modal ──
