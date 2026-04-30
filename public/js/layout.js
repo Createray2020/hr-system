@@ -24,7 +24,16 @@
     return res.json();
   };
 
-  window.logout = async () => { await _sb.auth.signOut(); location.href = '/login.html'; };
+  window.logout = async () => {
+    await _sb.auth.signOut();
+    localStorage.removeItem('preferred_version');
+    location.href = '/login.html';
+  };
+
+  window.switchToMobile = () => {
+    localStorage.setItem('preferred_version', 'mobile');
+    location.href = '/employee-app.html';
+  };
 
   // 取得目前登入員工資料
   let currentUser = null;
@@ -146,6 +155,9 @@
         <div class="name">${userName}</div>
         <div class="role">${userRole}</div>
       </div>
+      ${isMgrOrHR(currentUser) ? `
+      <button onclick="switchToMobile()" title="切換到手機版"
+        style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-dim);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0">📱</button>` : ''}
     </div>`;
 
   // 載入未讀通知數量

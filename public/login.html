@@ -126,12 +126,18 @@ function showError(msg) {
 function hideError() { document.getElementById('err-box').style.display = 'none'; }
 
 function redirectByRole(emp) {
-  localStorage.removeItem('preferred_version');
+  // 員工永遠去手機版（preferred_version 不適用）
   if (!Roles.canAccessBackoffice(emp)) {
-    window.location.href = '/attendance.html';
-  } else {
-    window.location.href = '/dashboard.html';
+    window.location.href = '/employee-app.html';
+    return;
   }
+  // 主管+：先看 preferred_version、再 fallback 螢幕寬度
+  const pref = localStorage.getItem('preferred_version');
+  let target;
+  if (pref === 'mobile')       target = '/employee-app.html';
+  else if (pref === 'desktop') target = '/dashboard.html';
+  else                         target = (window.innerWidth < 768) ? '/employee-app.html' : '/dashboard.html';
+  window.location.href = target;
 }
 
 // If already logged in, redirect
