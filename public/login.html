@@ -126,18 +126,13 @@ function showError(msg) {
 function hideError() { document.getElementById('err-box').style.display = 'none'; }
 
 function redirectByRole(emp) {
-  // 員工永遠去手機版（preferred_version 不適用）
-  if (!Roles.canAccessBackoffice(emp)) {
-    window.location.href = '/employee-app.html';
-    return;
-  }
-  // 主管+：先看 preferred_version、再 fallback 螢幕寬度
+  // 預設所有人手機版；只有 preferred_version='desktop' 且可進後台才跳 dashboard
   const pref = localStorage.getItem('preferred_version');
-  let target;
-  if (pref === 'mobile')       target = '/employee-app.html';
-  else if (pref === 'desktop') target = '/dashboard.html';
-  else                         target = (window.innerWidth < 768) ? '/employee-app.html' : '/dashboard.html';
-  window.location.href = target;
+  if (pref === 'desktop' && Roles.canAccessBackoffice(emp)) {
+    window.location.href = '/dashboard.html';
+  } else {
+    window.location.href = '/employee-app.html';
+  }
 }
 
 // If already logged in, redirect
