@@ -1,10 +1,11 @@
 // api/salary/index.js
 //
 // 本檔同時服務兩條路徑(同 Batch 3/4/5 模式向後相容):
-//   舊路徑(legacy):dashboard.html
-//     - GET  ?year&month&dept&status&employee_id   清單(回 row 含 client-side gross/net 算的)
+//   舊路徑(legacy)：僅留作 HR 後台 fallback、frontend 已全改 ?v=2
+//     - GET  ?year&month&dept&status&employee_id   清單(client-side gross/net、含 avatar/emp_role)
+//                                                 ※ requireRole(BACKOFFICE_ROLES) — cleanup 3 加上
 //     - POST ?_action=batch                        舊批次產生草稿(legacy schema)
-//   新路徑(Batch 9):salary.html / employee-salary.html(新版)
+//   新路徑(Batch 9):salary.html / employee-salary.html / dashboard.html(本次遷移)
 //     - GET ?year&month[&employee_id][&v=2]       清單(直接回 GENERATED gross_salary/net_salary)
 //     - POST body { action:'batch_v2', year, month }  新批次產生 → 走 lib/salary/calculator.js
 //
@@ -43,6 +44,9 @@ export default async function handler(req, res) {
 
   // ── Legacy GET ──────────────────────────────────────────
   if (req.method === 'GET') {
+    // cleanup 3：legacy GET 加 BACKOFFICE_ROLES gate（原本完全無 auth）
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES);
+    if (!caller) return;
     const { year, month, dept, dept_id, status, employee_id } = req.query;
     let q = supabaseAdmin.from('salary_records')
       .select(`*, employees!inner(name, dept_id, avatar, role, is_manager, employment_type, departments(name))`)

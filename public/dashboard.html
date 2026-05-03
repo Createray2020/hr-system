@@ -206,7 +206,9 @@ async function loadDashboard() {
   const [leaveStats, employees, salaryData, todayAtt] = await Promise.all([
     api('/api/leaves?stats=true'),
     api('/api/employees?status=active'),
-    api(`/api/salary?year=${now.getFullYear()}&month=${now.getMonth()+1}`).catch(()=>[]),
+    api(`/api/salary?v=2&year=${now.getFullYear()}&month=${now.getMonth()+1}`)
+      .then(r => r.records || [])
+      .catch(()=>[]),
     api(`/api/attendance?month=${ym}`).catch(()=>[]),
   ]);
 
