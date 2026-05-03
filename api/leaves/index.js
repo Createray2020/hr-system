@@ -1,7 +1,7 @@
 // api/leaves/index.js
 //
 // 本檔同時服務兩條路徑：
-//   舊路徑（legacy）：employee-leave.html / dashboard.html / calendar.html / leave.html.old
+//   舊路徑（legacy）：employee-leave.html / dashboard.html / calendar.html
 //     - GET  ?id=X / ?stats=true / ?status=approved|pending / 清單(含 dept / type / search 篩選)
 //     - POST body { employee_id, leave_type, start_date, end_date, days, reason, attachment_url }
 //     - PUT  ?id=X body { status: 'approved'|'rejected', handler_note }

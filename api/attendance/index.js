@@ -1,7 +1,7 @@
 // api/attendance/index.js
 //
 // 本檔同時服務兩條路徑：
-//   舊路徑（legacy）：employee-app.html / dashboard.html / attendance.html.old
+//   舊路徑（legacy）：employee-app.html / dashboard.html
 //     - GET  ?employee_id&month / ?date / ?all=true&start&end / ?_action=today
 //     - POST ?_action=punch  body { employee_id, type:'in'|'out' }
 //     - POST manual          body { employee_id, work_date, clock_in_time, ... }
@@ -107,7 +107,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    // ── 打卡 (_action=punch) ─── legacy(employee-app.html / attendance.html.old)
+    // ── 打卡 (_action=punch) ─── legacy(employee-app.html)
     if (req.query._action === 'punch') {
       const { employee_id, type } = req.body;
       if (!employee_id || !['in','out'].includes(type))

@@ -1,7 +1,7 @@
 // api/salary/index.js
 //
 // 本檔同時服務兩條路徑(同 Batch 3/4/5 模式向後相容):
-//   舊路徑(legacy):salary.html.old / employee-salary.html.old / dashboard.html
+//   舊路徑(legacy):dashboard.html
 //     - GET  ?year&month&dept&status&employee_id   清單(回 row 含 client-side gross/net 算的)
 //     - POST ?_action=batch                        舊批次產生草稿(legacy schema)
 //   新路徑(Batch 9):salary.html / employee-salary.html(新版)

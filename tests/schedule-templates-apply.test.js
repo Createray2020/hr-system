@@ -63,9 +63,13 @@ const validTemplate = {
   pattern: { type: 'weekly', shifts: { '0': 'OFF', '1': 'ST001', '2': 'ST001', '3': 'ST001', '4': 'ST001', '5': 'ST001', '6': 'OFF' } },
 };
 
+// NOTE: validPeriod uses far-future dates (2099) to avoid time-bomb
+// failures — apply.js compares period_start to real `new Date()`.
+// If a test needs to exercise "period already started" logic, use a
+// separate fixture with past dates.
 const validPeriod = {
   id: 'P_E001_2026_05', employee_id: 'E001', status: 'draft',
-  period_start: '2026-05-01', period_end: '2026-05-07',
+  period_start: '2099-01-01', period_end: '2099-01-07',
 };
 
 const validShiftTypes = [
