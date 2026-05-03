@@ -51,7 +51,7 @@
     },
     {
       "source": "/staff-table",
-      "destination": "/public/staff-table.html"
+      "destination": "/employees.html"
     },
     {
       "source": "/calendar",
