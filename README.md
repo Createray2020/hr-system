@@ -5,19 +5,13 @@
 ```
 hr-system-v2/
 ├── api/
-│   ├── stats.js                  GET  /api/stats
-│   ├── leaves.js                 GET  /api/leaves   POST /api/leaves
-│   ├── leave.js                  GET  /api/leave?id=  PUT /api/leave?id=
 │   ├── employees/
 │   │   ├── index.js              GET  /api/employees  POST /api/employees
 │   │   └── [id].js               GET  /api/employees/:id  PUT  DELETE
 │   ├── attendance/
-│   │   ├── index.js              GET  /api/attendance
-│   │   ├── punch.js              POST /api/attendance/punch
-│   │   └── manual.js             POST /api/attendance/manual
+│   │   └── index.js              GET  /api/attendance
 │   └── salary/
 │       ├── index.js              GET  /api/salary
-│       ├── batch.js              POST /api/salary/batch
 │       └── [id].js               PUT  /api/salary/:id  (confirm / pay)
 ├── lib/
 │   └── supabase.js               共用 DB client
@@ -30,7 +24,6 @@ hr-system-v2/
 │   ├── salary.html               薪資管理
 │   ├── css/style.css             共用樣式
 │   └── js/
-│       ├── app.js                共用工具（備用）
 │       └── layout.js             Sidebar 注入 + Auth guard
 ├── supabase_setup.sql            資料庫建表 SQL
 ├── vercel.json                   路由設定
