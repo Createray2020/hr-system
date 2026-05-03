@@ -102,7 +102,7 @@ function renderNotifications(list) {
   }
 
   wrap.innerHTML = `<div class="notif-list">${notifs.map(n => `
-    <div class="notif-item ${n.is_read ? 'read' : 'unread'}" onclick="openNotif('${n.id}','${n.url||'/dashboard.html'}')">
+    <div class="notif-item ${n.is_read ? 'read' : 'unread'}" onclick="openNotif('${n.id}','${n.url||''}')">
       <div class="notif-icon">${TYPE_ICON[n.type] || '🔔'}</div>
       <div class="notif-body">
         <div class="notif-title">${n.title}</div>
@@ -120,7 +120,15 @@ async function openNotif(id, url) {
   if (n) n.is_read = true;
   renderNotifications();
   window.PWA?.updateBadge(notifs.filter(x => !x.is_read).length);
-  if (url && url !== '/notifications.html') window.location.href = url;
+
+  let target = url;
+  if (!target) {
+    const u = window.currentUser;
+    const isMgrOrHR = u && (u.is_manager === true ||
+      ['hr','admin','ceo','chairman'].includes(u.role));
+    target = isMgrOrHR ? '/dashboard.html' : '/employee-app.html';
+  }
+  if (target !== '/notifications.html') window.location.href = target;
 }
 
 async function markAllRead() {

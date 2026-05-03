@@ -169,47 +169,47 @@ function render(r){
       </div>
 
       <div class="slip-row head"><div>收入項目</div><div class="v">金額</div></div>
-      <div class="slip-row"><div>底薪 (base_salary)</div><div class="v pos">+ ${fmt$(r.base_salary)}</div></div>
+      <div class="slip-row"><div>底薪</div><div class="v pos">+ ${fmt$(r.base_salary)}</div></div>
       <div class="slip-row"><div>全勤獎金 (扣 ${(n0(r.attendance_bonus_deduction_rate)*100).toFixed(1)}% 後)</div><div class="v pos">+ ${fmt$(r.attendance_bonus_actual)}</div></div>
       <div class="slip-row"><div>津貼 + 額外津貼</div><div class="v pos">+ ${fmt$(allowanceTotal)}</div></div>
-      <div class="slip-row"><div>加班費 (auto + manual)</div><div class="v pos">+ ${fmt$(overtimeTotal)}</div></div>
-      <div class="slip-row"><div>補休失效轉錢 (comp_expiry_payout)</div><div class="v pos">+ ${fmt$(r.comp_expiry_payout)}</div></div>
-      <div class="slip-row"><div>假日工作加給 (holiday_work_pay)</div><div class="v pos">+ ${fmt$(r.holiday_work_pay)}</div></div>
-      <div class="slip-row"><div>結算金額 (settlement_amount)</div><div class="v pos">+ ${fmt$(r.settlement_amount)}</div></div>
+      <div class="slip-row"><div>加班費</div><div class="v pos">+ ${fmt$(overtimeTotal)}</div></div>
+      <div class="slip-row"><div>補休失效轉錢</div><div class="v pos">+ ${fmt$(r.comp_expiry_payout)}</div></div>
+      <div class="slip-row"><div>假日工作加給</div><div class="v pos">+ ${fmt$(r.holiday_work_pay)}</div></div>
+      <div class="slip-row"><div>結算金額</div><div class="v pos">+ ${fmt$(r.settlement_amount)}</div></div>
 
-      <div class="slip-row total"><div>應發合計 (gross_salary)</div><div class="v">${fmt$(r.gross_salary)}</div></div>
+      <div class="slip-row total"><div>應發合計</div><div class="v">${fmt$(r.gross_salary)}</div></div>
 
       <div class="slip-row head" style="margin-top:14px"><div>扣除項目</div><div class="v">金額</div></div>
       <div class="slip-row"><div>曠職扣款 (${r.absence_days || 0} 天 × 日薪 ${fmt$(r.daily_wage_snapshot)})</div><div class="v neg">- ${fmt$(r.deduct_absence)}</div></div>
       <div class="slip-row"><div>勞保自付</div><div class="v neg">- ${fmt$(r.deduct_labor_ins)}</div></div>
       <div class="slip-row"><div>健保自付</div><div class="v neg">- ${fmt$(r.deduct_health_ins)}</div></div>
       <div class="slip-row"><div>所得稅</div><div class="v neg">- ${fmt$(r.deduct_tax)}</div></div>
-      <div class="slip-row"><div>出勤懲處 (attendance_penalty_total)</div><div class="v neg">- ${fmt$(r.attendance_penalty_total)}</div></div>
+      <div class="slip-row"><div>出勤懲處</div><div class="v neg">- ${fmt$(r.attendance_penalty_total)}</div></div>
 
-      <div class="slip-row total" style="color:#4ADE80"><div>實發合計 (net_salary)</div><div class="v">${fmt$(r.net_salary)}</div></div>
+      <div class="slip-row total" style="color:#4ADE80"><div>實發合計</div><div class="v">${fmt$(r.net_salary)}</div></div>
 
       ${overtimeTotal > 0 ? `
         <details>
-          <summary>加班費明細(auto:${fmt$(r.overtime_pay_auto)} / manual:${fmt$(r.overtime_pay_manual)})</summary>
-          <div>auto 部分由系統依該月 approved overtime_requests 加總(凍結 pay_multiplier);manual 部分由 HR 手動調整。${r.overtime_pay_note ? '<br>備註:' + escHtml(r.overtime_pay_note) : ''}</div>
+          <summary>加班費明細（自動 ${fmt$(r.overtime_pay_auto)} / 手動 ${fmt$(r.overtime_pay_manual)}）</summary>
+          <div>自動部分：系統依本月已核准的加班申請計算（採用申請當下的加班費倍率）；手動部分：HR 額外調整的金額。${r.overtime_pay_note ? '<br>備註:' + escHtml(r.overtime_pay_note) : ''}</div>
         </details>` : ''}
 
       ${n0(r.comp_expiry_payout) > 0 ? `
         <details>
           <summary>補休失效轉錢明細(${fmt$(r.comp_expiry_payout)})</summary>
-          <div>由 cron(每天 01:00 expiry-sweep)在補休失效當下算金額(時薪 × 剩餘小時 × 1.34 倍率)。月底 calculator 加總到本欄。</div>
+          <div>補休額度過期未用的部分自動轉為加班費（時薪 × 剩餘時數 × 1.34 倍）。本欄為本月所有失效轉換的合計。</div>
         </details>` : ''}
 
       ${n0(r.settlement_amount) > 0 ? `
         <details>
           <summary>特休結算明細(${fmt$(r.settlement_amount)})</summary>
-          <div>由特休週年滾動 cron 觸發 paid_out 後,月底 calculator 算 remaining_days × 日薪。${r.settlement_note ? '<br>備註:' + escHtml(r.settlement_note) : ''}</div>
+          <div>特休年度結算後、未用完的天數轉為現金（剩餘天數 × 日薪）。${r.settlement_note ? '<br>備註:' + escHtml(r.settlement_note) : ''}</div>
         </details>` : ''}
 
       ${n0(r.attendance_penalty_total) > 0 ? `
         <details>
           <summary>出勤懲處明細(${fmt$(r.attendance_penalty_total)})</summary>
-          <div>由 attendance_penalty_records(現金扣款類)加總。已豁免的不計入。</div>
+          <div>本月出勤異常（如曠職、嚴重遲到）的扣款合計。已申請豁免並通過的不計入。</div>
         </details>` : ''}
     </div>
   `;
