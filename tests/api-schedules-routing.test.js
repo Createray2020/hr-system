@@ -170,15 +170,15 @@ describe('分流：legacy 舊路徑（employee-app.html / calendar.html 用）',
     expect(calls.fromTables[0]).toBe('schedules');
   });
 
-  it('POST {employee_id, work_date, shift_type_id}（無 period_id）→ legacy upsert', async () => {
+  it('POST 無 period_id → 400（legacy POST 已移除、防回歸）', async () => {
     const [req, res] = makeReqRes({
       method: 'POST',
       body: { employee_id: 'E001', work_date: '2026-05-01', shift_type_id: 'ST1' },
     });
     await handler(req, res);
-    expect(calls.fromTables[0]).toBe('schedules');
-    expect(calls.inserted.find(x => x.table === 'schedules' && x.kind === 'upsert')).toBeTruthy();
-    expect([200, 201]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(400);
+    // 安全屬性：無 period_id 的 POST 絕不能寫 DB
+    expect(calls.inserted.find(x => x.table === 'schedules')).toBeFalsy();
   });
 });
 

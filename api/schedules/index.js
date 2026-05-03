@@ -1,9 +1,10 @@
 // api/schedules/index.js
 //
 // 本檔同時服務兩條路徑：
-//   舊路徑（legacy）：employee-app.html / calendar.html 用 dept/start/end 查
+//   舊路徑（legacy GET only）：calendar.html 用 dept/start/end/month 查
 //   新路徑（Batch 3+）：employee-schedule.html / schedule.html 用 period_id/year+month 查
 //   兩條路徑透過 query / body 形狀分流；_resource=shift_types 分支獨立。
+//   Legacy POST 已於 cleanup 2 移除（無 caller、無 auth 安全洞）。
 //
 // 共用：同一個 schedules 表、同一個 schema、同一個 supabase client。
 // work_date 是兩條路徑共用的核心欄位；新路徑「不」對舊路徑有任何假設。
@@ -118,27 +119,12 @@ export default async function handler(req, res) {
     }
   }
 
+  // body 有 period_id 的 POST 已在前面被 handleNewPost 接走、
+  // 走到這裡代表確定無 period_id（legacy POST 已移除）。
   if (req.method === 'POST') {
-    try {
-      const { employee_id, work_date, shift_type_id, start_time, end_time, note, created_by } = req.body;
-      if (!employee_id || !work_date || !shift_type_id)
-        return res.status(400).json({ error: '缺少必填欄位' });
-
-      const id = `S${employee_id}${work_date.replace(/-/g, '')}`;
-      const { error } = await supabaseAdmin.from('schedules').upsert([{
-        id, employee_id, work_date, shift_type_id,
-        start_time:  start_time || null,
-        end_time:    end_time   || null,
-        note:        note       || '',
-        created_by:  created_by || null,
-        updated_at:  new Date().toISOString(),
-      }], { onConflict: 'employee_id,work_date' });
-
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(201).json({ id, message: '班表已儲存' });
-    } catch(e) {
-      return res.status(500).json({ error: e.message });
-    }
+    return res.status(400).json({
+      error: 'POST /api/schedules requires period_id in body (legacy POST removed in cleanup)'
+    });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
