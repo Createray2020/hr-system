@@ -1,7 +1,6 @@
 // api/auth.js — 密碼管理（合併自 change-password + reset-password）
 // POST /api/auth?action=change-password  → 員工修改自己密碼
 // POST /api/auth?action=reset-password   → 管理員重設員工密碼
-import { createClient } from '@supabase/supabase-js';
 import { supabase, supabaseAdmin } from '../lib/supabase.js';
 import { canManageAuthAccounts } from '../lib/roles.js';
 
@@ -14,7 +13,6 @@ export default async function handler(req, res) {
   // ── change-password ────────────────────────────────────────────────────────
   if (action === 'change-password') {
     const { emp_no, old_password, new_password } = req.body || {};
-
     if (!emp_no || !old_password || !new_password)
       return res.status(400).json({ error: '缺少必要參數' });
     if (new_password.length < 6)
@@ -22,20 +20,18 @@ export default async function handler(req, res) {
 
     const email = emp_no + '@chuwa.hr';
 
-    // Step 1: verify old password
+    // Step 1: 驗舊密碼（同時拿 user.id）
     const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
       email, password: old_password,
     });
-    if (signInErr || !signInData.session)
+    if (signInErr || !signInData?.user)
       return res.status(401).json({ error: '目前密碼不正確' });
 
-    // Step 2: update with authenticated session
-    const authClient = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY,
-      { global: { headers: { Authorization: `Bearer ${signInData.session.access_token}` } } }
+    // Step 2: 用 admin path 改密碼
+    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
+      signInData.user.id,
+      { password: new_password }
     );
-    const { error: updateErr } = await authClient.auth.updateUser({ password: new_password });
     if (updateErr)
       return res.status(500).json({ error: '密碼更新失敗：' + updateErr.message });
 
