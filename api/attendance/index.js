@@ -259,8 +259,11 @@ export function makeRepo() {
       if (periodIds.length === 0) return []; // 沒 period_id 的 legacy schedule 視同沒排班
       const { data: periods } = await supabaseAdmin
         .from('schedule_periods').select('id, status').in('id', periodIds);
+      // 可打卡 status：published（主管已對員工公告）/ locked（當月開始後鎖定）/
+      // approved（向後相容：早期只到 approved 就視為可打卡的 period）
+      const PUNCHABLE_PERIOD_STATUS = new Set(['published', 'locked', 'approved']);
       const valid = new Set((periods || [])
-        .filter(p => p.status === 'locked' || p.status === 'approved').map(p => p.id));
+        .filter(p => PUNCHABLE_PERIOD_STATUS.has(p.status)).map(p => p.id));
       return scheds.filter(s => valid.has(s.period_id));
     },
 

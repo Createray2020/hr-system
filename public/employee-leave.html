@@ -122,12 +122,7 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
       <div class="m-form-row">
         <label class="m-label">假別</label>
         <select class="m-select" id="f-type" onchange="onTypeChange()">
-          <option value="annual">特休假</option>
-          <option value="sick">病假</option>
-          <option value="personal">事假</option>
-          <option value="marriage">婚假</option>
-          <option value="funeral">喪假</option>
-          <option value="maternity">產假</option>
+          <option value="">載入中…</option>
         </select>
       </div>
 
@@ -248,8 +243,32 @@ function clearFile() {
   document.getElementById('file-preview').style.display = 'none';
 }
 
-const LEAVE_LABELS = { annual:'特休假', sick:'病假', personal:'事假', marriage:'婚假', funeral:'喪假', maternity:'產假' };
-const CHIP_CLS = { annual:'chip-annual', sick:'chip-sick', personal:'chip-personal', marriage:'chip-marriage', funeral:'chip-funeral', maternity:'chip-maternity' };
+// 由 /api/leaves?_resource=leave_types 動態載入；render 時若沒拿到對應 chip class，
+// fallback 用 chip-personal（中性灰）。
+let LEAVE_LABELS = {};
+const CHIP_CLS = {
+  annual:'chip-annual', sick:'chip-sick', personal:'chip-personal',
+  marriage:'chip-marriage', funeral:'chip-funeral', maternity:'chip-maternity',
+  // 沒對應 class 的假別會走 fallback chip-personal,但 LEAVE_LABELS 仍會有正確中文名
+};
+
+async function loadLeaveTypes() {
+  const sel = document.getElementById('f-type');
+  try {
+    const types = await apiFetch('/api/leaves?_resource=leave_types');
+    if (!Array.isArray(types) || types.length === 0) {
+      sel.innerHTML = '<option value="">（無可用假別）</option>';
+      return;
+    }
+    LEAVE_LABELS = Object.fromEntries(types.map(t => [t.code, t.name_zh]));
+    sel.innerHTML = types.map(t =>
+      `<option value="${t.code}">${t.name_zh}</option>`
+    ).join('');
+  } catch(e) {
+    sel.innerHTML = '<option value="">載入失敗,請重新整理</option>';
+    console.error('[leave_types]', e);
+  }
+}
 
 function toast(msg, type='success') {
   const wrap = document.getElementById('toast-wrap');
@@ -316,7 +335,8 @@ async function submitLeave() {
     document.getElementById('f-end').value   = '';
     document.getElementById('f-reason').value = '';
     document.getElementById('days-num').textContent = '0';
-    document.getElementById('f-type').value = 'annual';
+    const sel = document.getElementById('f-type');
+    if (sel.options.length) sel.selectedIndex = 0;
     document.getElementById('upload-section').style.display = 'none';
     clearFile();
   } catch(e) { toast('送出失敗：' + e.message, 'error'); }
@@ -396,7 +416,8 @@ async function loadLeaves() {
   document.getElementById('f-end').value   = today;
   calcDays();
 
-  await loadLeaves();
+  // 並行：假別下拉 + 假單列表
+  await Promise.all([loadLeaveTypes(), loadLeaves()]);
 })();
 </script>
 

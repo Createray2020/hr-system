@@ -35,6 +35,18 @@ import { addDeptName, addDeptNameSingle } from '../../lib/dept-name-mapper.js';
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  // ── GET leave_types 清單（前端假別下拉用）──────────────────
+  // 不需要登入身份；這只是 active leave types 的中繼資料。
+  if (req.method === 'GET' && req.query._resource === 'leave_types') {
+    const { data, error } = await supabaseAdmin
+      .from('leave_types')
+      .select('code, name_zh, is_paid, has_balance, legal_max_days_per_year, display_order, description')
+      .eq('is_active', true)
+      .order('display_order');
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json(data || []);
+  }
+
   // ── 新路徑:annual_balance ────────────────────────────────
   if (req.method === 'GET' && req.query.annual_balance === 'true') {
     return handleGetAnnualBalance(req, res);
