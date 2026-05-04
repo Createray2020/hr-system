@@ -23,7 +23,7 @@
 //   不需要 vercel.json rewrite 輔助。Batch 10 上 prod 後手測再次確認。
 
 import { supabaseAdmin } from '../../lib/supabase.js';
-import { requireAuth, getEmployee } from '../../lib/auth.js';
+import { requireAuth } from '../../lib/auth.js';
 import {
   clockIn, clockOut,
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
@@ -113,10 +113,8 @@ export default async function handler(req, res) {
       if (!employee_id || !['in','out'].includes(type))
         return res.status(400).json({ error: '缺少必要參數' });
 
-      const user = await requireAuth(req, res);
-      if (!user) return;
-      const emp = await getEmployee(user);
-      if (!emp) return res.status(403).json({ error: '找不到員工資料' });
+      const emp = await requireAuth(req, res);
+      if (!emp) return;
       if (emp.id !== employee_id) return res.status(403).json({ error: '無法替他人打卡' });
 
       const now    = new Date();
