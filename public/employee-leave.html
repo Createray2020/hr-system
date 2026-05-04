@@ -42,6 +42,27 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 .submit-btn:active{transform:scale(.98)}
 .submit-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
 
+/* ── Level 3:班表帶入 ── */
+.sched-info{margin-top:8px;padding:10px 12px;background:rgba(91,141,239,.08);border:0.5px solid rgba(91,141,239,.2);border-radius:10px;font-size:12px;color:rgba(255,255,255,.75);line-height:1.5}
+.sched-info-label{font-size:10px;color:rgba(91,141,239,.8);font-family:'DM Mono',monospace;letter-spacing:.6px;margin-bottom:4px}
+.sched-warn{margin-top:8px;padding:10px 12px;background:rgba(251,146,60,.08);border:0.5px solid rgba(251,146,60,.25);border-radius:10px;font-size:12px;color:#FB923C;line-height:1.5}
+.sched-loading{margin-top:8px;font-size:11px;color:rgba(255,255,255,.35);text-align:center;padding:6px}
+
+/* ── 時段選擇 chip ── */
+.range-chips{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px}
+.range-chip{padding:10px 8px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.1);border-radius:10px;color:rgba(255,255,255,.55);font-size:12px;font-family:'Noto Sans TC',sans-serif;cursor:pointer;text-align:center;transition:all .15s}
+.range-chip:active{transform:scale(.97)}
+.range-chip.selected{background:rgba(91,141,239,.18);border-color:#5B8DEF;color:#fff;font-weight:600}
+.range-chip-sub{display:block;font-size:10px;color:rgba(255,255,255,.35);font-family:'DM Mono',monospace;margin-top:2px;letter-spacing:.4px}
+.range-chip.selected .range-chip-sub{color:rgba(255,255,255,.6)}
+
+/* ── 自訂時段 ── */
+.custom-time-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.time-input{width:100%;background:rgba(255,255,255,.06);border:0.5px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px;font-size:13px;color:#E8EAF0;font-family:'DM Mono',monospace;outline:none}
+.time-input:focus{border-color:rgba(91,141,239,.5)}
+.hours-display{margin-top:8px;font-size:11px;color:rgba(255,255,255,.5);text-align:right;font-family:'DM Mono',monospace}
+.hours-display strong{color:#5B8DEF;font-size:13px}
+
 /* ── 假單列表 ── */
 .leave-card{margin:0 16px 10px;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:14px;padding:14px}
 .leave-card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
@@ -149,17 +170,37 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
       <div class="date-row m-form-row">
         <div>
           <label class="m-label">開始日期</label>
-          <input type="date" class="m-input" id="f-start" oninput="calcDays()">
+          <input type="date" class="m-input" id="f-start" oninput="onDateChange()">
         </div>
         <div>
           <label class="m-label">結束日期</label>
-          <input type="date" class="m-input" id="f-end" oninput="calcDays()">
+          <input type="date" class="m-input" id="f-end" oninput="onDateChange()">
         </div>
       </div>
 
-      <div class="days-display">
-        <div class="days-num" id="days-num">0</div>
-        <div class="days-label">天</div>
+      <!-- 班表預覽 (Level 3:選日期後自動載入) -->
+      <div id="sched-preview"></div>
+
+      <!-- 時段選擇 chip (Level 2+3) -->
+      <div id="range-section" class="m-form-row" style="display:none">
+        <label class="m-label">請假時段</label>
+        <div class="range-chips" id="range-chips"></div>
+
+        <!-- 自訂時段(只在 range=custom 時顯示) -->
+        <div id="custom-time" class="custom-time-row" style="display:none">
+          <div>
+            <label class="m-label" style="margin-top:4px">開始時間</label>
+            <input type="time" class="time-input" id="f-time-start" step="900" oninput="recalcHours()">
+          </div>
+          <div>
+            <label class="m-label" style="margin-top:4px">結束時間</label>
+            <input type="time" class="time-input" id="f-time-end" step="900" oninput="recalcHours()">
+          </div>
+        </div>
+
+        <div class="hours-display">
+          總時數:<strong id="hours-num">0</strong> 小時
+        </div>
       </div>
 
       <div class="m-form-row">
@@ -294,25 +335,268 @@ function switchTab(tab, el) {
   if (tab==='list') renderLeaves();
 }
 
-function calcDays() {
+// ─────────────────────────────────────────────────────────────
+// Level 3:智慧帶入班表 + Level 2:時段選擇
+// ─────────────────────────────────────────────────────────────
+//
+// 流程:
+//   1. 員工選日期 → onDateChange() → loadSchedules() fetch 當期間班表
+//   2. 顯示班表摘要 + 列出時段選項 chip(整天/上半/下半/自訂)
+//   3. 員工選 chip 或自訂時段 → recalcHours() 計算實際時數
+//   4. submitLeave() 把選擇的時段組成 start_at/end_at 送出
+//
+// 設計原則:
+//   - 多天請假僅支援「整天」(後端 calculateLeaveHours 自動處理 overlap)
+//   - 單天請假支援 4 種:整天/上半/下半/自訂
+//   - 預設選「整天」(最常見情境、向後相容)
+//   - 沒排班那天會擋下、讓員工知道為何不能請
+let cachedSchedules = [];   // 當期日期區間的所有 schedules
+let selectedRange   = 'full'; // 'full' | 'morning' | 'afternoon' | 'custom'
+
+function fmtTime(t) {
+  // '09:00:00' → '09:00'
+  if (!t) return '';
+  return t.substring(0, 5);
+}
+
+async function onDateChange() {
   const s = document.getElementById('f-start').value;
   const e = document.getElementById('f-end').value;
-  if (!s || !e) { document.getElementById('days-num').textContent = '0'; return; }
-  const ms = new Date(e) - new Date(s);
-  const d = Math.max(0, Math.round(ms / 86400000) + 1);
-  document.getElementById('days-num').textContent = d;
+  if (!s || !e) { resetSched(); return; }
+  if (new Date(e) < new Date(s)) { resetSched(); return; }
+  await loadSchedules(s, e);
+  renderSchedPreview();
+  renderRangeChips();
+  recalcHours();
+}
+
+function resetSched() {
+  cachedSchedules = [];
+  document.getElementById('sched-preview').innerHTML = '';
+  document.getElementById('range-section').style.display = 'none';
+  document.getElementById('hours-num').textContent = '0';
+}
+
+async function loadSchedules(start, end) {
+  document.getElementById('sched-preview').innerHTML =
+    '<div class="sched-loading">載入班表中…</div>';
+  try {
+    const data = await apiFetch(`/api/schedules?start=${start}&end=${end}&employee_id=${currentUser.id}`);
+    // legacy GET 回 array of {work_date, start_time, end_time, shift_types:{name, is_off}}
+    cachedSchedules = Array.isArray(data) ? data : [];
+  } catch(err) {
+    cachedSchedules = [];
+    console.error('[loadSchedules]', err);
+  }
+}
+
+function renderSchedPreview() {
+  const el = document.getElementById('sched-preview');
+  const s = document.getElementById('f-start').value;
+  const e = document.getElementById('f-end').value;
+  if (!s || !e) { el.innerHTML = ''; return; }
+
+  // 列出每一天的班表
+  const dates = [];
+  const cur = new Date(s);
+  const endD = new Date(e);
+  while (cur <= endD) {
+    dates.push(cur.toISOString().substring(0,10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  if (dates.length === 0) { el.innerHTML = ''; return; }
+
+  // 先檢查是不是「整段都沒排班」
+  const workDays = dates.filter(d => {
+    const sched = cachedSchedules.find(s => s.work_date === d);
+    return sched && !sched.shift_types?.is_off && sched.start_time;
+  });
+
+  if (workDays.length === 0) {
+    el.innerHTML = `<div class="sched-warn">⚠️ 您所選區間內 ${dates.length} 天都沒有排班(休息日 / 例假日 / 國定假日 / 未排班),無法請假。請洽主管確認班表。</div>`;
+    return;
+  }
+
+  // 顯示班表摘要
+  const lines = dates.map(d => {
+    const sched = cachedSchedules.find(s => s.work_date === d);
+    const dow = ['日','一','二','三','四','五','六'][new Date(d).getDay()];
+    if (!sched) return `${d.substring(5)} (${dow}):未排班`;
+    const st = sched.shift_types;
+    if (!st) return `${d.substring(5)} (${dow}):—`;
+    if (st.is_off) return `${d.substring(5)} (${dow}):${st.name}(無工時)`;
+    if (sched.start_time) return `${d.substring(5)} (${dow}):${st.name} ${fmtTime(sched.start_time)}-${fmtTime(sched.end_time)}`;
+    return `${d.substring(5)} (${dow}):${st.name}`;
+  });
+  el.innerHTML = `
+    <div class="sched-info">
+      <div class="sched-info-label">當期班表(自動帶入)</div>
+      ${lines.join('<br>')}
+    </div>`;
+}
+
+function renderRangeChips() {
+  const s = document.getElementById('f-start').value;
+  const e = document.getElementById('f-end').value;
+  const sec = document.getElementById('range-section');
+  const chipsEl = document.getElementById('range-chips');
+  if (!s || !e) { sec.style.display = 'none'; return; }
+
+  const isSingleDay = s === e;
+  const sched = cachedSchedules.find(c => c.work_date === s);
+  const hasShift = sched && !sched.shift_types?.is_off && sched.start_time;
+
+  // 多天 / 沒排班 → 只顯示「整天」、不給選項
+  if (!isSingleDay || !hasShift) {
+    sec.style.display = isSingleDay && !hasShift ? 'none' : 'block';
+    chipsEl.innerHTML = `<button class="range-chip selected" onclick="selectRange('full')">整天<span class="range-chip-sub">依當日班表</span></button>`;
+    selectedRange = 'full';
+    document.getElementById('custom-time').style.display = 'none';
+    return;
+  }
+
+  // 單天且有排班 → 顯示 4 種選項
+  sec.style.display = 'block';
+  const startStr = fmtTime(sched.start_time);
+  const endStr   = fmtTime(sched.end_time);
+  // 計算上半/下半中點
+  const [sh, sm] = sched.start_time.split(':').map(Number);
+  const [eh, em] = sched.end_time.split(':').map(Number);
+  let midMin = ((sh*60+sm) + (eh*60+em + (sched.crosses_midnight ? 1440 : 0))) / 2;
+  const midH = Math.floor(midMin / 60) % 24;
+  const midM = Math.round(midMin % 60);
+  const midStr = `${String(midH).padStart(2,'0')}:${String(midM).padStart(2,'0')}`;
+
+  chipsEl.innerHTML = `
+    <button class="range-chip ${selectedRange==='full'?'selected':''}" onclick="selectRange('full')">
+      整天<span class="range-chip-sub">${startStr}-${endStr}</span>
+    </button>
+    <button class="range-chip ${selectedRange==='morning'?'selected':''}" onclick="selectRange('morning')">
+      上半段<span class="range-chip-sub">${startStr}-${midStr}</span>
+    </button>
+    <button class="range-chip ${selectedRange==='afternoon'?'selected':''}" onclick="selectRange('afternoon')">
+      下半段<span class="range-chip-sub">${midStr}-${endStr}</span>
+    </button>
+    <button class="range-chip ${selectedRange==='custom'?'selected':''}" onclick="selectRange('custom')">
+      自訂時段<span class="range-chip-sub">幾點到幾點</span>
+    </button>
+  `;
+  document.getElementById('custom-time').style.display = selectedRange === 'custom' ? 'grid' : 'none';
+}
+
+function selectRange(r) {
+  selectedRange = r;
+  renderRangeChips();
+  // 切到自訂時,預填當天班表時段
+  if (r === 'custom') {
+    const sched = cachedSchedules.find(c => c.work_date === document.getElementById('f-start').value);
+    if (sched && sched.start_time) {
+      document.getElementById('f-time-start').value = fmtTime(sched.start_time);
+      document.getElementById('f-time-end').value   = fmtTime(sched.end_time);
+    }
+  }
+  recalcHours();
+}
+
+// 取得當前選擇的 [start_at, end_at, hoursPreview]
+// 注意:hoursPreview 只是前端粗估,真實時數由後端 calculateLeaveHours 用 overlap 算
+function getSelectedRange() {
+  const s = document.getElementById('f-start').value;
+  const e = document.getElementById('f-end').value;
+  if (!s || !e) return null;
+
+  const isSingleDay = s === e;
+
+  // 多天:固定整天區間,後端依各天班表 overlap 計算
+  if (!isSingleDay) {
+    return {
+      start_at: `${s}T00:00:00+08:00`,
+      end_at:   `${e}T23:59:59+08:00`,
+      hours: estimateMultiDayHours(s, e),
+    };
+  }
+
+  const sched = cachedSchedules.find(c => c.work_date === s);
+  // 沒班 / 全休 → 不該到這裡(submitLeave 會擋),但保險起見回 0
+  if (!sched || sched.shift_types?.is_off || !sched.start_time) {
+    return { start_at: `${s}T00:00:00+08:00`, end_at: `${s}T23:59:59+08:00`, hours: 0 };
+  }
+
+  const startStr = fmtTime(sched.start_time);
+  const endStr   = fmtTime(sched.end_time);
+  // 半段中點
+  const [sh, sm] = sched.start_time.split(':').map(Number);
+  const [eh, em] = sched.end_time.split(':').map(Number);
+  const startMin = sh*60+sm;
+  const endMin   = eh*60+em + (sched.crosses_midnight ? 1440 : 0);
+  const midMin   = (startMin + endMin) / 2;
+  const midH = Math.floor(midMin / 60) % 24;
+  const midM = Math.round(midMin % 60);
+  const midStr = `${String(midH).padStart(2,'0')}:${String(midM).padStart(2,'0')}`;
+
+  let stTime = startStr, edTime = endStr;
+  if (selectedRange === 'morning')   { edTime = midStr; }
+  if (selectedRange === 'afternoon') { stTime = midStr; }
+  if (selectedRange === 'custom') {
+    stTime = document.getElementById('f-time-start').value || startStr;
+    edTime = document.getElementById('f-time-end').value   || endStr;
+  }
+
+  // 預估時數:overlap 班表時段 × scheduled_work_minutes 比例
+  const reqStart = parseTime(stTime);
+  const reqEnd   = parseTime(edTime) + (edTime <= stTime ? 1440 : 0);
+  const overlap = Math.max(0, Math.min(reqEnd, endMin) - Math.max(reqStart, startMin));
+  const span    = Math.max(1, endMin - startMin);
+  const ratio   = (Number(sched.scheduled_work_minutes) || span) / span;
+  const hours   = Math.round(overlap * ratio / 60 * 2) / 2;
+
+  return {
+    start_at: `${s}T${stTime}:00+08:00`,
+    end_at:   `${s}T${edTime}:00+08:00`,
+    hours,
+  };
+}
+
+function parseTime(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h*60 + m;
+}
+
+function estimateMultiDayHours(s, e) {
+  let total = 0;
+  const cur = new Date(s);
+  const endD = new Date(e);
+  while (cur <= endD) {
+    const d = cur.toISOString().substring(0,10);
+    const sched = cachedSchedules.find(c => c.work_date === d);
+    if (sched && !sched.shift_types?.is_off && sched.scheduled_work_minutes) {
+      total += Number(sched.scheduled_work_minutes) / 60;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return Math.round(total * 2) / 2;
+}
+
+function recalcHours() {
+  const r = getSelectedRange();
+  document.getElementById('hours-num').textContent = r ? r.hours : 0;
 }
 
 async function submitLeave() {
   if (!currentUser) return;
-  const type  = document.getElementById('f-type').value;
-  const start = document.getElementById('f-start').value;
-  const end   = document.getElementById('f-end').value;
-  const days  = parseInt(document.getElementById('days-num').textContent) || 0;
-  const reason= document.getElementById('f-reason').value.trim();
+  const type   = document.getElementById('f-type').value;
+  const start  = document.getElementById('f-start').value;
+  const end    = document.getElementById('f-end').value;
+  const reason = document.getElementById('f-reason').value.trim();
   if (!start || !end) { toast('請選擇請假日期', 'warn'); return; }
-  if (days <= 0)      { toast('結束日期須不早於開始日期', 'warn'); return; }
+  if (new Date(end) < new Date(start)) { toast('結束日期須不早於開始日期', 'warn'); return; }
   if (type === 'sick' && !selectedFile) { toast('病假須上傳病假證明', 'warn'); return; }
+
+  const range = getSelectedRange();
+  if (!range || range.hours <= 0) {
+    toast('您所選的區間沒有可請假的工時(可能全是休息日 / 例假 / 國假),無法送出', 'warn');
+    return;
+  }
 
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '送出中…';
@@ -322,29 +606,28 @@ async function submitLeave() {
       const ext  = selectedFile.name.split('.').pop();
       const path = `${currentUser.id}/${Date.now()}.${ext}`;
       const { error: upErr } = await _sb.storage.from('leave-attachments').upload(path, selectedFile, { upsert: true });
-      if (upErr) { toast('附件上傳失敗：' + upErr.message, 'error'); btn.disabled=false; btn.textContent='送出申請'; return; }
+      if (upErr) { toast('附件上傳失敗:' + upErr.message, 'error'); btn.disabled=false; btn.textContent='送出申請'; return; }
       attachment_url  = path;
       attachment_name = selectedFile.name;
     }
-    // 走新版 POST(送 start_at/end_at 觸發 lib/leave/request-flow.js):
-    // 後端會自動算 hours、預檢餘額、寫入完整資料,核准時時數計算才正確。
-    // start: 'YYYY-MM-DD' → 加上 +08:00 變整天時段
-    const start_at = `${start}T00:00:00+08:00`;
-    const end_at   = `${end}T23:59:59+08:00`;
+    // start_at/end_at 由 getSelectedRange() 組好(已含 +08:00 時區),
+    // 後端 calculateLeaveHours 會用 schedule overlap 計算實際時數。
     await apiFetch('/api/leaves', { method:'POST', body: JSON.stringify({
-      employee_id: currentUser.id, leave_type: type, start_at, end_at, reason,
+      employee_id: currentUser.id, leave_type: type,
+      start_at: range.start_at, end_at: range.end_at, reason,
       attachment_url, attachment_name
     })});
     toast('✅ 假單已送出', 'success');
     document.getElementById('f-start').value = '';
     document.getElementById('f-end').value   = '';
     document.getElementById('f-reason').value = '';
-    document.getElementById('days-num').textContent = '0';
+    selectedRange = 'full';
+    resetSched();
     const sel = document.getElementById('f-type');
     if (sel.options.length) sel.selectedIndex = 0;
     document.getElementById('upload-section').style.display = 'none';
     clearFile();
-  } catch(e) { toast('送出失敗：' + e.message, 'error'); }
+  } catch(e) { toast('送出失敗:' + e.message, 'error'); }
   btn.disabled = false; btn.textContent = '送出申請';
 }
 
@@ -419,7 +702,7 @@ async function loadLeaves() {
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('f-start').value = today;
   document.getElementById('f-end').value   = today;
-  calcDays();
+  // calcDays() 已被 onDateChange() 取代,不在 init 階段觸發(只有員工選日期才載入)
 
   // 並行：假別下拉 + 假單列表
   await Promise.all([loadLeaveTypes(), loadLeaves()]);
