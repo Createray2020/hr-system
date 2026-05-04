@@ -144,6 +144,12 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
         }).eq('id', request_id);
 
+        // 補打卡(punch_correction):核准後自動寫入 attendance 表
+        // 不寫的話 = 員工申請通過了但 DB 沒紀錄、薪資結算還是會少一天。
+        if (request.request_type === 'punch_correction') {
+          await applyPunchCorrection(request);
+        }
+
         // 通知申請人：審批完成
         const _p1 = { title: '✅ 申請已全部通過', body: `你的「${request.title}」已完成所有審批流程`, url: '/approvals.html' };
         sendPushToEmployees([request.applicant_id], { ..._p1, tag: 'approval-' + request_id }).catch(() => {});
@@ -230,4 +236,88 @@ export default async function handler(req, res) {
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 補打卡核准後 → 寫入 attendance 表
+//
+// form_data 從前端 approvals.html line 244-247 來:
+//   correction_date  : 'YYYY-MM-DD'
+//   correction_type  : '上班打卡' | '下班打卡'
+//   expected_time    : 'HH:MM'
+//   reason           : 員工說明
+//
+// 寫入策略:
+//   1. 先找該員工該日已有的 attendance row(可能是漏打卡的同一天但只打了上班 / 下班)
+//   2. 有 row → UPDATE 對應欄位(clock_in 或 clock_out)
+//   3. 沒 row → INSERT 新 row、含 schedule_id(從 schedules 抓)
+//   4. 若同時有 clock_in + clock_out,自動算 work_hours
+//   5. 失敗(例如沒 schedule、或 DB error)只 log,不影響 approval status —
+//      員工會在 attendance 列表發現沒寫進去、可請 HR 走人工補登
+//      (寧可 approval 已 completed 但資料寫失敗,也不要 approval 已 completed 但 rollback)
+// ─────────────────────────────────────────────────────────────────
+async function applyPunchCorrection(request) {
+  try {
+    const fd = request.form_data || {};
+    const employee_id = request.applicant_id;
+    const work_date   = fd.correction_date;
+    const punchTime   = fd.expected_time;     // 'HH:MM'
+    const punchType   = fd.correction_type;   // '上班打卡' | '下班打卡'
+    const reason      = fd.reason || '';
+
+    if (!employee_id || !work_date || !punchTime || !punchType) {
+      console.error('[applyPunchCorrection] 缺少必要欄位', { request_id: request.id, fd });
+      return;
+    }
+
+    const isClockIn = punchType === '上班打卡';
+    // 組 Asia/Taipei timezone 的 ISO timestamp
+    const punchIso = `${work_date}T${punchTime}:00+08:00`;
+
+    // 查當天已有 attendance row
+    const { data: existing } = await supabaseAdmin
+      .from('attendance').select('id, clock_in, clock_out, schedule_id, segment_no')
+      .eq('employee_id', employee_id).eq('work_date', work_date)
+      .maybeSingle();
+
+    if (existing) {
+      // 已有 row → 補對應欄位
+      const update = isClockIn
+        ? { clock_in: punchIso }
+        : { clock_out: punchIso };
+      // 兩端都有就算 work_hours
+      const newClockIn  = isClockIn  ? punchIso : existing.clock_in;
+      const newClockOut = isClockIn  ? existing.clock_out : punchIso;
+      if (newClockIn && newClockOut) {
+        update.work_hours = Math.max(0,
+          Math.round((new Date(newClockOut) - new Date(newClockIn)) / 36000) / 100);
+      }
+      update.note = `補打卡(approval ${request.id}):${reason}`;
+      await supabaseAdmin.from('attendance').update(update).eq('id', existing.id);
+      return;
+    }
+
+    // 沒 row → INSERT 新 row,先撈 schedule_id 連結
+    const { data: sched } = await supabaseAdmin
+      .from('schedules').select('id, segment_no')
+      .eq('employee_id', employee_id).eq('work_date', work_date)
+      .order('segment_no').limit(1).maybeSingle();
+
+    const insert = {
+      id: `AC_${request.id}`, // AC = attendance from correction
+      employee_id, work_date,
+      schedule_id: sched?.id || null,
+      segment_no: sched?.segment_no || 1,
+      clock_in:  isClockIn ? punchIso : null,
+      clock_out: isClockIn ? null     : punchIso,
+      work_hours: 0,
+      overtime_hours: 0,
+      status: 'normal',
+      note: `補打卡(approval ${request.id}):${reason}`,
+    };
+    await supabaseAdmin.from('attendance').insert([insert]);
+  } catch (err) {
+    // 不擋 approval status,只記 log
+    console.error('[applyPunchCorrection] 寫入失敗', { request_id: request.id, err: err.message });
+  }
 }
