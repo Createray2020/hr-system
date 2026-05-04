@@ -35,10 +35,12 @@ function todayIso() {
 
 function supabaseRepo() {
   return {
+    // 找出可以鎖定的 period:狀態為 published(主管已公告)或 approved(主管已核准但
+    // 未公告、向後相容)且 period_start <= today。兩者皆是 valid lock 來源。
     async findApprovedPeriodsToLock(today) {
       const { data, error } = await supabaseAdmin
         .from('schedule_periods').select('id, employee_id, period_start, period_end, status')
-        .eq('status', 'approved').lte('period_start', today);
+        .in('status', ['published', 'approved']).lte('period_start', today);
       if (error) throw error;
       return data || [];
     },
@@ -48,7 +50,7 @@ function supabaseRepo() {
       const { data, error } = await supabaseAdmin
         .from('schedule_periods')
         .update({ status: 'locked', locked_at: now, updated_at: now })
-        .eq('id', id).eq('status', 'approved')
+        .eq('id', id).in('status', ['published', 'approved'])
         .select().maybeSingle();
       if (error) return { ok: false, error: error.message };
       return { ok: !!data };

@@ -377,9 +377,12 @@ async function doPunch(type) {
   btn.disabled = true;
   btn.textContent = '打卡中…';
   try {
-    await apiFetch('/api/attendance/punch', {
+    // 改走新版 path:會自動 link schedule_id / segment_no、薪資結算才能正確 JOIN。
+    // employee_id 由後端從 JWT 取(不接受 client 傳)、timestamp 由 server 產生。
+    const action = type === 'in' ? 'clock_in' : 'clock_out';
+    await apiFetch('/api/attendance', {
       method: 'POST',
-      body: JSON.stringify({ employee_id: currentUser.id, type, timestamp: new Date().toISOString() })
+      body: JSON.stringify({ action })
     });
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
@@ -387,10 +390,19 @@ async function doPunch(type) {
     const data = await apiFetch(`/api/attendance/today?employee_id=${currentUser.id}`);
     updatePunchUI(data);
   } catch(e) {
-    toast('打卡失敗：' + e.message, 'error');
+    toast('打卡失敗：' + humanizePunchError(e.message), 'error');
     btn.disabled = false;
     btn.textContent = type === 'in' ? '⏺ 上班打卡' : '⏹ 下班打卡';
   }
+}
+
+// 把後端 error code 翻成使用者看得懂的中文訊息
+function humanizePunchError(raw) {
+  if (!raw) return '未知錯誤';
+  if (raw.includes('NO_SCHEDULE'))        return '今日無排班,無法打卡。請洽主管確認班表。';
+  if (raw.includes('ALREADY_CLOCKED_IN')) return '今日已打過上班卡,無需重複';
+  if (raw.includes('NO_OPEN_ATTENDANCE')) return '找不到對應的上班打卡紀錄';
+  return raw;
 }
 
 async function loadHours() {

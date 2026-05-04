@@ -9,7 +9,7 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
 
-const ALLOWED_STATUSES = ['draft', 'submitted', 'approved', 'locked'];
+const ALLOWED_STATUSES = ['draft', 'submitted', 'approved', 'published', 'locked'];
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();

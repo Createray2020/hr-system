@@ -43,7 +43,10 @@ function supabaseRepo() {
       if (periodIds.length === 0) return [];
       const { data: periods } = await supabaseAdmin
         .from('schedule_periods').select('id, status').in('id', periodIds);
-      const lockedSet = new Set((periods || []).filter(p => p.status === 'locked').map(p => p.id));
+      // 已公告(published)或已鎖定(locked)的 period 都應該掃曠職。
+      // approved 不掃(尚未對員工公告、員工不知道要打卡)。
+      const ATTENDABLE = new Set(['published', 'locked']);
+      const lockedSet = new Set((periods || []).filter(p => ATTENDABLE.has(p.status)).map(p => p.id));
       return scheds.filter(s => lockedSet.has(s.period_id));
     },
 
