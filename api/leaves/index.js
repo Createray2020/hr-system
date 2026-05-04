@@ -134,32 +134,16 @@ export default async function handler(req, res) {
     return res.status(201).json({ id: lid, message: '假單已建立' });
   }
 
-  // PUT(legacy 審核)
+  // PUT(legacy 審核)— 已棄用。
+  // 此路徑會直接 update status='approved' 但不重算時數、不扣餘額,造成
+  // 薪資結算 / 全勤獎金 / 特休餘額計算缺資料。
+  // 新路徑請走 PUT /api/leaves/:id body { decision: 'approve'|'reject' }
+  // (走 lib/leave/request-flow.js 的 approveLeaveRequest)。
   if (req.method === 'PUT') {
-    if (!id) return res.status(400).json({ error: '缺少 id' });
-    const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
-    if (!caller) return;
-    const { status, handler_note } = req.body;
-    if (!['approved', 'rejected'].includes(status))
-      return res.status(400).json({ error: '無效的 status' });
-    const { data: leave } = await supabaseAdmin
-      .from('leave_requests').select('employee_id, leave_type').eq('id', id).single();
-    const { error } = await supabaseAdmin.from('leave_requests')
-      .update({ status, handler_note: handler_note || '', handled_at: new Date().toISOString() })
-      .eq('id', id);
-    if (error) return res.status(500).json({ error: error.message });
-    if (leave?.employee_id) {
-      const LEAVE_TYPES = { annual:'特休假', sick:'病假', personal:'事假', maternity:'產假', funeral:'喪假', marriage:'婚假' };
-      const typeName = LEAVE_TYPES[leave.leave_type] || leave.leave_type;
-      const _lp = {
-        title: status === 'approved' ? '✅ 假單已核准' : '❌ 假單已退回',
-        body:  `你的${typeName}申請${status === 'approved' ? '已核准' : '已被退回'}`,
-        url:   '/employee-leave.html',
-      };
-      sendPushToEmployees([leave.employee_id], { ..._lp, tag: 'leave-' + id }).catch(() => {});
-      createNotifications([leave.employee_id], { ..._lp, type: 'leave' }).catch(() => {});
-    }
-    return res.status(200).json({ message: '審核完成' });
+    return res.status(410).json({
+      error: 'GONE',
+      message: 'legacy PUT /api/leaves?id=X 已棄用。請改用 PUT /api/leaves/:id body { decision }',
+    });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
@@ -209,20 +193,30 @@ async function handleNewGet(req, res) {
 }
 
 async function handleNewPost(req, res) {
-  const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
+  // 員工自己提交假單(本人提自己的);HR/主管可代提別人的(管理者場景)
+  const caller = await requireAuth(req, res);
   if (!caller) return;
 
-  const { leave_type, start_at, end_at, reason } = req.body;
-  // 員工自己申請;HR 代申請可在 body 傳 employee_id(管理者場景)
-  const employee_id = req.body.employee_id || caller.id;
-  if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+  const { leave_type, start_at, end_at, reason, attachment_url, attachment_name } = req.body;
+  const target_employee_id = req.body.employee_id || caller.id;
+  if (!target_employee_id) return res.status(400).json({ error: 'employee_id required' });
+
+  // 代提權限檢查:若 target 不是 caller 本人,必須是 backoffice role 或 is_manager。
+  if (target_employee_id !== caller.id) {
+    const isBackoffice = ['hr','ceo','chairman','admin'].includes(caller.role);
+    if (!isBackoffice && caller.is_manager !== true) {
+      return res.status(403).json({ error: 'Forbidden: 只能提交自己的假單' });
+    }
+  }
+
   if (!leave_type || !start_at || !end_at) {
     return res.status(400).json({ error: 'leave_type / start_at / end_at required' });
   }
 
   try {
     const r = await submitLeaveRequest(makeLeaveRepo(), {
-      employee_id, leave_type, start_at, end_at, reason,
+      employee_id: target_employee_id, leave_type, start_at, end_at, reason,
+      attachment_url, attachment_name,
     });
     if (!r.ok) return res.status(400).json(r);
     return res.status(201).json({ ok: true, request: r.request });

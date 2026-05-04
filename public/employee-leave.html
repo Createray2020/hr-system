@@ -326,8 +326,13 @@ async function submitLeave() {
       attachment_url  = path;
       attachment_name = selectedFile.name;
     }
+    // 走新版 POST(送 start_at/end_at 觸發 lib/leave/request-flow.js):
+    // 後端會自動算 hours、預檢餘額、寫入完整資料,核准時時數計算才正確。
+    // start: 'YYYY-MM-DD' → 加上 +08:00 變整天時段
+    const start_at = `${start}T00:00:00+08:00`;
+    const end_at   = `${end}T23:59:59+08:00`;
     await apiFetch('/api/leaves', { method:'POST', body: JSON.stringify({
-      employee_id: currentUser.id, leave_type: type, start_date: start, end_date: end, days, reason,
+      employee_id: currentUser.id, leave_type: type, start_at, end_at, reason,
       attachment_url, attachment_name
     })});
     toast('✅ 假單已送出', 'success');

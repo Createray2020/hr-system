@@ -402,11 +402,21 @@ async function loadLatestAnnouncements() {
 }
 
 async function quickLeave(id, status) {
+  // 走新版 endpoint(/api/leaves/:id PUT decision):會自動重算時數、扣餘額、寫 review_at。
+  // 不再走 legacy PUT(會繞過時數結算造成薪資結算缺資料)。
+  const decision = status === 'approved' ? 'approve' : 'reject';
   try {
-    await api(`/api/leaves?id=${id}`, { method:'PUT', body: JSON.stringify({ status, handler_note:'' }) });
+    const r = await api(`/api/leaves/${encodeURIComponent(id)}`, {
+      method:'PUT',
+      body: JSON.stringify({ decision })
+    });
+    if (r && r.ok === false) {
+      toast('操作失敗:' + (r.reason || 'unknown'), 'error');
+      return;
+    }
     toast(status==='approved'?'✅ 已核准':'❌ 已退回', status==='approved'?'success':'error');
     await loadDashboard();
-  } catch(e) { toast('操作失敗','error'); }
+  } catch(e) { toast('操作失敗:' + e.message, 'error'); }
 }
 </script>
 <script src="/js/roles.js"></script>
