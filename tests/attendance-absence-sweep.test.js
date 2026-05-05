@@ -34,6 +34,17 @@ describe('runAbsenceSweep — basic', () => {
     expect(r).toMatchObject({ absent_count: 0, leave_count: 0, normal_count: 0 });
   });
 
+  it('repo 給空 list(is_off 已被 cron repo 過濾光)→ 不寫任何 attendance row', async () => {
+    // 契約鎖死:lib 信任 repo 給的 list、不重複 shift_type 判斷。
+    // ST003 休假 / ST004 例假 / 國假在 cron-absence-detection.js 端就被過濾、
+    // lib 看到的就是空陣列、自然不寫 absent。
+    const repo = makeRepo({ findLockedSchedulesByDate: vi.fn(async () => []) });
+    const r = await runAbsenceSweep(repo, '2026-05-04');  // 5/3 週日(全公司 ST004)
+    expect(r).toMatchObject({ absent_count: 0, leave_count: 0, normal_count: 0 });
+    expect(repo.upsertAttendance).not.toHaveBeenCalled();
+    expect(repo.notifyAbsence).not.toHaveBeenCalled();
+  });
+
   it('repo 缺 method 拒絕', async () => {
     await expect(runAbsenceSweep({}, '2026-04-26')).rejects.toThrow(/findLockedSchedulesByDate/);
   });
