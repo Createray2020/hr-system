@@ -5,11 +5,17 @@ import {
   rejectLeaveRequest, cancelLeaveRequest,
 } from '../lib/leave/request-flow.js';
 
+// Phase 1.2 加 advance/proof 欄位、預設值設成「最寬鬆」(advance_hours=0、不需證明)
+// 避免 submitLeaveRequest 改造後既有 case 踩到前置時間 / 證明邏輯
 const SEED_LT = {
-  annual:    { code:'annual',    name_zh:'特休', is_paid:true,  has_balance:true,  is_active:true },
-  sick:      { code:'sick',      name_zh:'病假', is_paid:true,  has_balance:false, is_active:true },
-  personal:  { code:'personal',  name_zh:'事假', is_paid:false, has_balance:false, is_active:true },
-  comp:      { code:'comp',      name_zh:'補休', is_paid:true,  has_balance:true,  is_active:true },
+  annual:    { code:'annual',    name_zh:'特休', is_paid:true,  has_balance:true,  is_active:true,
+               advance_hours:0, advance_rule:'soft', requires_proof:false, proof_grace_days:0 },
+  sick:      { code:'sick',      name_zh:'病假', is_paid:true,  has_balance:false, is_active:true,
+               advance_hours:0, advance_rule:'soft', requires_proof:false, proof_grace_days:0 },
+  personal:  { code:'personal',  name_zh:'事假', is_paid:false, has_balance:false, is_active:true,
+               advance_hours:0, advance_rule:'soft', requires_proof:false, proof_grace_days:0 },
+  comp:      { code:'comp',      name_zh:'補休', is_paid:true,  has_balance:true,  is_active:true,
+               advance_hours:0, advance_rule:'soft', requires_proof:false, proof_grace_days:0 },
 };
 
 function makeRepo(over = {}) {
@@ -20,6 +26,7 @@ function makeRepo(over = {}) {
     listActiveLeaveTypes: vi.fn(async () => Object.values(SEED_LT)),
     findSchedulesInRange: vi.fn(async () => []),
     findActiveAnnualRecord: vi.fn(async () => null),
+    findEmployeeById: vi.fn(async (id) => ({ id, role: 'employee', is_manager: false, manager_id: 'M1' })),
     lockAndIncrementUsedDays: vi.fn(async () => ({ ok: true, record: { id: 1 } })),
     insertBalanceLog: vi.fn(async () => ({ id: 1 })),
     insertLeaveRequest: vi.fn(async (row) => ({ ...row })),
@@ -109,7 +116,7 @@ describe('submitLeaveRequest', () => {
       reason: '出國',
     });
     expect(r.ok).toBe(true);
-    expect(r.request.status).toBe('pending');
+    expect(r.request.status).toBe('pending_mgr'); // Phase 1.2: 一般員工初始 stage
     expect(r.request.hours).toBe(8);
     expect(r.request.finalized_hours).toBe(null);
     expect(r.request.days).toBe(1); // legacy 欄位

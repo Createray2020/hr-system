@@ -261,6 +261,16 @@ export function makeLeaveRepo() {
       }
     },
 
+    // ─── employees(submit / approve / archive 用、需要 role / is_manager / manager_id)─────
+    async findEmployeeById(id) {
+      const { data, error } = await supabaseAdmin
+        .from('employees')
+        .select('id, name, role, is_manager, manager_id, dept_id')
+        .eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data || null;
+    },
+
     // ─── employees(annual rollover 用)─────
     async findEmployeesWithAnniversaryToday(today) {
       // today: 'YYYY-MM-DD',匹配 annual_leave_seniority_start 月日
