@@ -28,6 +28,7 @@ import {
   clockIn, clockOut,
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
 } from '../../lib/attendance/clock.js';
+import { recomputeAttendanceStatus } from '../../lib/attendance/recompute.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
 
 const WORK_START_HOUR = 9;
@@ -169,12 +170,33 @@ export default async function handler(req, res) {
       workHours = Math.round((new Date(clockOutIso) - new Date(clockInIso)) / 36000) / 100;
     }
 
+    // 撈當天員工的 schedule(取 segment_no 最小那筆、單段班一定中)、給 recompute 算
+    // 找不到時 schedule=null、recompute 不算 late/early、status 走 fallback
+    let manualSchedule = null;
+    try {
+      const { data: scheds } = await supabaseAdmin
+        .from('schedules')
+        .select('id, start_time, end_time, crosses_midnight, scheduled_work_minutes, segment_no')
+        .eq('employee_id', employee_id).eq('work_date', work_date)
+        .order('segment_no').limit(1);
+      manualSchedule = (scheds && scheds[0]) || null;
+    } catch (_) {}
+
+    // recompute late/early/status(timezone-aware、跟 clockIn/clockOut 同算法)
+    // caller 顯式給 status → HR override 路徑、保留;沒給 → 用 recompute 結果
+    const computed = recomputeAttendanceStatus(
+      { clock_in: clockInIso, clock_out: clockOutIso, work_date, status: status || null },
+      manualSchedule,
+    );
+
     const payload = {
       clock_in:       clockInIso,
       clock_out:      clockOutIso,
       work_hours:     workHours,
       overtime_hours: parseFloat(overtime_hours) || 0,
-      status:         status || 'normal',
+      status:         status || computed.status,
+      late_minutes:        computed.late_minutes,
+      early_leave_minutes: computed.early_leave_minutes,
       note:           note   || '',
     };
 
