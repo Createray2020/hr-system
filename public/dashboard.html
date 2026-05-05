@@ -228,16 +228,25 @@ async function loadDashboard() {
   document.getElementById('st-salary').textContent = netTotal > 0 ? '$'+netTotal.toLocaleString() : '—';
   document.getElementById('ql-salary-draft').textContent = draftCount;
 
-  // 待審假單
-  const pendingLeaves = await api('/api/leaves?status=pending');
+  // 待審假單(Phase 1.4 涵蓋 pending_mgr / pending_ceo + 舊 'pending')
+  // /api/leaves 不帶 status 拿全部、client-filter pending_*(/api/leaves?stats=true 仍只算
+  // 舊 'pending'、stat 卡也順手用 client-side 計數修正)
+  const allLeavesForCard = await api('/api/leaves');
+  const PENDING_STAGES = ['pending', 'pending_mgr', 'pending_ceo'];
+  const pendingLeaves = (allLeavesForCard || []).filter(r => PENDING_STAGES.includes(r.status));
+  // 修正 stat 卡計數(/api/leaves?stats=true 是 legacy 只算 'pending')
+  document.getElementById('st-leave').textContent = pendingLeaves.length;
+  document.getElementById('ql-pending').textContent = pendingLeaves.length;
+
   const plEl = document.getElementById('pending-leaves');
   if (!pendingLeaves.length) {
     plEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px 0">目前沒有待審假單 ✓</div>';
   } else {
+    const SU = window.HR_Utils;
     plEl.innerHTML = pendingLeaves.slice(0,5).map(r=>`
       <div class="pending-item">
         <div>
-          <div class="pending-name">${r.emp_name} <span style="font-size:12px;color:var(--text-dim)">— ${window.HR_Utils.leaveTypeLabel(r.leave_type)} ${r.days}天</span></div>
+          <div class="pending-name">${r.emp_name} <span style="font-size:12px;color:var(--text-dim)">— ${SU.leaveTypeLabel(r.leave_type)} ${r.days}天 · ${SU.stageLabel(r.status)}</span></div>
           <div class="pending-meta">${r.start_date} ～ ${r.end_date}</div>
         </div>
         <div class="pending-action">
@@ -407,13 +416,20 @@ async function quickLeave(id, status) {
   // 走新版 endpoint(/api/leaves/:id PUT decision):會自動重算時數、扣餘額、寫 review_at。
   // 不再走 legacy PUT(會繞過時數結算造成薪資結算缺資料)。
   const decision = status === 'approved' ? 'approve' : 'reject';
+  // Phase 1.4:reject 必填 reject_reason(後端 rejectLeaveRequest 會擋)
+  const body = { decision };
+  if (decision === 'reject') {
+    const reason = prompt('退回原因 (必填):');
+    if (!reason || !reason.trim()) { toast('退回需填原因','error'); return; }
+    body.reject_reason = reason.trim();
+  }
   try {
     const r = await api(`/api/leaves/${encodeURIComponent(id)}`, {
       method:'PUT',
-      body: JSON.stringify({ decision })
+      body: JSON.stringify(body)
     });
     if (r && r.ok === false) {
-      toast('操作失敗:' + (r.reason || 'unknown'), 'error');
+      toast('操作失敗:' + (r.reason || r.error || 'unknown'), 'error');
       return;
     }
     toast(status==='approved'?'✅ 已核准':'❌ 已退回', status==='approved'?'success':'error');
