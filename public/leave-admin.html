@@ -129,6 +129,34 @@ function isHR(u) { return u && (u.role === 'hr' || u.role === 'admin'); }
 function isCeoOrChairman(u) { return u && (u.role === 'ceo' || u.role === 'chairman'); }
 function normalizeStage(status) { return status === 'pending' ? 'pending_mgr' : status; }
 
+// Phase 1.4.5 stop-gap:純主管(is_manager=true 且非 elevated)只看本部門員工的假單。
+// 沿用 calendar.html L188-246 pattern。
+let myDeptEmpIds = null;
+async function waitForCurrentUser(maxMs = 5000) {
+  const step = 100;
+  for (let i = 0; i < maxMs / step; i++) {
+    if (window.currentUser) return window.currentUser;
+    await new Promise(r => setTimeout(r, step));
+  }
+  return null;
+}
+async function loadDeptScope() {
+  const u = await waitForCurrentUser();
+  if (!u) { myDeptEmpIds = new Set(); return; }
+  if (isElevated(u)) { myDeptEmpIds = null; return; } // HR / CEO / chairman / admin 看全公司
+  const deptId = u.dept_id;
+  if (!deptId) { myDeptEmpIds = new Set(); return; }
+  try {
+    const emps = await window.api('/api/employees?status=active');
+    myDeptEmpIds = new Set((emps || []).filter(e => e.dept_id === deptId).map(e => e.id));
+  } catch (_) {
+    myDeptEmpIds = new Set();
+  }
+}
+function inScope(empId) {
+  return myDeptEmpIds === null || myDeptEmpIds.has(empId);
+}
+
 async function load(retries = 0) {
   if (!window.api || !window.currentUser) {
     if (retries < 25) return setTimeout(()=>load(retries+1), 200);
@@ -146,6 +174,9 @@ async function load(retries = 0) {
     // 載入假別中文名 + 完整 row
     await window.HR_Utils?.loadLeaveTypeLabels?.();
     populateTypeFilter();
+
+    // Phase 1.4.5:純主管限本部門 employee id Set、HR+ 設 null(不過濾)
+    await loadDeptScope();
 
     // 用 legacy endpoint 拿全部假單(回的 row 已含 emp 資料)
     const rows = await api('/api/leaves');
@@ -191,6 +222,8 @@ function render() {
   const q      = document.getElementById('f-search').value.trim().toLowerCase();
 
   const rows = allLeaves.filter(l => {
+    // Phase 1.4.5 stop-gap:純主管只看本部門。HR / CEO / chairman / admin inScope 永遠 true。
+    if (!inScope(l.employee_id)) return false;
     if (!statusMatches(status, l, u)) return false;
     if (type && l.leave_type !== type) return false;
     if (q) {
