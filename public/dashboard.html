@@ -29,6 +29,13 @@
   .pending-name{font-weight:500;font-size:14px}
   .pending-meta{font-size:12px;color:var(--text-dim);margin-top:1px}
   .pending-action{display:flex;gap:6px}
+  /* Phase 1.4d/1.4.5: stage badge classes(對齊 utils.js stageBadgeClass)*/
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .badge-pending{background:rgba(251,191,36,.15);color:#FBBF24}
+  .badge-approved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .badge-archived{background:rgba(74,222,128,.10);color:#86efac}
+  .badge-rejected{background:rgba(248,113,113,.12);color:#F87171}
+  .badge-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
   .today-list{list-style:none}
   .today-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(42,48,72,.4);font-size:13px}
   .today-item:last-child{border-bottom:none}
@@ -146,6 +153,16 @@
 </div>
 
 <script>
+// 西元 YYYY/MM/DD,沿用 leave-admin.html / leave.html 的 fmtDt pattern。
+// 不走 toLocaleDateString('zh-TW')(部分瀏覽器 zh-TW locale 默用 ROC era 顯示 0115 民國)。
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d);
+  const pad = n => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}/${pad(dt.getMonth()+1)}/${pad(dt.getDate())}`;
+}
+
 function toast(msg, type='success') {
   let wrap = document.getElementById('toast-wrap');
   if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
@@ -243,17 +260,21 @@ async function loadDashboard() {
     plEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px 0">目前沒有待審假單 ✓</div>';
   } else {
     const SU = window.HR_Utils;
-    plEl.innerHTML = pendingLeaves.slice(0,5).map(r=>`
+    plEl.innerHTML = pendingLeaves.slice(0,5).map(r=>{
+      const stageBadge = `<span class="pill ${SU.stageBadgeClass(r.status)}" style="margin-left:6px">${SU.stageLabel(r.status)}</span>`;
+      // 用既有 fmtDate 拿乾淨西元 YYYY/MM/DD、不走 toLocaleDateString('zh-TW') 的民國 fallback
+      const dateRange = `${fmtDate(r.start_at || r.start_date)} ～ ${fmtDate(r.end_at || r.end_date)}`;
+      return `
       <div class="pending-item">
         <div>
-          <div class="pending-name">${r.emp_name} <span style="font-size:12px;color:var(--text-dim)">— ${SU.leaveTypeLabel(r.leave_type)} ${r.days}天 · ${SU.stageLabel(r.status)}</span></div>
-          <div class="pending-meta">${r.start_date} ～ ${r.end_date}</div>
+          <div class="pending-name">${r.emp_name || r.employee_id} <span style="font-size:12px;color:var(--text-dim)">— ${SU.leaveTypeLabel(r.leave_type)} ${r.days}天</span>${stageBadge}</div>
+          <div class="pending-meta">${dateRange}</div>
         </div>
         <div class="pending-action">
-          <button class="btn btn-approve btn-sm" onclick="quickLeave('${r.id}','approved')">核准</button>
-          <button class="btn btn-reject btn-sm"  onclick="quickLeave('${r.id}','rejected')">退回</button>
+          <a class="btn btn-ghost btn-sm" href="/leave-admin.html?id=${encodeURIComponent(r.id)}">查看 / 審核</a>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   // 今日出勤
