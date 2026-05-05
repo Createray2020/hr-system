@@ -332,3 +332,29 @@ describe('cancelLeaveRequest', () => {
     expect(r.reason).toBe('NOT_OWN_REQUEST');
   });
 });
+
+// 退化測試:原本 leave_requests.days 為 INTEGER、寫入 0.5 會 PG syntax error。
+// schema 已改 NUMERIC(5,2)、本區塊確保 lib 層產出小數 days、未來若有人把欄位
+// 退回 INT 或在 lib 加 parseInt 會被擋下。
+describe('submitLeaveRequest — 半天 / 小數 days(NUMERIC 退化測試)', () => {
+  it('personal 半天 4h(09-13)→ request.days=0.5、hours=4、不 throw', async () => {
+    const halfDayShift = dayShift({
+      start_time: '09:00', end_time: '13:00',
+      scheduled_work_minutes: 240, // 4h、無 break
+    });
+    const repo = makeRepo({
+      findSchedulesInRange: vi.fn(async () => [halfDayShift]),
+    });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T09:00:00+08:00',
+      end_at:   '2026-04-27T13:00:00+08:00',
+      reason: '看醫生',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.hours).toBe(4);
+    expect(r.request.days).toBe(0.5);
+    // 守住小數型態:若 lib 退化加 parseInt / Math.floor、會被這條擋下
+    expect(Number.isInteger(r.request.days)).toBe(false);
+  });
+});
