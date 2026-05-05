@@ -33,10 +33,15 @@ export default async function handler(req, res) {
 function supabaseRepo() {
   return {
     async findLockedSchedulesByDate(date) {
+      // is_off=true 的 schedule(ST003 休假 / ST004 例假 / 國假)員工本來就不該打卡、
+      // cron 不對這類 schedule 寫 absent。lib/attendance/absence-sweep.js 信任 repo
+      // 給的 list、不重複 shift_type 判斷。
+      // !inner 強制 INNER JOIN、shift_types.is_off=false 條件下推給 PG。
       const { data: scheds, error } = await supabaseAdmin
         .from('schedules')
-        .select('id, employee_id, segment_no, period_id')
-        .eq('work_date', date);
+        .select('id, employee_id, segment_no, period_id, shift_types!inner(is_off)')
+        .eq('work_date', date)
+        .eq('shift_types.is_off', false);
       if (error) throw error;
       if (!scheds || scheds.length === 0) return [];
       const periodIds = [...new Set(scheds.map(s => s.period_id).filter(Boolean))];
@@ -47,7 +52,10 @@ function supabaseRepo() {
       // approved 不掃(尚未對員工公告、員工不知道要打卡)。
       const ATTENDABLE = new Set(['published', 'locked']);
       const lockedSet = new Set((periods || []).filter(p => ATTENDABLE.has(p.status)).map(p => p.id));
-      return scheds.filter(s => lockedSet.has(s.period_id));
+      // 回給 lib 的 row 不帶 shift_types 巢狀(契約乾淨、lib 不該知 shift_type)
+      return scheds
+        .filter(s => lockedSet.has(s.period_id))
+        .map(({ shift_types, ...rest }) => rest);
     },
 
     async findAttendanceByDateSegment(employee_id, date, segment_no) {
