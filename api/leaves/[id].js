@@ -1,21 +1,63 @@
 // api/leaves/[id].js
-// PUT    /api/leaves/:id  body { decision: 'approve'|'reject'|'cancel', reject_reason? }
-// DELETE /api/leaves/:id  → 員工撤回(等同 cancel)
+// PUT    /api/leaves/:id  body { decision: 'approve'|'reject'|'cancel', reject_reason?, override_reason? }
+//                          body { action: 'archive' }                       — HR 歸檔
+//                          body { action: 'submit_proof', proof_url: ... }  — 員工 / HR 上傳證明
+// DELETE /api/leaves/:id  → 員工本人撤回 pending_mgr / pending_ceo
 //
-// 對應設計文件：docs/attendance-system-design-v1.md §4.3.2
-// 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §7.6
-//
-// Routing 假設(Vercel file-system routing):同 holidays/[id].js precedent。
-// vercel.json 中既有的 /api/leaves/:id/review rewrite 已在 Batch 5 移除,
-// 否則本檔永遠不會被 hit(會被 rewrite 到 index.js?id=...)。
+// Phase 1.3:多階審核 stage-aware approve / reject + archive + submit_proof。
+// Backward compat:舊 'pending' status 視為 'pending_mgr' 處理。
 
-import { requireRole } from '../../lib/auth.js';
+import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import {
   approveLeaveRequest, rejectLeaveRequest, cancelLeaveRequest,
 } from '../../lib/leave/request-flow.js';
+import {
+  canReview, canCancel, canArchive,
+  transitionApprove, transitionArchive,
+} from '../../lib/leave/stages.js';
 import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { makeLeaveRepo } from './_repo.js';
+
+/** 'pending'(legacy)→ 'pending_mgr'。其他原樣。 */
+function normalizeStage(status) {
+  return status === 'pending' ? 'pending_mgr' : status;
+}
+
+/** push 通知 helper(維持舊行為) */
+async function notifyLeaveStatus(repo, requestRow, id) {
+  try {
+    if (!requestRow?.employee_id) return;
+    let typeName = requestRow.leave_type;
+    try {
+      const lt = await repo.findLeaveType(requestRow.leave_type);
+      if (lt?.name_zh) typeName = lt.name_zh;
+    } catch (_) {}
+    const titleMap = {
+      approved: '✅ 假單已核准',
+      rejected: '❌ 假單已退回',
+      cancelled: '↩ 假單已撤回',
+      archived:  '📦 假單已歸檔',
+      pending_ceo: '⏳ 已轉給執行長',
+    };
+    const status = requestRow.status;
+    const bodyMap = {
+      approved: '已核准',
+      rejected: '已被退回',
+      cancelled: '已撤回',
+      archived: '已歸檔',
+      pending_ceo: '主管已批、轉執行長審核',
+    };
+    const payload = {
+      title: titleMap[status] || '假單異動',
+      body:  `${typeName} 申請${bodyMap[status] || '狀態變更'}`,
+      url:   '/leave',
+      tag:   'leave-' + id,
+    };
+    sendPushToEmployees([requestRow.employee_id], payload).catch(() => {});
+    createNotifications([requestRow.employee_id], { ...payload, type: 'leave' }).catch(() => {});
+  } catch (_) {}
+}
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -23,80 +65,216 @@ export default async function handler(req, res) {
   const id = req.query.id;
   if (!id) return res.status(400).json({ error: 'leave id required' });
 
+  const repo = makeLeaveRepo();
+
+  // ─── DELETE 員工本人撤回 ─────────────────────────────────────
+  if (req.method === 'DELETE') {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+    try {
+      const req_ = await repo.findLeaveRequestById(id);
+      if (!req_) return res.status(404).json({ error: 'NOT_FOUND' });
+      if (!canCancel({ id: caller.id }, { ...req_, status: normalizeStage(req_.status) })) {
+        return res.status(403).json({ error: 'Cannot cancel:本人 + pending 階段才能撤回' });
+      }
+      const r = await cancelLeaveRequest(repo, { request_id: id, cancelled_by: caller.id });
+      if (!r.ok) return res.status(400).json(r);
+      return res.status(200).json({ ok: true, request: r.request });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  if (req.method !== 'PUT') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const body = req.body || {};
+  const { decision, reject_reason, override_reason, action, proof_url } = body;
+
+  // ─── PUT action='submit_proof' 員工 / HR 上傳證明 ──────────────
+  if (action === 'submit_proof') {
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+    const leaveRequest = await repo.findLeaveRequestById(id);
+    if (!leaveRequest) return res.status(404).json({ error: 'NOT_FOUND' });
+
+    const isOwn = leaveRequest.employee_id === caller.id;
+    const isElevated = ['hr', 'admin'].includes(caller.role);
+    if (!isOwn && !isElevated) {
+      return res.status(403).json({ error: 'Forbidden:本人或 HR 才能上傳證明' });
+    }
+    if (leaveRequest.proof_status !== 'required') {
+      return res.status(400).json({ error: 'INVALID_PROOF_STATUS', actual: leaveRequest.proof_status });
+    }
+    if (!proof_url || !String(proof_url).trim()) {
+      return res.status(400).json({ error: 'proof_url required' });
+    }
+    try {
+      const updated = await repo.updateLeaveRequest(id, {
+        proof_url: String(proof_url).trim(),
+        proof_status: 'submitted',
+      });
+      return res.status(200).json({ ok: true, request: updated });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  // ─── 以下:approve / reject / cancel / archive 都需要主管以上 ──
   const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
   if (!caller) return;
   const callerId = caller.id;
 
-  const repo = makeLeaveRepo();
-
-  if (req.method === 'PUT') {
-    const { decision, reject_reason } = req.body || {};
-    if (!['approve', 'reject', 'cancel'].includes(decision)) {
-      return res.status(400).json({ error: 'decision must be approve / reject / cancel' });
+  // ─── PUT action='archive' HR 歸檔 ────────────────────────────
+  if (action === 'archive') {
+    const leaveRequest = await repo.findLeaveRequestById(id);
+    if (!leaveRequest) return res.status(404).json({ error: 'NOT_FOUND' });
+    if (!canArchive(caller, leaveRequest)) {
+      return res.status(403).json({ error: 'Cannot archive:HR/admin + status=approved 才能歸檔' });
     }
+    let nextStage;
+    try { nextStage = transitionArchive(leaveRequest.status); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
 
     try {
-      let r;
-      if (decision === 'approve') {
-        r = await approveLeaveRequest(repo, { request_id: id, approved_by: callerId });
-      } else if (decision === 'reject') {
-        r = await rejectLeaveRequest(repo, { request_id: id, rejected_by: callerId, reject_reason });
-      } else {
-        // cancel:HR 強制撤回 = 走 reject 還是 cancel?規範說員工本人才能 cancel
-        // 此處讓 HR 走 cancel(假設 HR 知道自己在做什麼)
-        const req_ = await repo.findLeaveRequestById(id);
-        if (!req_) return res.status(404).json({ error: 'NOT_FOUND' });
-        r = await cancelLeaveRequest(repo, { request_id: id, cancelled_by: req_.employee_id });
-      }
-      if (!r.ok) return res.status(400).json(r);
-
-      // 推播通知申請人(維持舊 push 行為)
-      try {
-        const req_ = r.request || await repo.findLeaveRequestById(id);
-        if (req_?.employee_id) {
-          // 動態從 leave_types 拿中文名(支援所有 active 假別、不再 hardcode)
-          let typeName = req_.leave_type;
-          try {
-            const lt = await repo.findLeaveType(req_.leave_type);
-            if (lt?.name_zh) typeName = lt.name_zh;
-          } catch (_) {}
-          const titleMap = {
-            approved: '✅ 假單已核准',
-            rejected: '❌ 假單已退回',
-            cancelled: '↩ 假單已撤回',
-          };
-          const status = req_.status;
-          const payload = {
-            title: titleMap[status] || '假單異動',
-            body:  `${typeName} 申請${status === 'approved' ? '已核准' : status === 'rejected' ? '已被退回' : '已撤回'}`,
-            url:   '/leave',
-            tag:   'leave-' + id,
-          };
-          sendPushToEmployees([req_.employee_id], payload).catch(() => {});
-          createNotifications([req_.employee_id], { ...payload, type: 'leave' }).catch(() => {});
-        }
-      } catch (_) {}
-
-      return res.status(200).json({ ok: true, request: r.request });
+      const updated = await repo.updateLeaveRequest(id, {
+        status: nextStage,
+        archived_by: callerId,
+        archived_at: new Date().toISOString(),
+      });
+      await notifyLeaveStatus(repo, updated, id);
+      return res.status(200).json({ ok: true, request: updated });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
   }
 
-  if (req.method === 'DELETE') {
-    // 員工撤回(等同 cancel)
-    try {
+  // ─── PUT decision approve / reject / cancel ──────────────────
+  if (!['approve', 'reject', 'cancel'].includes(decision)) {
+    return res.status(400).json({ error: 'decision must be approve / reject / cancel (or action archive / submit_proof)' });
+  }
+
+  try {
+    let r;
+    if (decision === 'approve') {
+      r = await handleApprove({ repo, id, callerId, caller, body, override_reason });
+    } else if (decision === 'reject') {
+      r = await handleReject({ repo, id, callerId, caller, reject_reason });
+    } else {
+      // HR 強制撤回 = 走 cancelLeaveRequest(用 employee_id 當 cancelled_by 繞過 own-check)
       const req_ = await repo.findLeaveRequestById(id);
       if (!req_) return res.status(404).json({ error: 'NOT_FOUND' });
-      const r = await cancelLeaveRequest(repo, {
-        request_id: id, cancelled_by: callerId || req_.employee_id,
-      });
-      if (!r.ok) return res.status(400).json(r);
-      return res.status(200).json({ ok: true, request: r.request });
-    } catch (e) {
-      return res.status(500).json({ error: e.message });
+      r = await cancelLeaveRequest(repo, { request_id: id, cancelled_by: req_.employee_id });
     }
+    if (!r.ok) {
+      // canReview / canArchive 失敗的特殊回 403
+      if (r.reason === 'FORBIDDEN') return res.status(403).json(r);
+      return res.status(400).json(r);
+    }
+    await notifyLeaveStatus(repo, r.request, id);
+    return res.status(200).json({ ok: true, request: r.request });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
+// ─── multi-stage approve ───────────────────────────────────────
+async function handleApprove({ repo, id, callerId, caller, body, override_reason }) {
+  const leaveRequest = await repo.findLeaveRequestById(id);
+  if (!leaveRequest) return { ok: false, reason: 'NOT_FOUND' };
+
+  const stage = normalizeStage(leaveRequest.status);
+  if (stage !== 'pending_mgr' && stage !== 'pending_ceo') {
+    return { ok: false, reason: 'NOT_PENDING', actual: leaveRequest.status };
   }
 
-  return res.status(405).json({ error: 'Method not allowed' });
+  // canReview 需要 employee_manager_id、從 employees 表撈
+  const employee = await repo.findEmployeeById(leaveRequest.employee_id);
+  const reviewable = {
+    ...leaveRequest,
+    status: stage,
+    employee_manager_id: employee?.manager_id || null,
+  };
+  if (!canReview(caller, reviewable)) {
+    return { ok: false, reason: 'FORBIDDEN', detail: 'Cannot review at stage ' + stage };
+  }
+
+  let nextStage;
+  try { nextStage = transitionApprove(stage); }
+  catch (e) { return { ok: false, reason: 'INVALID_TRANSITION', detail: e.message }; }
+
+  const now = new Date().toISOString();
+
+  // override 紀錄(申請是 late_application=true 且 caller 提供 override_reason)
+  const overrideExtras = (leaveRequest.late_application && override_reason && String(override_reason).trim())
+    ? { override_by: callerId, override_at: now, override_reason: String(override_reason).trim() }
+    : {};
+
+  if (nextStage === 'pending_ceo') {
+    // 主管審完、推給執行長。不扣餘額。
+    // 注意:DB 上的實際 status 可能是 'pending'(legacy)、用 .eq('status', stage_actual) 會抓不到、
+    // 直接 updateLeaveRequest by id 沒 status 條件、安全。
+    const updated = await repo.updateLeaveRequest(id, {
+      status: 'pending_ceo',
+      mgr_reviewed_by: callerId,
+      mgr_reviewed_at: now,
+      mgr_decision: 'approved',
+      ...overrideExtras,
+    });
+    return { ok: true, request: updated };
+  }
+
+  // nextStage === 'approved':執行長最終批、扣餘額
+  const stageExtras = {
+    ceo_reviewed_by: callerId,
+    ceo_reviewed_at: now,
+    ceo_decision: 'approved',
+    ...overrideExtras,
+  };
+  // approveLeaveRequest 內部會驗 status === expected_status、扣餘額、寫 status='approved'+ patch_extras
+  return approveLeaveRequest(repo, {
+    request_id: id,
+    approved_by: callerId,
+    expected_status: leaveRequest.status, // 用實際 status (可能是 'pending' 或 'pending_ceo')
+    patch_extras: stageExtras,
+  });
+}
+
+// ─── multi-stage reject ────────────────────────────────────────
+async function handleReject({ repo, id, callerId, caller, reject_reason }) {
+  if (!reject_reason || !String(reject_reason).trim()) {
+    return { ok: false, reason: 'REJECT_REASON_REQUIRED' };
+  }
+  const leaveRequest = await repo.findLeaveRequestById(id);
+  if (!leaveRequest) return { ok: false, reason: 'NOT_FOUND' };
+
+  const stage = normalizeStage(leaveRequest.status);
+  if (stage !== 'pending_mgr' && stage !== 'pending_ceo') {
+    return { ok: false, reason: 'NOT_PENDING', actual: leaveRequest.status };
+  }
+
+  const employee = await repo.findEmployeeById(leaveRequest.employee_id);
+  const reviewable = {
+    ...leaveRequest,
+    status: stage,
+    employee_manager_id: employee?.manager_id || null,
+  };
+  if (!canReview(caller, reviewable)) {
+    return { ok: false, reason: 'FORBIDDEN', detail: 'Cannot reject at stage ' + stage };
+  }
+
+  const now = new Date().toISOString();
+  const trimmedReason = String(reject_reason).trim();
+  const stageExtras = stage === 'pending_mgr'
+    ? { mgr_reviewed_by: callerId, mgr_reviewed_at: now, mgr_decision: 'rejected', mgr_reject_reason: trimmedReason }
+    : { ceo_reviewed_by: callerId, ceo_reviewed_at: now, ceo_decision: 'rejected', ceo_reject_reason: trimmedReason };
+
+  return rejectLeaveRequest(repo, {
+    request_id: id,
+    rejected_by: callerId,
+    reject_reason: trimmedReason,
+    expected_status: leaveRequest.status,
+    patch_extras: stageExtras,
+  });
 }
