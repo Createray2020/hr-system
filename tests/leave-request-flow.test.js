@@ -337,6 +337,108 @@ describe('cancelLeaveRequest', () => {
   });
 });
 
+// 三類 shift break 演算覆蓋(對應 lib/schedule/break-overlap.js 的 fixed/flexible/none 分流)
+// 對應 prod Bug A(半天切點)+ Bug B(自訂時段多扣 break)、防退化
+describe('submitLeaveRequest — 三類 shift break 演算覆蓋', () => {
+  // ── fixed break (ST001 風格:break_start/end 有值)──
+  it('fixed break:自訂 15:00-18:00 不跨午休 → hours=3、days=0.375', async () => {
+    // dayShift 預設 ST001 風格(9-18、break 13-14)
+    const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [dayShift()]) });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T15:00:00+08:00',
+      end_at:   '2026-04-27T18:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    // overlap=3h、午休 13-14 不在 15-18 內 → breakOverlap=0、結果 3h
+    expect(r.request.hours).toBe(3);
+    expect(r.request.days).toBe(0.375);
+  });
+
+  it('fixed break:上半段 09:00-13:00 → hours=4、days=0.5', async () => {
+    const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [dayShift()]) });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T09:00:00+08:00',
+      end_at:   '2026-04-27T13:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.hours).toBe(4);
+    expect(r.request.days).toBe(0.5);
+  });
+
+  it('fixed break:下半段 14:00-18:00 → hours=4、days=0.5', async () => {
+    const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [dayShift()]) });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T14:00:00+08:00',
+      end_at:   '2026-04-27T18:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.hours).toBe(4);
+    expect(r.request.days).toBe(0.5);
+  });
+
+  it('fixed break:跨午休 12:00-15:00 → hours=2(扣 13-14 那 1 小時)', async () => {
+    const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [dayShift()]) });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T12:00:00+08:00',
+      end_at:   '2026-04-27T15:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    // overlap=3h、午休 13-14 完整落在 12-15 內 → breakOverlap=1h、結果 2h
+    expect(r.request.hours).toBe(2);
+    expect(r.request.days).toBe(0.25);
+  });
+
+  // ── flexible break (ST005 風格:break_minutes>0、無 break_start/end)──
+  it('flexible break:自訂 15:00-18:00 → hours=2.5(按比例攤、沿用現行為)', async () => {
+    const flex = dayShift({ break_start: null, break_end: null, break_minutes: 60 });
+    const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [flex]) });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T15:00:00+08:00',
+      end_at:   '2026-04-27T18:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    // 540 span、work 480、ratio=480/540、3h × ratio ≈ 2.667 → round 0.5 = 2.5
+    expect(r.request.hours).toBe(2.5);
+  });
+
+  it('flexible break:整天 10:00-19:00 → hours=8(span 540、break 60)', async () => {
+    const flex = dayShift({
+      start_time: '10:00', end_time: '19:00', scheduled_work_minutes: 480,
+      break_start: null, break_end: null, break_minutes: 60,
+    });
+    const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [flex]) });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T10:00:00+08:00',
+      end_at:   '2026-04-27T19:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.hours).toBe(8);
+  });
+
+  // ── no break (ST006 風格:break_minutes=0、無 break_start/end)──
+  it('no break:自訂 18:00-21:00 → hours=3、無扣減', async () => {
+    const noBreak = dayShift({
+      start_time: '18:00', end_time: '22:00', scheduled_work_minutes: 240,
+      break_start: null, break_end: null, break_minutes: 0,
+    });
+    const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [noBreak]) });
+    const r = await submitLeaveRequest(repo, {
+      employee_id: 'E001', leave_type: 'personal',
+      start_at: '2026-04-27T18:00:00+08:00',
+      end_at:   '2026-04-27T21:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.hours).toBe(3);
+    expect(r.request.days).toBe(0.375);
+  });
+});
+
 // 退化測試:原本 leave_requests.days 為 INTEGER、寫入 0.5 會 PG syntax error。
 // schema 已改 NUMERIC(5,2)、本區塊確保 lib 層產出小數 days、未來若有人把欄位
 // 退回 INT 或在 lib 加 parseInt 會被擋下。
