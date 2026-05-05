@@ -1,6 +1,21 @@
 // public/js/pwa.js — PWA 初始化 & 推播通知
 const VAPID_PUBLIC_KEY = 'BO_tfAfRgPpYgzJvCnZDdxJfpjELOW05Ywuwr_4VA3m34PqqkZFHdmT6-NKEJEEjmjOsPHHxorpG3Ya2-BBvLnk';
 
+// pwa.js 在多種頁面被載入(backoffice 有 layout.js 設 window._supabase、
+// employee-app / employee-leave 等沒有、各自 const _sb 不掛 window)。
+// 為了 push 訂閱要拿 session、自持一份 supabase client。anon key 是 public、
+// session 透過 localStorage 共用、不會跟頁面 client 衝突。
+const _PWA_SB_URL = 'https://scsgqxixmbompnoypuuw.supabase.co';
+const _PWA_SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+let _pwaSb = null;
+function _getPwaSb() {
+  if (window._supabase) return window._supabase;
+  if (_pwaSb) return _pwaSb;
+  if (!window.supabase?.createClient) return null;
+  _pwaSb = window.supabase.createClient(_PWA_SB_URL, _PWA_SB_KEY);
+  return _pwaSb;
+}
+
 const PWA = {
   registration: null,
 
@@ -89,25 +104,35 @@ const PWA = {
         console.log('[PWA] 已有訂閱，重新儲存到 DB');
       }
 
-      const empId = window.currentUser?.id;
+      // 等 currentUser 載入完(race 防護、最多等 5s、跟 dashboard.html 同 pattern)
+      const empId = await PWA.waitForCurrentUserId(5000);
       if (!empId) {
-        console.warn('[PWA] currentUser 未載入，訂閱暫不儲存');
+        console.warn('[PWA] currentUser 未載入(已等 5s),訂閱暫不儲存');
         return;
       }
 
-      const session = await window._supabase?.auth?.getSession();
-      const token = session?.data?.session?.access_token;
-      if (!token) console.warn('[PWA] 未登入、推播訂閱會失敗');
+      // 拿 supabase access_token、沒有就 skip 不送 POST
+      // (原本沒 return、會 fire 沒 Authorization 的 POST 撞 401)
+      const token = await PWA.getAccessToken();
+      if (!token) {
+        console.warn('[PWA] 無 supabase session,訂閱暫不儲存');
+        return;
+      }
+
       const res = await fetch('/api/push', {
         method:  'POST',
         headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body:    JSON.stringify({ action: 'subscribe', employee_id: empId, subscription: sub.toJSON() }),
       });
       const result = await res.json().catch(() => ({}));
-      console.log('[PWA] 訂閱儲存結果:', result.message || result);
+      if (res.ok) {
+        console.log('[PWA] 訂閱儲存成功:', result.message || 'ok');
+      } else {
+        console.warn('[PWA] 訂閱儲存失敗:', res.status, result.error || result.message);
+      }
     } catch(e) {
       if (e.name === 'NotAllowedError') {
         console.warn('[PWA] 通知權限被拒絕');
@@ -158,6 +183,27 @@ const PWA = {
       if (count > 0 && 'setAppBadge' in navigator)  await navigator.setAppBadge(count);
       if (count === 0 && 'clearAppBadge' in navigator) await navigator.clearAppBadge();
     } catch(_) {}
+  },
+
+  // 輪詢等 layout / 頁面 script 設好 window.currentUser
+  // (沿用 dashboard.html L166 / calendar.html L194 的 pattern)
+  async waitForCurrentUserId(maxMs = 5000) {
+    const step = 100;
+    for (let i = 0; i < maxMs / step; i++) {
+      if (window.currentUser?.id) return window.currentUser.id;
+      await new Promise(r => setTimeout(r, step));
+    }
+    return null;
+  },
+
+  // 拿 supabase session 的 access_token、給 push subscribe POST 帶 Authorization
+  async getAccessToken() {
+    const sb = _getPwaSb();
+    if (!sb?.auth?.getSession) return null;
+    try {
+      const { data } = await sb.auth.getSession();
+      return data?.session?.access_token || null;
+    } catch { return null; }
   },
 
   urlBase64ToUint8Array(base64String) {
