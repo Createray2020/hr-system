@@ -254,6 +254,69 @@ let currentUser = null, API = '';
 let allLeaves = [], currentFilter = '';
 let selectedFile = null;
 
+// ─── lib/schedule/break-overlap.js mirror (前後端共用 SOT) ───
+// ⚠ SOT 在 lib/schedule/break-overlap.js、改這邊請同步那邊。
+//   後端用 ESM 跑、前端用 vanilla JS、故各自一份、語意必須一致。
+function classifyShiftBreak(shift) {
+  if (!shift) return 'none';
+  if (shift.break_start && shift.break_end) return 'fixed';
+  if (Number(shift.break_minutes) > 0) return 'flexible';
+  return 'none';
+}
+function timeStringToMs(timeStr, baseDateStr) {
+  if (!timeStr) return null;
+  const m = String(timeStr).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!m) return null;
+  const t = Date.parse(`${baseDateStr}T${m[1].padStart(2,'0')}:${m[2]}:00+08:00`);
+  return Number.isFinite(t) ? t : null;
+}
+function calculateBreakOverlapMs(reqStartMs, reqEndMs, baseDateStr, shift) {
+  if (!shift?.break_start || !shift?.break_end) return 0;
+  const bStart = timeStringToMs(shift.break_start, baseDateStr);
+  const bEnd   = timeStringToMs(shift.break_end,   baseDateStr);
+  if (bStart == null || bEnd == null || bEnd <= bStart) return 0;
+  return Math.max(0, Math.min(reqEndMs, bEnd) - Math.max(reqStartMs, bStart));
+}
+function calculateSegmentLeaveMinutes({ reqStartMs, reqEndMs, segStartMs, segEndMs, shift, baseDateStr }) {
+  const overlapStart = Math.max(reqStartMs, segStartMs);
+  const overlapEnd   = Math.min(reqEndMs,   segEndMs);
+  const overlap = Math.max(0, overlapEnd - overlapStart);
+  if (overlap <= 0) return 0;
+  const mode = classifyShiftBreak(shift);
+  if (mode === 'none') return overlap / 60000;
+  if (mode === 'fixed') {
+    // 扣「請假 ∩ 排班 ∩ 午休」、傳 overlap range 而不是 request range(避免多段班重複扣)
+    const breakOverlap = calculateBreakOverlapMs(overlapStart, overlapEnd, baseDateStr, shift);
+    return Math.max(0, overlap - breakOverlap) / 60000;
+  }
+  // flexible
+  const span = Math.max(1, segEndMs - segStartMs);
+  const breakMs = Number(shift.break_minutes || 0) * 60000;
+  const work = Math.max(0, span - breakMs);
+  return overlap * (work / span) / 60000;
+}
+function calculateHalfDayBoundaries(shift) {
+  if (!shift?.start_time || !shift?.end_time) return null;
+  if (shift.shift_types?.is_off || shift.is_off) return null;
+  const startStr = String(shift.start_time).slice(0, 5);
+  const endStr   = String(shift.end_time).slice(0, 5);
+  if (classifyShiftBreak(shift) === 'fixed') {
+    return {
+      morning:   { start: startStr, end: String(shift.break_start).slice(0, 5) },
+      afternoon: { start: String(shift.break_end).slice(0, 5), end: endStr },
+    };
+  }
+  const [sh, sm] = startStr.split(':').map(Number);
+  const [eh, em] = endStr.split(':').map(Number);
+  const startMin = sh*60 + sm;
+  const endMin   = eh*60 + em + (shift.crosses_midnight ? 1440 : 0);
+  const midMin = (startMin + endMin) / 2;
+  const midH = Math.floor(midMin / 60) % 24;
+  const midM = Math.round(midMin % 60);
+  const midStr = `${String(midH).padStart(2,'0')}:${String(midM).padStart(2,'0')}`;
+  return { morning: { start: startStr, end: midStr }, afternoon: { start: midStr, end: endStr } };
+}
+
 function onTypeChange() {
   const isSick = document.getElementById('f-type').value === 'sick';
   document.getElementById('upload-section').style.display = isSick ? '' : 'none';
@@ -459,23 +522,20 @@ function renderRangeChips() {
   sec.style.display = 'block';
   const startStr = fmtTime(sched.start_time);
   const endStr   = fmtTime(sched.end_time);
-  // 計算上半/下半中點
-  const [sh, sm] = sched.start_time.split(':').map(Number);
-  const [eh, em] = sched.end_time.split(':').map(Number);
-  let midMin = ((sh*60+sm) + (eh*60+em + (sched.crosses_midnight ? 1440 : 0))) / 2;
-  const midH = Math.floor(midMin / 60) % 24;
-  const midM = Math.round(midMin % 60);
-  const midStr = `${String(midH).padStart(2,'0')}:${String(midM).padStart(2,'0')}`;
+  // 上下半段切點:fixed break shift 用 break_start/break_end、其他用中點
+  const halfBounds = calculateHalfDayBoundaries(sched);
+  const morningEnd   = halfBounds?.morning.end   ?? startStr;
+  const afternoonStart = halfBounds?.afternoon.start ?? endStr;
 
   chipsEl.innerHTML = `
     <button class="range-chip ${selectedRange==='full'?'selected':''}" onclick="selectRange('full')">
       整天<span class="range-chip-sub">${startStr}-${endStr}</span>
     </button>
     <button class="range-chip ${selectedRange==='morning'?'selected':''}" onclick="selectRange('morning')">
-      上半段<span class="range-chip-sub">${startStr}-${midStr}</span>
+      上半段<span class="range-chip-sub">${startStr}-${morningEnd}</span>
     </button>
     <button class="range-chip ${selectedRange==='afternoon'?'selected':''}" onclick="selectRange('afternoon')">
-      下半段<span class="range-chip-sub">${midStr}-${endStr}</span>
+      下半段<span class="range-chip-sub">${afternoonStart}-${endStr}</span>
     </button>
     <button class="range-chip ${selectedRange==='custom'?'selected':''}" onclick="selectRange('custom')">
       自訂時段<span class="range-chip-sub">幾點到幾點</span>
@@ -524,31 +584,27 @@ function getSelectedRange() {
 
   const startStr = fmtTime(sched.start_time);
   const endStr   = fmtTime(sched.end_time);
-  // 半段中點
-  const [sh, sm] = sched.start_time.split(':').map(Number);
-  const [eh, em] = sched.end_time.split(':').map(Number);
-  const startMin = sh*60+sm;
-  const endMin   = eh*60+em + (sched.crosses_midnight ? 1440 : 0);
-  const midMin   = (startMin + endMin) / 2;
-  const midH = Math.floor(midMin / 60) % 24;
-  const midM = Math.round(midMin % 60);
-  const midStr = `${String(midH).padStart(2,'0')}:${String(midM).padStart(2,'0')}`;
+  // 上下半段切點:用同一個 SOT
+  const halfBounds = calculateHalfDayBoundaries(sched);
 
   let stTime = startStr, edTime = endStr;
-  if (selectedRange === 'morning')   { edTime = midStr; }
-  if (selectedRange === 'afternoon') { stTime = midStr; }
+  if (selectedRange === 'morning' && halfBounds)   { edTime = halfBounds.morning.end; }
+  if (selectedRange === 'afternoon' && halfBounds) { stTime = halfBounds.afternoon.start; }
   if (selectedRange === 'custom') {
     stTime = document.getElementById('f-time-start').value || startStr;
     edTime = document.getElementById('f-time-end').value   || endStr;
   }
 
-  // 預估時數:overlap 班表時段 × scheduled_work_minutes 比例
-  const reqStart = parseTime(stTime);
-  const reqEnd   = parseTime(edTime) + (edTime <= stTime ? 1440 : 0);
-  const overlap = Math.max(0, Math.min(reqEnd, endMin) - Math.max(reqStart, startMin));
-  const span    = Math.max(1, endMin - startMin);
-  const ratio   = (Number(sched.scheduled_work_minutes) || span) / span;
-  const hours   = Math.round(overlap * ratio / 60 * 2) / 2;
+  // 預估時數:用三類分流 SOT(跟後端 calculateLeaveHours 一致)
+  const reqStartMs = timeStringToMs(stTime, s);
+  const reqEndMs   = timeStringToMs(edTime, s) + (edTime <= stTime ? 86400000 : 0);
+  const segStartMs = timeStringToMs(startStr, s);
+  const segEndMs   = timeStringToMs(endStr,   s) + (sched.crosses_midnight ? 86400000 : 0);
+  const minutes = calculateSegmentLeaveMinutes({
+    reqStartMs, reqEndMs, segStartMs, segEndMs,
+    shift: sched, baseDateStr: s,
+  });
+  const hours = Math.round(minutes / 60 * 2) / 2;
 
   return {
     start_at: `${s}T${stTime}:00+08:00`,

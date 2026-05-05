@@ -77,7 +77,7 @@ export default async function handler(req, res) {
 
       let q = supabaseAdmin
         .from('schedules')
-        .select('*, shift_types(name, color, is_off, is_flexible, start_time, end_time)')
+        .select('*, shift_types(name, color, is_off, is_flexible, start_time, end_time, break_start, break_end, break_minutes)')
         .order('work_date');
       if (start)       q = q.gte('work_date', start);
       if (end)         q = q.lte('work_date', end);
@@ -112,6 +112,10 @@ export default async function handler(req, res) {
           is_flexible: s.shift_types?.is_flexible || false,
           shift_start: s.start_time || s.shift_types?.start_time || '',
           shift_end:   s.end_time   || s.shift_types?.end_time   || '',
+          // 給 break-overlap.js 三類分流用(前端內嵌 mirror、後端 lib/schedule/break-overlap.js)
+          break_start:   s.shift_types?.break_start   ?? null,
+          break_end:     s.shift_types?.break_end     ?? null,
+          break_minutes: s.shift_types?.break_minutes ?? null,
         };
       }));
     } catch(e) {

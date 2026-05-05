@@ -34,6 +34,8 @@ const dayShift = (over = {}) => ({
   id: 'S1', employee_id: 'E001', work_date: '2026-04-27',
   start_time: '09:00', end_time: '18:00',
   crosses_midnight: false, scheduled_work_minutes: 480, // 9h-1h break
+  // 2026-05-05 加:fixed break window(ST001 風格)
+  break_start: '13:00', break_end: '14:00', break_minutes: 60,
   ...over,
 });
 
@@ -48,15 +50,17 @@ describe('calculateLeaveHours', () => {
     expect(h).toBe(8);
   });
 
-  it('半天請假(9-13)→ 4 hours(按比例扣 break)', async () => {
+  it('半天請假(9-13)→ 4 hours(fixed break,午休 13-14 不在請假區間)', async () => {
     const repo = makeRepo({ findSchedulesInRange: vi.fn(async () => [dayShift()]) });
     const h = await calculateLeaveHours(repo, {
       employee_id: 'E001',
       start_at: '2026-04-27T09:00:00+08:00',
       end_at:   '2026-04-27T13:00:00+08:00',
     });
-    // 4h overlap × (480/540) ratio ≈ 3.555 → round 0.5 = 3.5
-    expect(h).toBe(3.5);
+    // ST001 風格:break_start=13:00 break_end=14:00、請假 09-13 完全不跨午休
+    // overlap = 4h、breakOverlap = 0、結果 = 4h
+    // (原本 3.5h 是 ratio 攤算守 bug、2026-05-05 修)
+    expect(h).toBe(4);
   });
 
   it('多段班(早+晚)各請半段 → 加總', async () => {

@@ -24,15 +24,28 @@ export function makeLeaveRepo() {
     },
 
     // ─── schedules ───────
+    // JOIN shift_types 帶出 break_start / break_end / break_minutes / is_off,
+    // 給 lib/schedule/break-overlap.js 的三類分流使用。
     async findSchedulesInRange(employee_id, dateStart, dateEnd) {
       const { data, error } = await supabaseAdmin
         .from('schedules')
-        .select('id, employee_id, work_date, start_time, end_time, crosses_midnight, scheduled_work_minutes, segment_no, period_id')
+        .select(`
+          id, employee_id, work_date, start_time, end_time, crosses_midnight,
+          scheduled_work_minutes, segment_no, period_id,
+          shift_types(break_start, break_end, break_minutes, is_off)
+        `)
         .eq('employee_id', employee_id)
         .gte('work_date', dateStart).lte('work_date', dateEnd)
         .order('work_date').order('segment_no');
       if (error) throw error;
-      return data || [];
+      // Flatten shift_types fields onto top-level so calculateLeaveHours / break-overlap 直接用 s.break_*
+      return (data || []).map(s => ({
+        ...s,
+        break_start:   s.shift_types?.break_start   ?? null,
+        break_end:     s.shift_types?.break_end     ?? null,
+        break_minutes: s.shift_types?.break_minutes ?? null,
+        is_off:        s.shift_types?.is_off        ?? false,
+      }));
     },
 
     // ─── annual_leave_records ─────
