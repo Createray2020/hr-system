@@ -87,9 +87,17 @@ function supabaseRepo() {
     },
 
     async notifyAbsence({ employee_id, manager_id, work_date, segment_no }) {
+      // 補員工姓名(HR / 主管 / 員工自己看通知時要能辨識是誰、不能只 EMP_xxx)
+      let empLabel = employee_id;
+      try {
+        const { data: emp } = await supabaseAdmin
+          .from('employees').select('name').eq('id', employee_id).maybeSingle();
+        if (emp?.name) empLabel = `${emp.name}(${employee_id})`;
+      } catch (_) {}
+
       const payload = {
         title: '出勤異常:曠職',
-        body: `員工 ${employee_id} ${work_date}${segment_no > 1 ? ` 段${segment_no}` : ''} 未打卡且無請假`,
+        body: `${empLabel} ${work_date}${segment_no > 1 ? ` 段${segment_no}` : ''} 未打卡且無請假`,
         url: '/attendance-admin',
         tag: `absence-${employee_id}-${work_date}-${segment_no}`,
       };

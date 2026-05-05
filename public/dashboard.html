@@ -151,12 +151,14 @@ function toast(msg, type='success') {
   if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
   const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
 }
-const LEAVE_TYPES  = {annual:'特休假',sick:'病假',personal:'事假',maternity:'產假',funeral:'喪假',marriage:'婚假'};
+// 假別中文名統一從 /api/leaves?_resource=leave_types 動態拿(見 public/js/utils.js)
 
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
   setWelcome();
   await applyRoleFilter();
+  // 載入假別中文名(idempotent、給 pendingLeaves render 用)
+  await window.HR_Utils?.loadLeaveTypeLabels?.();
   try {
     await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
@@ -235,7 +237,7 @@ async function loadDashboard() {
     plEl.innerHTML = pendingLeaves.slice(0,5).map(r=>`
       <div class="pending-item">
         <div>
-          <div class="pending-name">${r.emp_name} <span style="font-size:12px;color:var(--text-dim)">— ${LEAVE_TYPES[r.leave_type]||r.leave_type} ${r.days}天</span></div>
+          <div class="pending-name">${r.emp_name} <span style="font-size:12px;color:var(--text-dim)">— ${window.HR_Utils.leaveTypeLabel(r.leave_type)} ${r.days}天</span></div>
           <div class="pending-meta">${r.start_date} ～ ${r.end_date}</div>
         </div>
         <div class="pending-action">
@@ -420,6 +422,7 @@ async function quickLeave(id, status) {
 }
 </script>
 <script src="/js/roles.js"></script>
+<script src="/js/utils.js"></script>
 <script src="/js/layout.js"></script>
 
 <script src="/js/pwa.js"></script>

@@ -271,9 +271,17 @@ async function handleNewPost(req, res) {
 
   // late_change 即時推播 HR + CEO
   if (isLateChange) {
+    // 補員工姓名(HR / CEO 看通知時要能辨識是誰)
+    let empLabel = employee_id;
+    try {
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('name').eq('id', employee_id).maybeSingle();
+      if (emp?.name) empLabel = `${emp.name}(${employee_id})`;
+    } catch (_) {}
+
     const payload = {
       title: '排班當日異動',
-      body: `${employee_id} ${work_date} 排班於工作日當天被調整`,
+      body: `${empLabel} ${work_date} 排班於工作日當天被調整`,
       url: '/schedule',
       tag: 'late-change',
     };

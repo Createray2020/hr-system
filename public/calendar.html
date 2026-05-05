@@ -211,6 +211,8 @@ function toDateStr(d) {
 // ── Bootstrap ─────────────────────────────────────────────────────────
 window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
+  // 載入假別中文名(idempotent、給 leave 事件 title 用)
+  await window.HR_Utils?.loadLeaveTypeLabels?.();
   await loadDeptScope();
   bindControls();
   await loadAllEvents();
@@ -363,7 +365,7 @@ async function fetchLeaves(start, end) {
       .map(r => ({
         date:   r.start_date,
         endDate: r.end_date,
-        title:  `${r.emp_name || '員工'} — ${LEAVE_LABELS[r.leave_type] || r.leave_type}`,
+        title:  `${r.emp_name || '員工'} — ${window.HR_Utils.leaveTypeLabel(r.leave_type)}`,
         color:  'leave',
         source: 'leave',
         days:   r.days,
@@ -397,7 +399,7 @@ async function fetchSchedules(year, month) {
   } catch { return []; }
 }
 
-const LEAVE_LABELS = { annual:'特休假', sick:'病假', personal:'事假', maternity:'產假', funeral:'喪假', marriage:'婚假' };
+// 假別中文名統一從 /api/leaves?_resource=leave_types 動態拿(見 public/js/utils.js)
 
 // 月曆格子 / 週視圖用的事件標籤，帶時間前綴
 function fmtPillLabel(ev) {
@@ -672,6 +674,7 @@ function renderDetail(date) {
 }
 </script>
 <script src="/js/roles.js"></script>
+<script src="/js/utils.js"></script>
 <script src="/js/layout.js"></script>
 
 <script src="/js/pwa.js"></script>

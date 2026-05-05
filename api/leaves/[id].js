@@ -54,8 +54,12 @@ export default async function handler(req, res) {
       try {
         const req_ = r.request || await repo.findLeaveRequestById(id);
         if (req_?.employee_id) {
-          const LEAVE_TYPES = { annual:'特休', sick:'病假', personal:'事假', maternity:'產假', funeral:'喪假', marriage:'婚假', comp:'補休', public:'公假' };
-          const typeName = LEAVE_TYPES[req_.leave_type] || req_.leave_type;
+          // 動態從 leave_types 拿中文名(支援所有 active 假別、不再 hardcode)
+          let typeName = req_.leave_type;
+          try {
+            const lt = await repo.findLeaveType(req_.leave_type);
+            if (lt?.name_zh) typeName = lt.name_zh;
+          } catch (_) {}
           const titleMap = {
             approved: '✅ 假單已核准',
             rejected: '❌ 假單已退回',
