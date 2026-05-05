@@ -19,7 +19,12 @@ import {
 import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { makeLeaveRepo } from './_repo.js';
 
-/** 'pending'(legacy)→ 'pending_mgr'。其他原樣。 */
+/** 'pending'(legacy)→ 'pending_mgr'。其他原樣。
+ *
+ *  Phase 1.5 cleanup 後 prod 已無 'pending' row、CHECK 也移除 'pending'、
+ *  legacy POST(api/leaves/index.js)也改寫 'pending_mgr'。理論上此函式回傳
+ *  永遠不會走 status==='pending' branch。保留作 read-side safety net、
+ *  防舊 export / 未來 hot-fix 直接 INSERT 'pending' 的漏網路徑、無害且清楚。 */
 function normalizeStage(status) {
   return status === 'pending' ? 'pending_mgr' : status;
 }

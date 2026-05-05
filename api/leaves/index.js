@@ -130,8 +130,10 @@ export default async function handler(req, res) {
     if (!employee_id || !leave_type || !start_date || !end_date || !days)
       return res.status(400).json({ error: '缺少必填欄位' });
     const lid = 'L' + Date.now();
+    // Phase 1.5:legacy POST 預設寫 pending_mgr(從前是 'pending'、Phase 1.5 cleanup 後
+    // CHECK 已移除 'pending'、不能再寫舊值)。
     const { error } = await supabaseAdmin.from('leave_requests')
-      .insert([{ id: lid, employee_id, leave_type, start_date, end_date, days, reason, status: 'pending',
+      .insert([{ id: lid, employee_id, leave_type, start_date, end_date, days, reason, status: 'pending_mgr',
                  attachment_url: attachment_url || null, attachment_name: attachment_name || null }]);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(201).json({ id: lid, message: '假單已建立' });
