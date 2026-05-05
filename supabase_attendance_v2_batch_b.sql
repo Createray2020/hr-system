@@ -14,6 +14,9 @@
 -- ========== 段 1：所有 ALTER ==========
 
 -- ---------- shift_types ----------
+-- 注意：is_off=true 的 shift（ST003 休假日、ST004 例假日）不應有 break，
+-- 但這個 ALTER 預設 60 分鐘、需在 migrations/2026_05_05_shift_types_break_window.sql
+-- 跑 UPDATE 清為 0。break_start / break_end 也由該 migration 補上。
 ALTER TABLE shift_types ADD COLUMN IF NOT EXISTS
   break_minutes INT NOT NULL DEFAULT 60;
 

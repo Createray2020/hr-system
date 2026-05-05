@@ -3,6 +3,9 @@
 -- ══════════════════════════════════════════════
 
 -- 班別設定表
+-- 2026-05-05: 加 break_start / break_end TIME 欄位（fixed break window）、
+-- ST001 backfill 13:00-14:00、ST003/ST004 break_minutes 清為 0
+-- 詳見 migrations/2026_05_05_shift_types_break_window.sql
 CREATE TABLE IF NOT EXISTS shift_types (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
@@ -11,17 +14,23 @@ CREATE TABLE IF NOT EXISTS shift_types (
   is_flexible BOOLEAN DEFAULT FALSE,
   is_off      BOOLEAN DEFAULT FALSE,
   color       TEXT DEFAULT '#5B8DEF',
+  break_start TIME,    -- 2026-05-05 加：固定午休開始（NULL=用 break_minutes 攤算）
+  break_end   TIME,    -- 2026-05-05 加：固定午休結束
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+-- 注意：break_minutes / is_active 由 supabase_attendance_v2_batch_b.sql ALTER 加上
 ALTER TABLE shift_types ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "allow_all" ON shift_types FOR ALL USING (true) WITH CHECK (true);
 
-INSERT INTO shift_types (id, name, start_time, end_time, is_flexible, is_off, color) VALUES
-('ST001', '早班',   '09:00', '18:00', false, false, '#5B8DEF'),
-('ST002', '晚班',   NULL,    NULL,    true,  false, '#C084FC'),
-('ST003', '休假日', NULL,    NULL,    false, true,  '#4ADE80'),
-('ST004', '例假日', NULL,    NULL,    false, true,  '#7A85A0')
+INSERT INTO shift_types (id, name, start_time, end_time, is_flexible, is_off, color, break_start, break_end) VALUES
+('ST001', '早班',   '09:00', '18:00', false, false, '#5B8DEF', '13:00', '14:00'),
+('ST002', '晚班',   NULL,    NULL,    true,  false, '#C084FC', NULL,    NULL),
+('ST003', '休假日', NULL,    NULL,    false, true,  '#4ADE80', NULL,    NULL),
+('ST004', '例假日', NULL,    NULL,    false, true,  '#7A85A0', NULL,    NULL)
 ON CONFLICT (id) DO NOTHING;
+
+-- 2026-05-05: is_off=true 的 shift 不應有 break (batch_b 預設 break_minutes=60、覆蓋為 0)
+UPDATE shift_types SET break_minutes = 0 WHERE id IN ('ST003', 'ST004');
 
 -- 班表（每筆代表一個員工某天的班別）
 CREATE TABLE IF NOT EXISTS schedules (
