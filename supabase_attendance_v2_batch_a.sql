@@ -33,6 +33,8 @@ CREATE INDEX idx_holidays_year ON holidays(EXTRACT(YEAR FROM date));
 
 
 -- ========== leave_types ==========
+-- 2026-05-05: Phase 1.1 加 advance_hours / advance_rule / requires_proof / proof_grace_days
+-- 詳見 migrations/2026_05_05_leave_phase1_schema.sql
 CREATE TABLE leave_types (
   code            TEXT PRIMARY KEY,
   name_zh         TEXT NOT NULL,
@@ -46,19 +48,63 @@ CREATE TABLE leave_types (
   display_order   INT NOT NULL DEFAULT 0,
   description     TEXT,
   legal_reference TEXT,
+  -- 2026-05-05 Phase 1.1: 前置時間 / 證明
+  advance_hours    INTEGER NOT NULL DEFAULT 0,
+  advance_rule     TEXT    NOT NULL DEFAULT 'soft' CHECK (advance_rule IN ('hard','soft')),
+  requires_proof   BOOLEAN NOT NULL DEFAULT false,
+  proof_grace_days INTEGER NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
-INSERT INTO leave_types (code, name_zh, is_paid, pay_rate, affects_attendance_bonus, affects_attendance_rate, has_balance, legal_max_days_per_year, legal_reference) VALUES
-  ('annual',    '特休',    true,  1.00, false, false, true,  NULL, '勞基法 §38'),
-  ('sick',      '病假',    true,  0.50, true,  true,  false, 30,   '勞工請假規則 §4'),
-  ('personal',  '事假',    false, 0.00, true,  true,  false, 14,   '勞工請假規則 §7'),
-  ('maternity', '產假',    true,  1.00, false, false, false, NULL, '勞基法 §50'),
-  ('funeral',   '喪假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §3'),
-  ('marriage',  '婚假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §2'),
-  ('comp',      '補休',    true,  1.00, false, false, true,  NULL, '勞基法 §32-1'),
-  ('public',    '公假',    true,  1.00, false, false, false, NULL, '勞工請假規則 §8');
+-- batch_a 原有 8 種假別、含 Phase 1.1 backfill 後的 advance_* / requires_proof / proof_grace_days
+-- ON CONFLICT DO UPDATE 是讓重跑時把 4 個 Phase 1.1 欄位更新到位（其他欄位保留原 row 的）
+INSERT INTO leave_types (
+  code, name_zh, is_paid, pay_rate, affects_attendance_bonus, affects_attendance_rate,
+  has_balance, legal_max_days_per_year, legal_reference,
+  advance_hours, advance_rule, requires_proof, proof_grace_days
+) VALUES
+  ('annual',    '特休',    true,  1.00, false, false, true,  NULL, '勞基法 §38',          72,  'hard', false, 0),
+  ('sick',      '病假',    true,  0.50, true,  true,  false, 30,   '勞工請假規則 §4',     0,   'soft', true,  5),
+  ('personal',  '事假',    false, 0.00, true,  true,  false, 14,   '勞工請假規則 §7',     24,  'hard', false, 0),
+  ('maternity', '產假',    true,  1.00, false, false, false, NULL, '勞基法 §50',          336, 'hard', true,  0),
+  ('funeral',   '喪假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §3',     0,   'soft', true,  5),
+  ('marriage',  '婚假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §2',     168, 'hard', true,  0),
+  ('comp',      '補休',    true,  1.00, false, false, true,  NULL, '勞基法 §32-1',        72,  'hard', false, 0),
+  ('public',    '公假',    true,  1.00, false, false, false, NULL, '勞工請假規則 §8',     120, 'hard', true,  0)
+ON CONFLICT (code) DO UPDATE SET
+  advance_hours    = EXCLUDED.advance_hours,
+  advance_rule     = EXCLUDED.advance_rule,
+  requires_proof   = EXCLUDED.requires_proof,
+  proof_grace_days = EXCLUDED.proof_grace_days;
+
+-- 2026-05-05 Phase 1.1: 新增 5 種假別（產檢 / 陪產 / 流產 / 安胎 / 育嬰）
+-- 來源：migrations/2026_05_05_leave_phase1_schema.sql C 段
+INSERT INTO leave_types (
+  code, name_zh, is_paid, pay_rate, has_balance,
+  legal_max_days_per_year, is_active, display_order,
+  advance_hours, advance_rule, requires_proof, proof_grace_days
+) VALUES
+  ('paternity_prenatal', '產檢假',       true,  1.00, false, 7,    true, 81, 24,  'hard', false, 0),
+  ('paternity',          '陪產假',       true,  1.00, false, 7,    true, 82, 0,   'soft', true,  5),
+  ('miscarriage',        '流產假',       true,  1.00, false, NULL, true, 83, 0,   'soft', true,  5),
+  ('pregnancy_rest',     '安胎假',       true,  0.50, false, NULL, true, 84, 0,   'soft', true,  5),
+  ('parental',           '育嬰留職停薪', false, 0.00, false, NULL, true, 85, 240, 'hard', true,  0)
+ON CONFLICT (code) DO NOTHING;
+
+-- 2026-05-05: prod 才有的 7 種假別（在 batch_a 之後手動於 prod 加入）
+-- 注意：本 INSERT 只覆蓋 code / name_zh / display_order / 4 個 Phase 1.1 欄位、其他欄位
+--   (is_paid / pay_rate / affects_* / has_balance / legal_max_days / legal_reference)
+--   取 CREATE TABLE 預設值。fresh setup 跑這段後若需要校正、請對照 prod 匯出。
+INSERT INTO leave_types (code, name_zh, display_order, advance_hours, advance_rule, requires_proof, proof_grace_days) VALUES
+  ('work_injury',      '公傷病假',           50, 0,  'soft', true,  0),
+  ('menstrual',        '生理假',             51, 0,  'soft', false, 0),
+  ('family_care',      '家庭照顧假',         52, 0,  'soft', false, 0),
+  ('typhoon',          '颱風假',             53, 0,  'soft', false, 0),
+  ('voting',           '投票日',             54, 24, 'hard', false, 0),
+  ('hospital_unpaid',  '住院傷病假(不支薪)', 55, 0,  'soft', true,  5),
+  ('job_seeking',      '謀職假',             56, 24, 'hard', false, 0)
+ON CONFLICT (code) DO NOTHING;
 
 
 -- ========== annual_leave_records ==========

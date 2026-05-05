@@ -121,9 +121,20 @@ ALTER TABLE leave_requests ADD CONSTRAINT
   fk_leave_requests_type FOREIGN KEY (leave_type)
   REFERENCES leave_types(code);
 
+-- 2026-05-05 Phase 1.1: status CHECK 從 4 值擴展為 7 值（多階審核）。
+--   保留 'pending' 向後相容、Phase 1.3 改 API 後再 UPDATE 成 pending_mgr 並從 CHECK 拿掉。
+--   詳見 migrations/2026_05_05_leave_phase1_schema.sql E 段。
 ALTER TABLE leave_requests DROP CONSTRAINT IF EXISTS leave_requests_status_check;
 ALTER TABLE leave_requests ADD CONSTRAINT leave_requests_status_check
-  CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled'));
+  CHECK (status IN (
+    'pending',       -- 舊版單階
+    'pending_mgr',   -- 新版：等主管審
+    'pending_ceo',   -- 新版：主管已批、等執行長審
+    'approved',      -- 執行長已批、待 HR 歸檔
+    'archived',      -- HR 已歸檔（最終）
+    'rejected',      -- 任一階拒絕（最終）
+    'cancelled'      -- 員工撤回（最終）
+  ));
 
 ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS
   reviewed_by TEXT REFERENCES employees(id);
@@ -144,6 +155,35 @@ ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS
 
 ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS
   source_overtime_request_id BIGINT;
+
+-- 2026-05-05 Phase 1.1: 多階審核 + 前置 / 證明 / override 18 欄位。
+-- 詳見 migrations/2026_05_05_leave_phase1_schema.sql D 段。
+ALTER TABLE leave_requests
+  -- 多階審核（mgr → ceo → archived）
+  ADD COLUMN IF NOT EXISTS mgr_reviewed_by    TEXT REFERENCES employees(id),
+  ADD COLUMN IF NOT EXISTS mgr_reviewed_at    TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS mgr_decision       TEXT
+    CHECK (mgr_decision IS NULL OR mgr_decision IN ('approved','rejected')),
+  ADD COLUMN IF NOT EXISTS mgr_reject_reason  TEXT,
+  ADD COLUMN IF NOT EXISTS ceo_reviewed_by    TEXT REFERENCES employees(id),
+  ADD COLUMN IF NOT EXISTS ceo_reviewed_at    TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS ceo_decision       TEXT
+    CHECK (ceo_decision IS NULL OR ceo_decision IN ('approved','rejected')),
+  ADD COLUMN IF NOT EXISTS ceo_reject_reason  TEXT,
+  ADD COLUMN IF NOT EXISTS archived_at        TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS archived_by        TEXT REFERENCES employees(id),
+  -- 前置時間
+  ADD COLUMN IF NOT EXISTS late_application   BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS late_reason        TEXT,
+  -- 證明文件
+  ADD COLUMN IF NOT EXISTS proof_url          TEXT,
+  ADD COLUMN IF NOT EXISTS proof_due_at       TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS proof_status       TEXT NOT NULL DEFAULT 'not_required'
+    CHECK (proof_status IN ('not_required','required','submitted','expired','converted_to_personal')),
+  -- Override
+  ADD COLUMN IF NOT EXISTS override_by        TEXT REFERENCES employees(id),
+  ADD COLUMN IF NOT EXISTS override_at        TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS override_reason    TEXT;
 
 
 -- ========== 段 2：所有 backfill UPDATE / INSERT ==========
