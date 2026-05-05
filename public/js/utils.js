@@ -48,6 +48,11 @@
     return _byCode[code] || null;
   }
 
+  /** active leave_types 完整 row 陣列(已依 display_order 排序)。空陣列代表還沒載入。 */
+  function leaveTypes() {
+    return _types.slice();
+  }
+
   function leaveTypeLabel(code) {
     if (!code) return '';
     return _labels[code] || code;
@@ -144,6 +149,7 @@
     leaveTypeLabel,
     leaveTypeLabelFull,
     leaveType,
+    leaveTypes,
     stageLabel,
     stageBadgeClass,
     advanceHintText,

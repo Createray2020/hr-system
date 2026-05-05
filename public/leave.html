@@ -20,13 +20,23 @@
   .bal-sub{font-size:11px;color:var(--text-dim);margin-top:2px}
   .form-card{background:rgba(255,255,255,.03);border:0.5px solid rgba(255,255,255,.08);border-radius:10px;padding:18px;margin-bottom:18px}
   .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
-  .p-pending{background:rgba(251,191,36,.15);color:#FBBF24}
-  .p-approved{background:rgba(74,222,128,.15);color:#4ADE80}
-  .p-rejected{background:rgba(248,113,113,.12);color:#F87171}
-  .p-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
-  .leave-row{display:grid;grid-template-columns:90px 80px 1fr 70px 80px;gap:10px;padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);align-items:center;font-size:13px}
+  /* Phase 1.4: stage badge classes(對齊 utils.js stageBadgeClass)*/
+  .badge-pending{background:rgba(251,191,36,.15);color:#FBBF24}
+  .badge-approved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .badge-archived{background:rgba(74,222,128,.10);color:#86efac}
+  .badge-rejected{background:rgba(248,113,113,.12);color:#F87171}
+  .badge-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
+  .leave-row{display:grid;grid-template-columns:90px 100px 1fr 70px 100px;gap:10px;padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);align-items:center;font-size:13px}
   .leave-row.head{font-weight:600;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,.15)}
   .est-hint{font-size:13px;color:#7FBBFF;background:rgba(91,141,239,.08);padding:8px 12px;border-radius:6px;margin-top:8px}
+  .lt-hint{font-size:12px;color:rgba(255,255,255,.55);margin-top:6px;line-height:1.5}
+  .lt-hint .lt-advance{color:#7FBBFF}
+  .lt-hint .lt-proof{color:#FBBF24;display:block}
+  .late-warn{font-size:13px;color:#FB923C;background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.25);padding:8px 12px;border-radius:6px;margin-top:8px}
+  .hard-warn{font-size:13px;color:#F87171;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);padding:8px 12px;border-radius:6px;margin-top:8px}
+  .mini-tag{padding:2px 6px;border-radius:3px;font-size:10px;font-family:'DM Mono',monospace;margin-left:4px}
+  .mini-tag-late{background:rgba(251,146,60,.15);color:#FB923C}
+  .mini-tag-proof{background:rgba(251,191,36,.15);color:#FBBF24}
 </style>
 </head>
 <body data-page="leave">
@@ -56,33 +66,34 @@
       <div style="display:grid;grid-template-columns:160px 1fr 1fr;gap:12px">
         <div class="form-row">
           <label class="form-label">類型</label>
-          <select class="form-select" id="f-type" onchange="estimate()">
-            <option value="annual">特休 (annual)</option>
-            <option value="sick">病假 (sick)</option>
-            <option value="personal">事假 (personal)</option>
-            <option value="maternity">產假 (maternity)</option>
-            <option value="funeral">喪假 (funeral)</option>
-            <option value="marriage">婚假 (marriage)</option>
-            <option value="comp">補休 (comp)</option>
-            <option value="public">公假 (public)</option>
+          <select class="form-select" id="f-type" onchange="onTypeOrTimeChange()">
+            <option value="">載入中…</option>
           </select>
         </div>
         <div class="form-row">
           <label class="form-label">開始時間</label>
-          <input type="datetime-local" class="form-input" id="f-start" oninput="estimate()">
+          <input type="datetime-local" class="form-input" id="f-start" oninput="onTypeOrTimeChange()">
         </div>
         <div class="form-row">
           <label class="form-label">結束時間</label>
-          <input type="datetime-local" class="form-input" id="f-end" oninput="estimate()">
+          <input type="datetime-local" class="form-input" id="f-end" oninput="onTypeOrTimeChange()">
         </div>
       </div>
+      <div class="lt-hint" id="lt-hint" style="display:none"></div>
       <div class="form-row" style="margin-top:8px">
         <label class="form-label">理由</label>
         <input type="text" class="form-input" id="f-reason" placeholder="例:出國 / 看醫生 / 婚假">
       </div>
+      <!-- soft late 時顯示 -->
+      <div class="form-row" id="late-reason-row" style="display:none;margin-top:8px">
+        <label class="form-label" style="color:#FB923C">遲報原因 (必填)</label>
+        <input type="text" class="form-input" id="f-late-reason" placeholder="例:臨時家裡有事、無法事先通知">
+      </div>
       <div class="est-hint" id="est-hint" style="display:none"></div>
+      <div class="late-warn" id="late-warn" style="display:none"></div>
+      <div class="hard-warn" id="hard-warn" style="display:none"></div>
       <div style="display:flex;justify-content:flex-end;margin-top:12px">
-        <button class="btn btn-primary" onclick="submitRequest()">送出申請</button>
+        <button class="btn btn-primary" id="submit-btn" onclick="submitRequest()">送出申請</button>
       </div>
     </div>
 
@@ -123,9 +134,22 @@ async function load(retries = 0) {
     if (retries < 25) return setTimeout(()=>load(retries+1), 200);
     return;
   }
-  // 載入假別中文名(idempotent)
+  // 載入假別中文名(idempotent)+ 完整 row(advance/proof 等)
   await window.HR_Utils?.loadLeaveTypeLabels?.();
+  populateTypeOptions();
   await Promise.all([loadBalance(), loadList()]);
+}
+
+function populateTypeOptions() {
+  const sel = document.getElementById('f-type');
+  const types = window.HR_Utils?.leaveTypes?.() || [];
+  if (!types.length) {
+    sel.innerHTML = '<option value="">（無可用假別）</option>';
+    return;
+  }
+  // 依 display_order 排(utils.js cache 已 sorted)、value=code、label=name_zh
+  sel.innerHTML = '<option value="">請選擇假別</option>'
+    + types.map(t => `<option value="${escHtml(t.code)}">${escHtml(t.name_zh)}</option>`).join('');
 }
 
 async function loadBalance() {
@@ -162,59 +186,133 @@ function renderList(rows) {
     wrap.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text-dim);font-size:13px">無假單</div>`;
     return;
   }
+  const SU = window.HR_Utils;
   wrap.innerHTML = rows.map(r => {
-    const tName = window.HR_Utils.leaveTypeLabel(r.leave_type);
+    const tName = SU.leaveTypeLabel(r.leave_type);
     const hours = r.finalized_hours ?? r.hours ?? '—';
-    const canCancel = r.status === 'pending' && r.employee_id === currentUser.id;
+    // pending / pending_mgr / pending_ceo 都算「未走完」、員工本人可撤回
+    const cancellable = ['pending','pending_mgr','pending_ceo'].includes(r.status)
+                        && r.employee_id === currentUser.id;
+    const lateTag = r.late_application ? `<span class="mini-tag mini-tag-late">⚠ 補申請</span>` : '';
+    const proofTag = r.proof_status === 'required'
+      ? `<span class="mini-tag mini-tag-proof" title="需於 ${fmtDt(r.proof_due_at)} 前補繳">⏳ 待補證明</span>` : '';
+    const proofBtn = (r.proof_status === 'required' && r.employee_id === currentUser.id)
+      ? `<button class="btn btn-ghost btn-sm" onclick="uploadProof('${escHtml(r.id)}')">📎 提交證明</button>` : '';
+    const cancelBtn = cancellable
+      ? `<button class="btn btn-ghost btn-sm" onclick="cancelOne('${escHtml(r.id)}')">撤回</button>` : '';
     return `
       <div class="leave-row">
-        <div>${escHtml(tName)}</div>
-        <div><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span></div>
+        <div>${escHtml(tName)}${lateTag}${proofTag}</div>
+        <div><span class="pill ${SU.stageBadgeClass(r.status)}">${escHtml(SU.stageLabel(r.status))}</span></div>
         <div style="font-size:12px">${fmtDt(r.start_at)} ~ ${fmtDt(r.end_at)}</div>
         <div style="font-family:'DM Mono',monospace">${hours}h</div>
-        <div>${canCancel ? `<button class="btn btn-ghost btn-sm" onclick="cancelOne('${escHtml(r.id)}')">撤回</button>` : ''}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${proofBtn}${cancelBtn}</div>
       </div>
     `;
   }).join('');
 }
 
 let _est_timer = null;
-async function estimate() {
+function onTypeOrTimeChange() {
   clearTimeout(_est_timer);
-  _est_timer = setTimeout(_doEstimate, 250);
+  _est_timer = setTimeout(_doEstimateAndCheck, 250);
 }
-async function _doEstimate() {
+function _doEstimateAndCheck() {
+  const SU = window.HR_Utils;
+  const code = document.getElementById('f-type').value;
   const start = document.getElementById('f-start').value;
   const end   = document.getElementById('f-end').value;
-  const hint  = document.getElementById('est-hint');
-  if (!start || !end) { hint.style.display='none'; return; }
-  // 簡單預估:用 client time 算粗略時數;實際以 server 算為準
-  const startMs = new Date(start).getTime();
-  const endMs   = new Date(end).getTime();
-  if (endMs <= startMs) { hint.textContent='結束時間需晚於開始'; hint.style.display=''; return; }
-  const rough = Math.round((endMs - startMs) / 360000) / 10;
-  hint.textContent = `(粗估 ${rough} 小時;實際以伺服端依當下排班計算為準)`;
-  hint.style.display='';
+
+  // 假別 hint(advance + proof)
+  const ltHint = document.getElementById('lt-hint');
+  const lt = SU.leaveType(code);
+  if (lt) {
+    const adv = SU.advanceHintText(lt);
+    const proof = SU.proofHintText(lt);
+    ltHint.innerHTML = `<span class="lt-advance">⏰ ${escHtml(adv)}</span>`
+                     + (proof ? `<span class="lt-proof">📎 ${escHtml(proof)}</span>` : '');
+    ltHint.style.display = '';
+  } else {
+    ltHint.style.display = 'none';
+  }
+
+  // 粗估時數
+  const hint = document.getElementById('est-hint');
+  if (!start || !end) {
+    hint.style.display = 'none';
+  } else {
+    const startMs = new Date(start).getTime();
+    const endMs   = new Date(end).getTime();
+    if (endMs <= startMs) { hint.textContent='結束時間需晚於開始'; hint.style.display=''; }
+    else {
+      const rough = Math.round((endMs - startMs) / 360000) / 10;
+      hint.textContent = `(粗估 ${rough} 小時;實際以伺服端依當下排班計算為準)`;
+      hint.style.display='';
+    }
+  }
+
+  // advance time client-side check
+  const lateWarn = document.getElementById('late-warn');
+  const hardWarn = document.getElementById('hard-warn');
+  const lateRow  = document.getElementById('late-reason-row');
+  const submitBtn = document.getElementById('submit-btn');
+  lateWarn.style.display = 'none';
+  hardWarn.style.display = 'none';
+  lateRow.style.display = 'none';
+  submitBtn.disabled = false;
+  if (lt && start) {
+    const r = SU.checkAdvanceClient(lt, new Date(start).toISOString(), new Date());
+    if (!r.ok) {
+      hardWarn.textContent = `❌ 未達前置時間:${SU.advanceHintText(lt)}(目前距假期 ${Math.floor(r.gapHours)} 小時、不足 ${r.advanceHours} 小時)、無法送出`;
+      hardWarn.style.display = '';
+      submitBtn.disabled = true;
+    } else if (r.late) {
+      lateWarn.textContent = `⚠ 未達建議前置時間(目前距假期 ${Math.floor(r.gapHours)} 小時、建議 ${r.advanceHours} 小時)、請補充遲報原因`;
+      lateWarn.style.display = '';
+      lateRow.style.display = '';
+    }
+  }
 }
 
 async function submitRequest() {
+  const SU = window.HR_Utils;
   const leave_type = document.getElementById('f-type').value;
   const start = document.getElementById('f-start').value;
   const end   = document.getElementById('f-end').value;
   const reason = document.getElementById('f-reason').value.trim();
+  const lateReasonEl = document.getElementById('f-late-reason');
+  const lateRow = document.getElementById('late-reason-row');
+  if (!leave_type) { toast('請選擇假別','error'); return; }
   if (!start || !end) { toast('請填開始 / 結束時間','error'); return; }
   if (new Date(end).getTime() <= new Date(start).getTime()) {
     toast('結束時間需晚於開始','error'); return;
+  }
+  // soft late 時 late_reason 必填
+  let late_reason = null;
+  if (lateRow.style.display !== 'none') {
+    late_reason = lateReasonEl.value.trim();
+    if (!late_reason) { toast('請填遲報原因','error'); lateReasonEl.focus(); return; }
   }
   try {
     const startIso = new Date(start).toISOString();
     const endIso   = new Date(end).toISOString();
     const r = await api('/api/leaves', { method:'POST', body: JSON.stringify({
       leave_type, start_at: startIso, end_at: endIso, reason: reason || null,
+      late_reason,
     })});
-    if (!r.ok) { toast('申請失敗:'+(r.reason||'unknown'), 'error'); return; }
+    if (!r.ok) {
+      const msg = r.reason === 'ADVANCE_TIME_NOT_MET'
+        ? `未達前置時間(需 ${r.advance_hours} 小時、距假期僅 ${Math.floor(r.gap_hours)} 小時)`
+        : r.reason === 'LATE_REASON_REQUIRED'
+        ? '請填遲報原因'
+        : (r.reason || 'unknown');
+      toast('申請失敗:' + msg, 'error');
+      if (r.reason === 'LATE_REASON_REQUIRED') lateReasonEl.focus();
+      return;
+    }
     toast('已送出申請,等待主管審核');
     document.getElementById('f-reason').value = '';
+    if (lateReasonEl) lateReasonEl.value = '';
     await load();
   } catch(e) {
     toast('申請失敗:'+e.message, 'error');
@@ -224,10 +322,25 @@ async function submitRequest() {
 async function cancelOne(id) {
   if (!confirm('確定撤回此假單?')) return;
   try {
-    await api(`/api/leaves/${encodeURIComponent(id)}`, { method:'PUT', body: JSON.stringify({ decision: 'cancel' })});
+    // Phase 1.3:員工本人撤回走 DELETE(canCancel 檢查 actor.id===employee_id + pending_*)
+    await api(`/api/leaves/${encodeURIComponent(id)}`, { method:'DELETE' });
     toast('已撤回');
     await loadList();
   } catch(e) { toast('撤回失敗:'+e.message, 'error'); }
+}
+
+async function uploadProof(id) {
+  const url = prompt('請貼上證明文件的 URL(先把證明上傳到雲端再貼連結):');
+  if (!url || !url.trim()) return;
+  try {
+    const r = await api(`/api/leaves/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ action: 'submit_proof', proof_url: url.trim() }),
+    });
+    if (r && r.ok === false) { toast('提交失敗:' + (r.reason || r.error || 'unknown'), 'error'); return; }
+    toast('已提交證明');
+    await loadList();
+  } catch(e) { toast('提交失敗:'+e.message, 'error'); }
 }
 
 buildYearOptions();

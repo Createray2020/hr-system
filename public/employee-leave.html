@@ -115,6 +115,19 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 @keyframes mtin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 .m-toast-success{border-left:3px solid #4ADE80}.m-toast-error{border-left:3px solid #F87171}.m-toast-warn{border-left:3px solid #FB923C}
 
+/* Phase 1.4: stage / advance / proof / late UI */
+.lt-hint-row{margin-top:8px;padding:8px 10px;background:rgba(91,141,239,.06);border:0.5px solid rgba(91,141,239,.18);border-radius:8px;font-size:11px;line-height:1.6}
+.lt-advance{color:#7FBBFF}
+.lt-proof{color:#FBBF24;display:block;margin-top:2px}
+.late-warn{margin-top:8px;padding:8px 10px;background:rgba(251,146,60,.08);border:0.5px solid rgba(251,146,60,.25);border-radius:8px;font-size:11px;color:#FB923C;line-height:1.5}
+.hard-warn{margin-top:8px;padding:8px 10px;background:rgba(248,113,113,.08);border:0.5px solid rgba(248,113,113,.3);border-radius:8px;font-size:11px;color:#F87171;line-height:1.5}
+.s-pending_mgr,.s-pending_ceo{background:rgba(251,146,60,.12);color:#FB923C}
+.s-archived{background:rgba(74,222,128,.10);color:#86efac}
+.s-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
+.mini-tag{padding:2px 6px;border-radius:3px;font-size:10px;font-family:'DM Mono',monospace;margin-left:4px}
+.mini-tag-late{background:rgba(251,146,60,.15);color:#FB923C}
+.mini-tag-proof{background:rgba(251,191,36,.15);color:#FBBF24}
+
 /* ── 底部導航 ── */
 .mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
 .mobile-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-decoration:none}
@@ -145,6 +158,7 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
         <select class="m-select" id="f-type" onchange="onTypeChange()">
           <option value="">載入中…</option>
         </select>
+        <div class="lt-hint-row" id="lt-hint" style="display:none"></div>
       </div>
 
       <!-- 病假證明上傳 -->
@@ -207,6 +221,15 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
         <label class="m-label">原因（選填）</label>
         <textarea class="m-textarea" id="f-reason" placeholder="請填寫請假原因…"></textarea>
       </div>
+
+      <!-- soft late 時顯示 -->
+      <div class="m-form-row" id="late-reason-row" style="display:none">
+        <label class="m-label" style="color:#FB923C">遲報原因（必填）</label>
+        <textarea class="m-textarea" id="f-late-reason" placeholder="例:臨時家裡有事、無法事先通知"></textarea>
+      </div>
+
+      <div class="late-warn" id="late-warn" style="display:none"></div>
+      <div class="hard-warn" id="hard-warn" style="display:none"></div>
 
       <button class="submit-btn" id="submit-btn" onclick="submitLeave()">送出申請</button>
     </div>
@@ -318,9 +341,59 @@ function calculateHalfDayBoundaries(shift) {
 }
 
 function onTypeChange() {
-  const isSick = document.getElementById('f-type').value === 'sick';
+  const code = document.getElementById('f-type').value;
+  const isSick = code === 'sick';
   document.getElementById('upload-section').style.display = isSick ? '' : 'none';
   if (!isSick) clearFile();
+  // Phase 1.4: 顯示假別 hint(advance + proof)、re-check advance 狀態
+  renderTypeHint(code);
+  recheckAdvance();
+}
+
+function renderTypeHint(code) {
+  const SU = window.HR_Utils;
+  const lt = SU?.leaveType?.(code);
+  const el = document.getElementById('lt-hint');
+  if (!lt) { el.style.display = 'none'; return; }
+  const adv = SU.advanceHintText(lt);
+  const proof = SU.proofHintText(lt);
+  el.innerHTML = `<span class="lt-advance">⏰ ${adv}</span>`
+               + (proof ? `<span class="lt-proof">📎 ${proof}</span>` : '');
+  el.style.display = '';
+}
+
+// 假期起點(用 getSelectedRange 算的 start_at、若還沒選日期 / 班表沒載完則回 null)
+function getCurrentStartAt() {
+  try {
+    const r = getSelectedRange();
+    return r?.start_at || null;
+  } catch (_) { return null; }
+}
+
+function recheckAdvance() {
+  const SU = window.HR_Utils;
+  const code = document.getElementById('f-type').value;
+  const lt = SU?.leaveType?.(code);
+  const startAt = getCurrentStartAt();
+  const lateWarn = document.getElementById('late-warn');
+  const hardWarn = document.getElementById('hard-warn');
+  const lateRow  = document.getElementById('late-reason-row');
+  const submitBtn = document.getElementById('submit-btn');
+  lateWarn.style.display = 'none';
+  hardWarn.style.display = 'none';
+  lateRow.style.display = 'none';
+  submitBtn.disabled = false;
+  if (!lt || !startAt) return;
+  const r = SU.checkAdvanceClient(lt, startAt, new Date());
+  if (!r.ok) {
+    hardWarn.textContent = `❌ 未達前置時間:${SU.advanceHintText(lt)}(目前距假期 ${Math.floor(r.gapHours)} 小時、不足 ${r.advanceHours} 小時)、無法送出`;
+    hardWarn.style.display = '';
+    submitBtn.disabled = true;
+  } else if (r.late) {
+    lateWarn.textContent = `⚠ 未達建議前置時間(目前距假期 ${Math.floor(r.gapHours)} 小時、建議 ${r.advanceHours} 小時)、請補充遲報原因`;
+    lateWarn.style.display = '';
+    lateRow.style.display = '';
+  }
 }
 
 function onFileSelect(file) {
@@ -357,17 +430,19 @@ const CHIP_CLS = {
 };
 
 async function loadLeaveTypes() {
+  // 透過 HR_Utils 集中載(idempotent、cache 共用、其他頁面已 load 過就不會重 fetch)
+  // 同時拿到 advance_hours / requires_proof 等欄位、給 renderTypeHint / recheckAdvance 用
   const sel = document.getElementById('f-type');
   try {
-    const types = await apiFetch('/api/leaves?_resource=leave_types');
-    if (!Array.isArray(types) || types.length === 0) {
+    await window.HR_Utils.loadLeaveTypeLabels();
+    const types = window.HR_Utils.leaveTypes();
+    if (!types.length) {
       sel.innerHTML = '<option value="">（無可用假別）</option>';
       return;
     }
     LEAVE_LABELS = Object.fromEntries(types.map(t => [t.code, t.name_zh]));
-    sel.innerHTML = types.map(t =>
-      `<option value="${t.code}">${t.name_zh}</option>`
-    ).join('');
+    sel.innerHTML = '<option value="">請選擇假別</option>'
+                  + types.map(t => `<option value="${t.code}">${t.name_zh}</option>`).join('');
   } catch(e) {
     sel.innerHTML = '<option value="">載入失敗,請重新整理</option>';
     console.error('[leave_types]', e);
@@ -636,6 +711,8 @@ function estimateMultiDayHours(s, e) {
 function recalcHours() {
   const r = getSelectedRange();
   document.getElementById('hours-num').textContent = r ? r.hours : 0;
+  // Phase 1.4: 日期 / 時段 / 班表變動時、同步重算 advance 檢查
+  recheckAdvance();
 }
 
 async function submitLeave() {
@@ -654,6 +731,15 @@ async function submitLeave() {
     return;
   }
 
+  // soft late 時 late_reason 必填(client-side 先 prompt)
+  const lateRow = document.getElementById('late-reason-row');
+  const lateReasonEl = document.getElementById('f-late-reason');
+  let late_reason = null;
+  if (lateRow.style.display !== 'none') {
+    late_reason = lateReasonEl.value.trim();
+    if (!late_reason) { toast('請填遲報原因', 'warn'); lateReasonEl.focus(); return; }
+  }
+
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '送出中…';
   try {
@@ -668,21 +754,48 @@ async function submitLeave() {
     }
     // start_at/end_at 由 getSelectedRange() 組好(已含 +08:00 時區),
     // 後端 calculateLeaveHours 會用 schedule overlap 計算實際時數。
-    await apiFetch('/api/leaves', { method:'POST', body: JSON.stringify({
-      employee_id: currentUser.id, leave_type: type,
-      start_at: range.start_at, end_at: range.end_at, reason,
-      attachment_url, attachment_name
-    })});
+    // apiFetch throw on !res.ok、所以改用 fetch 直接拿 body 來判斷 reason
+    const session = await _sb.auth.getSession();
+    const token = session?.data?.session?.access_token;
+    const res = await fetch(API + '/api/leaves', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+      body: JSON.stringify({
+        employee_id: currentUser.id, leave_type: type,
+        start_at: range.start_at, end_at: range.end_at, reason,
+        late_reason,
+        attachment_url, attachment_name,
+      }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.ok === false) {
+      const msg = result.reason === 'ADVANCE_TIME_NOT_MET'
+        ? `未達前置時間(需 ${result.advance_hours} 小時、距假期僅 ${Math.floor(result.gap_hours)} 小時)`
+        : result.reason === 'LATE_REASON_REQUIRED'
+        ? '請填遲報原因'
+        : (result.reason || result.error || `${res.status}`);
+      toast('送出失敗:' + msg, 'error');
+      if (result.reason === 'LATE_REASON_REQUIRED' && lateReasonEl) lateReasonEl.focus();
+      btn.disabled = false; btn.textContent = '送出申請';
+      return;
+    }
     toast('✅ 假單已送出', 'success');
     document.getElementById('f-start').value = '';
     document.getElementById('f-end').value   = '';
     document.getElementById('f-reason').value = '';
+    if (lateReasonEl) lateReasonEl.value = '';
     selectedRange = 'full';
     resetSched();
     const sel = document.getElementById('f-type');
     if (sel.options.length) sel.selectedIndex = 0;
     document.getElementById('upload-section').style.display = 'none';
+    document.getElementById('lt-hint').style.display = 'none';
+    document.getElementById('late-reason-row').style.display = 'none';
+    document.getElementById('late-warn').style.display = 'none';
+    document.getElementById('hard-warn').style.display = 'none';
     clearFile();
+    // 重新 fetch 自己的假單列表
+    await loadLeaves();
   } catch(e) { toast('送出失敗:' + e.message, 'error'); }
   btn.disabled = false; btn.textContent = '送出申請';
 }
@@ -695,44 +808,104 @@ function filterList(status, el) {
 }
 
 function getFlowHtml(status) {
+  // 多階審核 4 個 step:員工 → 主管 → 執行長 → 人資
+  // legacy 'pending' 視為 'pending_mgr' 處理
+  const s = status === 'pending' ? 'pending_mgr' : status;
   const steps = [
     { label:'員工',  done: true },
-    { label:'主管',  done: status==='approved'||status==='rejected', current: status==='pending', reject: status==='rejected' },
-    { label:'執行長', done: status==='approved', current: false },
-    { label:'人資',  done: status==='approved', current: false },
+    { label:'主管',  done: ['pending_ceo','approved','archived'].includes(s),
+                     current: s === 'pending_mgr',
+                     reject: s === 'rejected' },
+    { label:'執行長', done: ['approved','archived'].includes(s),
+                     current: s === 'pending_ceo' },
+    { label:'人資',   done: s === 'archived' },
   ];
-  return steps.map((s, i) => {
+  return steps.map((s2, i) => {
     let dotCls = 'flow-dot-wait';
     let symbol = String(i+1);
-    if (s.reject)   { dotCls = 'flow-dot-reject'; symbol = '✗'; }
-    else if (s.done){ dotCls = 'flow-dot-done';   symbol = '✓'; }
-    else if (s.current){ dotCls = 'flow-dot-current'; symbol = '…'; }
+    if (s2.reject)   { dotCls = 'flow-dot-reject'; symbol = '✗'; }
+    else if (s2.done){ dotCls = 'flow-dot-done';   symbol = '✓'; }
+    else if (s2.current){ dotCls = 'flow-dot-current'; symbol = '…'; }
     const arrow = i < steps.length-1 ? '<span class="flow-arrow">›</span>' : '';
-    return `<div class="flow-step"><div class="flow-dot ${dotCls}">${symbol}</div><div class="flow-name">${s.label}</div></div>${arrow}`;
+    return `<div class="flow-step"><div class="flow-dot ${dotCls}">${symbol}</div><div class="flow-name">${s2.label}</div></div>${arrow}`;
   }).join('');
 }
 
+async function uploadProofMobile(id) {
+  const url = prompt('請貼上證明文件的 URL(先把證明上傳到雲端再貼連結):');
+  if (!url || !url.trim()) return;
+  try {
+    const res = await fetch(API + `/api/leaves/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: await authHeaders(),
+      body: JSON.stringify({ action: 'submit_proof', proof_url: url.trim() }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.ok === false) {
+      toast('提交失敗:' + (result.error || result.reason || `${res.status}`), 'error');
+      return;
+    }
+    toast('已提交證明', 'success');
+    await loadLeaves();
+  } catch(e) { toast('提交失敗:' + e.message, 'error'); }
+}
+
+async function cancelLeave(id) {
+  if (!confirm('確定撤回此假單?')) return;
+  try {
+    const res = await fetch(API + `/api/leaves/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: await authHeaders(),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      toast('撤回失敗:' + (e.error || e.reason || `${res.status}`), 'error');
+      return;
+    }
+    toast('已撤回', 'success');
+    await loadLeaves();
+  } catch(e) { toast('撤回失敗:' + e.message, 'error'); }
+}
+
+async function authHeaders() {
+  const session = await _sb.auth.getSession();
+  const token = session?.data?.session?.access_token;
+  return { 'Content-Type':'application/json', ...(token ? { 'Authorization':`Bearer ${token}` } : {}) };
+}
+
 function renderLeaves() {
-  const filtered = currentFilter ? allLeaves.filter(l=>l.status===currentFilter) : allLeaves;
+  const SU = window.HR_Utils;
+  // filter 'pending' tab 涵蓋所有 pending* 狀態
+  const filtered = currentFilter
+    ? allLeaves.filter(l => currentFilter === 'pending'
+        ? ['pending', 'pending_mgr', 'pending_ceo'].includes(l.status)
+        : l.status === currentFilter)
+    : allLeaves;
   const wrap = document.getElementById('leave-list');
   if (!filtered.length) {
     wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><div>沒有假單紀錄</div></div>`;
     return;
   }
   wrap.innerHTML = filtered.map(l => {
-    const statusBadge = l.status==='pending'
-      ? `<span class="status-badge s-pending">審批中</span>`
-      : l.status==='approved'
-      ? `<span class="status-badge s-approved">已核准</span>`
-      : `<span class="status-badge s-rejected">已退回</span>`;
+    const stageText = SU.stageLabel(l.status);
+    const stageCls  = SU.stageBadgeClass(l.status);
+    const statusBadge = `<span class="status-badge ${stageCls}">${stageText}</span>`;
+    const lateTag  = l.late_application ? `<span class="mini-tag mini-tag-late">⚠ 補申請</span>` : '';
+    const proofTag = l.proof_status === 'required'
+      ? `<span class="mini-tag mini-tag-proof">⏳ 待補證明</span>` : '';
+    const proofBtn = (l.proof_status === 'required' && l.employee_id === currentUser.id)
+      ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="uploadProofMobile('${l.id}')">📎 提交證明</button>` : '';
+    const cancelBtn = (['pending','pending_mgr','pending_ceo'].includes(l.status) && l.employee_id === currentUser.id)
+      ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;margin-left:6px" onclick="cancelLeave('${l.id}')">撤回</button>` : '';
     return `<div class="leave-card">
       <div class="leave-card-top">
-        <span class="leave-type-chip ${CHIP_CLS[l.leave_type]||'chip-personal'}">${LEAVE_LABELS[l.leave_type]||l.leave_type}</span>
+        <span class="leave-type-chip ${CHIP_CLS[l.leave_type]||'chip-personal'}">${LEAVE_LABELS[l.leave_type]||l.leave_type}${lateTag}${proofTag}</span>
         ${statusBadge}
       </div>
       <div class="leave-dates">${l.start_date} ～ ${l.end_date}</div>
       <div class="leave-days-badge">共 ${l.days} 天${l.attachment_name ? ` <span title="${l.attachment_name}">📎</span>` : ''}</div>
       <div class="flow-row">${getFlowHtml(l.status)}</div>
+      ${proofBtn || cancelBtn ? `<div>${proofBtn}${cancelBtn}</div>` : ''}
     </div>`;
   }).join('');
 }
@@ -765,6 +938,7 @@ async function loadLeaves() {
 })();
 </script>
 
+<script src="/js/utils.js"></script>
 <script src="/js/pwa.js"></script>
 <script>PWA.init();</script>
 </body>
