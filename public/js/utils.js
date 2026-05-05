@@ -1,22 +1,24 @@
 // public/js/utils.js — 前端共用 helpers
 //
-// 目前提供：
-//   loadLeaveTypeLabels()    — 從 /api/leaves?_resource=leave_types fetch、cache 在 module
-//                              (idempotent、第二次呼叫不會重 fetch)
-//   leaveTypeLabel(code)     — name_zh、找不到回 code(列表 / chip / dropdown 用)
-//   leaveTypeLabelFull(code) — name_zh(code)、詳情 / debug 用
+// Phase 1.0 提供:loadLeaveTypeLabels / leaveTypeLabel / leaveTypeLabelFull
+// Phase 1.4 加:leaveType / stageLabel / stageBadgeClass / advanceHintText /
+//             proofHintText / gapHoursClient / checkAdvanceClient
 //
 // 用法(HTML 頁面):
 //   <script src="/js/utils.js"></script>
 //   ...
 //   await window.HR_Utils.loadLeaveTypeLabels();   // init 時 await 一次
-//   element.textContent = window.HR_Utils.leaveTypeLabel('menstrual');  // → '生理假'
+//   const lt = window.HR_Utils.leaveType('annual');
+//   element.textContent = window.HR_Utils.leaveTypeLabel('menstrual');
+//   chip.className = 'badge ' + window.HR_Utils.stageBadgeClass('pending_mgr');
 //
 // 注意:/api/leaves?_resource=leave_types 不需 auth(api/leaves/index.js:39 已標註)、
 // 故本檔 fetch 不需要帶 Authorization header。
 
 (function () {
-  let _labels = {};       // code → name_zh
+  let _types = [];          // 完整 row 陣列(Phase 1.4 起)
+  let _byCode = {};         // code → row(完整欄位)
+  let _labels = {};         // code → name_zh(legacy compat)
   let _loadPromise = null;
 
   async function loadLeaveTypeLabels() {
@@ -27,6 +29,8 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const types = await res.json();
         if (Array.isArray(types)) {
+          _types = types;
+          _byCode = Object.fromEntries(types.map(t => [t.code, t]));
           _labels = Object.fromEntries(types.map(t => [t.code, t.name_zh]));
         }
       } catch (e) {
@@ -36,6 +40,12 @@
       return _labels;
     })();
     return _loadPromise;
+  }
+
+  /** 完整 row(含 advance_hours / requires_proof 等)。找不到回 null。 */
+  function leaveType(code) {
+    if (!code) return null;
+    return _byCode[code] || null;
   }
 
   function leaveTypeLabel(code) {
@@ -49,9 +59,96 @@
     return name ? `${name}(${code})` : code;
   }
 
+  // ─── stage label / badge class(Phase 1.4)──────────────────
+  // 'pending'(legacy)= 'pending_mgr'(向後相容)
+  const STAGE_LABEL = {
+    pending:      '待主管審核',
+    pending_mgr:  '待主管審核',
+    pending_ceo:  '待執行長審核',
+    approved:     '已核准',
+    archived:     '已歸檔',
+    rejected:     '已退回',
+    cancelled:    '已撤回',
+  };
+  const STAGE_BADGE = {
+    pending:     'badge-pending',
+    pending_mgr: 'badge-pending',
+    pending_ceo: 'badge-pending',
+    approved:    'badge-approved',
+    archived:    'badge-archived',
+    rejected:    'badge-rejected',
+    cancelled:   'badge-cancelled',
+  };
+  function stageLabel(status) { return STAGE_LABEL[status] || status || ''; }
+  function stageBadgeClass(status) { return STAGE_BADGE[status] || 'badge-pending'; }
+
+  // ─── 前置時間提示文字 ────────────────────────────────────
+  // advance_hours = 0 → '當天可申請'
+  // advance_hours = 24 → '需於 1 天前申請'(hard)/'建議於 1 天前申請、緊急可當天'(soft)
+  // 24 整數倍轉天、不整除顯示小時
+  function advanceHintText(lt) {
+    if (!lt) return '';
+    const h = Number(lt.advance_hours || 0);
+    if (h === 0) return '當天可申請';
+    const isHard = lt.advance_rule === 'hard';
+    const days = h / 24;
+    const text = Number.isInteger(days) ? `${days} 天前` : `${h} 小時前`;
+    return isHard ? `需於 ${text}申請` : `建議於 ${text}申請(緊急狀況可當天申請)`;
+  }
+
+  // ─── 證明文件提示文字 ────────────────────────────────────
+  function proofHintText(lt) {
+    if (!lt || !lt.requires_proof) return '';
+    const grace = Number(lt.proof_grace_days || 0);
+    if (grace === 0) return '需檢附證明文件';
+    return `需檢附證明文件、可於假期結束後 ${grace} 日內補繳`;
+  }
+
+  // ─── 申請時間 → 假期起點 差幾小時(client-side、跟 lib/leave/advance-time.js 同邏輯)─
+  function gapHoursClient(submittedAt, leaveStartAt) {
+    const subMs = toMs(submittedAt);
+    const startMs = toMs(leaveStartAt);
+    return (startMs - subMs) / 3600000;
+  }
+  function toMs(t) {
+    if (t instanceof Date) return t.getTime();
+    if (typeof t === 'number') return t;
+    if (typeof t === 'string') {
+      const ms = Date.parse(t);
+      if (Number.isFinite(ms)) return ms;
+    }
+    return NaN;
+  }
+
+  // ─── client-side advance time 檢查(跟後端 validateAdvanceTime 對齊)──
+  // 回 { ok, late, gapHours, advanceHours }
+  //   advance_hours=0 → 永遠 ok=true, late=false
+  //   gap >= advance_hours → ok=true, late=false
+  //   gap < advance_hours, hard → ok=false, late=false
+  //   gap < advance_hours, soft → ok=true, late=true
+  function checkAdvanceClient(lt, leaveStartAt, submittedAt) {
+    if (!lt) return { ok: true, late: false };
+    const advance = Number(lt.advance_hours || 0);
+    if (advance === 0) return { ok: true, late: false, gapHours: null, advanceHours: 0 };
+    const gap = gapHoursClient(submittedAt || new Date(), leaveStartAt);
+    if (!Number.isFinite(gap)) return { ok: true, late: false };
+    if (gap >= advance) return { ok: true, late: false, gapHours: gap, advanceHours: advance };
+    if (lt.advance_rule === 'hard') {
+      return { ok: false, late: false, gapHours: gap, advanceHours: advance };
+    }
+    return { ok: true, late: true, gapHours: gap, advanceHours: advance };
+  }
+
   window.HR_Utils = {
     loadLeaveTypeLabels,
     leaveTypeLabel,
     leaveTypeLabelFull,
+    leaveType,
+    stageLabel,
+    stageBadgeClass,
+    advanceHintText,
+    proofHintText,
+    gapHoursClient,
+    checkAdvanceClient,
   };
 })();

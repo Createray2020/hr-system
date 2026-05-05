@@ -38,9 +38,12 @@ export default async function handler(req, res) {
   // ── GET leave_types 清單（前端假別下拉用）──────────────────
   // 不需要登入身份；這只是 active leave types 的中繼資料。
   if (req.method === 'GET' && req.query._resource === 'leave_types') {
+    // Phase 1.4: SELECT 補 advance_hours / advance_rule / requires_proof / proof_grace_days
+    // 給 public/js/utils.js 的 advanceHintText / proofHintText / checkAdvanceClient 用。
+    // 純加欄位、無 row-level filter / 業務邏輯改動。
     const { data, error } = await supabaseAdmin
       .from('leave_types')
-      .select('code, name_zh, is_paid, has_balance, legal_max_days_per_year, display_order, description')
+      .select('code, name_zh, is_paid, has_balance, legal_max_days_per_year, display_order, description, advance_hours, advance_rule, requires_proof, proof_grace_days')
       .eq('is_active', true)
       .order('display_order');
     if (error) return res.status(500).json({ error: error.message });
