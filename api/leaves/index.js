@@ -197,7 +197,11 @@ async function handleNewPost(req, res) {
   const caller = await requireAuth(req, res);
   if (!caller) return;
 
-  const { leave_type, start_at, end_at, reason, attachment_url, attachment_name } = req.body;
+  const {
+    leave_type, start_at, end_at, reason,
+    late_reason,                            // Phase 1.3a: soft late 時必填
+    attachment_url, attachment_name,
+  } = req.body;
   const target_employee_id = req.body.employee_id || caller.id;
   if (!target_employee_id) return res.status(400).json({ error: 'employee_id required' });
 
@@ -216,8 +220,11 @@ async function handleNewPost(req, res) {
   try {
     const r = await submitLeaveRequest(makeLeaveRepo(), {
       employee_id: target_employee_id, leave_type, start_at, end_at, reason,
+      late_reason,
       attachment_url, attachment_name,
     });
+    // r.ok=false 時 r 已含 reason / advance_hours / gap_hours / requested_hours / remaining 等
+    // 前端依 reason 決定 UX(ADVANCE_TIME_NOT_MET / LATE_REASON_REQUIRED / INSUFFICIENT_BALANCE 等)
     if (!r.ok) return res.status(400).json(r);
     return res.status(201).json({ ok: true, request: r.request });
   } catch (e) {
