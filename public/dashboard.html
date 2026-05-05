@@ -174,12 +174,35 @@ window.onload = async () => {
   await new Promise(r => setTimeout(r, 650));
   setWelcome();
   await applyRoleFilter();
+  await loadDeptScope();   // Phase 1.4.5:純主管限本部門 employee id Set、HR+ 設 null
   // 載入假別中文名(idempotent、給 pendingLeaves render 用)
   await window.HR_Utils?.loadLeaveTypeLabels?.();
   try {
     await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
+
+// Stop-gap:純主管(is_manager=true 且非 backoffice role)只看自己部門的員工 / 出勤 / 假單。
+// null = HR / CEO / chairman / admin(不過濾、看全公司)
+// Set = 純主管、本部門 employee id 集合(含空 Set fail-safe)
+// 沿用 calendar.html L188-246 pattern。
+let myDeptEmpIds = null;
+async function loadDeptScope() {
+  const u = await waitForCurrentUser();
+  if (!u) { myDeptEmpIds = new Set(); return; }
+  if (window.Roles?.isBackofficeRole(u)) { myDeptEmpIds = null; return; }
+  const deptId = u.dept_id;
+  if (!deptId) { myDeptEmpIds = new Set(); return; }
+  try {
+    const emps = await window.api('/api/employees?status=active');
+    myDeptEmpIds = new Set((emps || []).filter(e => e.dept_id === deptId).map(e => e.id));
+  } catch (_) {
+    myDeptEmpIds = new Set();
+  }
+}
+function inScope(empId) {
+  return myDeptEmpIds === null || myDeptEmpIds.has(empId);
+}
 
 // 輪詢等待 layout.js 設好 window.currentUser、避免 race
 async function waitForCurrentUser(maxMs = 5000) {
@@ -222,7 +245,7 @@ async function loadDashboard() {
   const ym  = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const today = now.toISOString().split('T')[0];
 
-  const [leaveStats, employees, salaryData, todayAtt] = await Promise.all([
+  const [leaveStats, employeesAll, salaryData, todayAttAll] = await Promise.all([
     api('/api/leaves?stats=true'),
     api('/api/employees?status=active'),
     api(`/api/salary?v=2&year=${now.getFullYear()}&month=${now.getMonth()+1}`)
@@ -230,6 +253,10 @@ async function loadDashboard() {
       .catch(()=>[]),
     api(`/api/attendance?month=${ym}`).catch(()=>[]),
   ]);
+
+  // Phase 1.4.5:純主管 client-side filter 本部門。HR+ inScope 永遠 true。
+  const employees = (employeesAll || []).filter(e => inScope(e.id));
+  const todayAtt  = (todayAttAll  || []).filter(a => inScope(a.employee_id));
 
   // Stats bar
   document.getElementById('st-emp').textContent   = employees.length;
@@ -250,7 +277,9 @@ async function loadDashboard() {
   // 舊 'pending'、stat 卡也順手用 client-side 計數修正)
   const allLeavesForCard = await api('/api/leaves');
   const PENDING_STAGES = ['pending', 'pending_mgr', 'pending_ceo'];
-  const pendingLeaves = (allLeavesForCard || []).filter(r => PENDING_STAGES.includes(r.status));
+  const pendingLeaves = (allLeavesForCard || [])
+    .filter(r => PENDING_STAGES.includes(r.status))
+    .filter(r => inScope(r.employee_id)); // Phase 1.4.5: 純主管只看本部門
   // 修正 stat 卡計數(/api/leaves?stats=true 是 legacy 只算 'pending')
   document.getElementById('st-leave').textContent = pendingLeaves.length;
   document.getElementById('ql-pending').textContent = pendingLeaves.length;
