@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   clockIn, clockOut,
   pickSegmentForClockIn, calculateLateMinutes, calculateEarlyLeaveMinutes,
+  isoToMinutesOfDay, isoToTaipeiDateString,
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
 } from '../lib/attendance/clock.js';
 
@@ -239,5 +240,82 @@ describe('helpers', () => {
       { segment_no: 2, start_time: '14:00', end_time: '18:00' },
     ];
     expect(pickSegmentForClockIn(segs, '2026-04-26T10:00:00+08:00').segment_no).toBe(1);
+  });
+});
+
+// ─── Phase: timezone-aware helpers(修 live punch 全 early_leave bug)───
+describe('isoToMinutesOfDay — 多種 timezone 形式回相同值', () => {
+  // 18:09 台灣 = 10:09 UTC = 1089 wall-clock minutes
+  it('UTC Z (.000Z 結尾) → Taipei wall-clock minutes', () => {
+    expect(isoToMinutesOfDay('2026-05-05T10:09:00.000Z')).toBe(1089);
+  });
+
+  it('+08:00 顯式時區 → 同樣 1089', () => {
+    expect(isoToMinutesOfDay('2026-05-05T18:09:00+08:00')).toBe(1089);
+  });
+
+  it('+0000 顯式 UTC(無冒號 / 4 位數)→ 同樣 1089', () => {
+    // 注意:'+00' (兩位數)在 Node ISO T 形式解析為 NaN、必須用 +0000 / +00:00 / Z
+    expect(isoToMinutesOfDay('2026-05-05T10:09:00.123+0000')).toBe(1089);
+  });
+
+  it('PG style 空格分隔 + +00 → 同樣 1089', () => {
+    expect(isoToMinutesOfDay('2026-05-05 10:09:00+00')).toBe(1089);
+  });
+
+  it('凌晨 00:30 台灣 = 前日 16:30 UTC → 30', () => {
+    expect(isoToMinutesOfDay('2026-05-05T16:30:00.000Z')).toBe(30);
+  });
+
+  it('invalid date 字串 → 0', () => {
+    expect(isoToMinutesOfDay('not a date')).toBe(0);
+    expect(isoToMinutesOfDay('')).toBe(0);
+  });
+});
+
+describe('isoToTaipeiDateString — UTC 跨日邊界轉台灣日期', () => {
+  it('UTC 16:30 → 台灣隔日 00:30、回隔日日期', () => {
+    expect(isoToTaipeiDateString('2026-05-05T16:30:00.000Z')).toBe('2026-05-06');
+  });
+
+  it('UTC 15:59:59 → 台灣 23:59:59、回當日', () => {
+    expect(isoToTaipeiDateString('2026-05-05T15:59:59.000Z')).toBe('2026-05-05');
+  });
+
+  it('+08:00 顯式時區 → 字串日期跟 wall-clock 一致', () => {
+    expect(isoToTaipeiDateString('2026-05-05T09:00:00+08:00')).toBe('2026-05-05');
+    expect(isoToTaipeiDateString('2026-05-05T23:59:00+08:00')).toBe('2026-05-05');
+  });
+
+  it('invalid date → 空字串', () => {
+    expect(isoToTaipeiDateString('not a date')).toBe('');
+  });
+});
+
+describe('calculateLateMinutes / EarlyLeaveMinutes — UTC ISO 輸入(live punch)', () => {
+  it('calculateEarlyLeaveMinutes:18:09 台灣 UTC 形式、end=18:00 → 0(不算早退)', () => {
+    // 修補前的 bug:UTC Z 抓到 10:09、跟 18:00 比、會誤算 471 分早退
+    expect(calculateEarlyLeaveMinutes('2026-05-05T10:09:00.000Z', '2026-05-05', '18:00', false)).toBe(0);
+  });
+
+  it('calculateEarlyLeaveMinutes:17:30 台灣 UTC 形式、end=18:00 → 30', () => {
+    expect(calculateEarlyLeaveMinutes('2026-05-05T09:30:00.000Z', '2026-05-05', '18:00', false)).toBe(30);
+  });
+
+  it('calculateLateMinutes:09:05 台灣 UTC 形式、start=09:00 → 5', () => {
+    expect(calculateLateMinutes('2026-05-05T01:05:00.000Z', '2026-05-05', '09:00')).toBe(5);
+  });
+
+  it('calculateLateMinutes:08:55 台灣 UTC 形式、start=09:00 → 0(早到 max 蓋掉)', () => {
+    expect(calculateLateMinutes('2026-05-05T00:55:00.000Z', '2026-05-05', '09:00')).toBe(0);
+  });
+
+  it('calculateLateMinutes:09:00 整點台灣 UTC 形式 → 0', () => {
+    expect(calculateLateMinutes('2026-05-05T01:00:00.000Z', '2026-05-05', '09:00')).toBe(0);
+  });
+
+  it('calculateEarlyLeaveMinutes:跨日班、UTC 隔日 21:30 = 台灣隔日 05:30、end=06:00 → 30', () => {
+    // 跨日班 work_date='2026-04-26'、隔日 5:30 台灣打卡
+    expect(calculateEarlyLeaveMinutes('2026-04-26T21:30:00.000Z', '2026-04-26', '06:00', true)).toBe(30);
   });
 });
