@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   leave_type    TEXT NOT NULL,
   start_date    DATE NOT NULL,
   end_date      DATE NOT NULL,
-  days          INTEGER NOT NULL,
+  -- 2026-05-05: 改 NUMERIC 支援半天 / 自訂時段，見 migrations/2026_05_05_leave_days_to_numeric.sql
+  days          NUMERIC(5,2) NOT NULL,
   reason        TEXT,
   status        TEXT DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
   applied_at    TIMESTAMPTZ DEFAULT NOW(),
