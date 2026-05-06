@@ -214,10 +214,11 @@ async function waitForCurrentUser(maxMs = 5000) {
   return null;
 }
 
-// Stop-gap：非 HR / CEO / chairman 隱藏薪資與員工資料區塊；
-// 主管與員工的「請假審批」卡也隱藏（連結指向錯頁、append query 沒意義）。
+// 非 HR / CEO / chairman 隱藏薪資 / 員工資料 / 請假審批三張入口卡。
+// 「請假審批」是 HR-only widget、href 已是 /leave-admin.html(commit 5aec1d0 修)、
+// 但主管 / 員工按進去看到的不是自己職責(leave-admin 對非 HR 無意義)、所以一併隱藏。
 // 用 display:none 而非 remove、保留子元素給 loadDashboard 寫入時 getElementById 可找到。
-// 真正的後端 role filter 在 5/1 後 backlog 處理。
+// 後端 dept-scope filter 已於 Phase 1.4.5 / Phase 2 收緊(commit 87109fe / 20602d1)。
 async function applyRoleFilter() {
   // 等 currentUser 載入再判斷、否則 race 中 isBackofficeRole(undefined)=false 會誤隱藏 HR 元素
   const u = await waitForCurrentUser();
