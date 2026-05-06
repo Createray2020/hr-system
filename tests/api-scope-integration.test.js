@@ -22,7 +22,8 @@ vi.mock('../lib/supabase.js', () => {
     c.gte = vi.fn(() => c); c.lte = vi.fn(() => c);
     c.lt = vi.fn(() => c); c.gt = vi.fn(() => c);
     c.or = vi.fn(() => c); c.order = vi.fn(() => c); c.limit = vi.fn(() => c);
-    c.single = vi.fn(() => Promise.resolve({ data: null, error: { code: 'PGRST116' } }));
+    // 預設成功(data=null + error=null)、scope 通過時 200;若特定 test 要 404、自己 override
+    c.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
     c.maybeSingle = vi.fn(() => Promise.resolve({ data: null, error: null }));
     // 所有的 dept emp ids fetch 預設回空 array(對 employees table)
     c.then = (onF, onR) => Promise.resolve({ data: [], error: null }).then(onF, onR);
@@ -57,6 +58,7 @@ vi.mock('../lib/push.js', () => ({
 
 const { default: leavesHandler } = await import('../api/leaves/index.js');
 const { default: employeesHandler } = await import('../api/employees/index.js');
+const { default: employeesByIdHandler } = await import('../api/employees/[id].js');
 const { default: schedulesHandler } = await import('../api/schedules/index.js');
 
 function makeReqRes({ method = 'GET', query = {}, body = null } = {}) {
@@ -171,6 +173,53 @@ describe('/api/employees 通用 GET — scope dispatch', () => {
     await employeesHandler(req, res);
     const eq = calls.eqs.find(e => e.table === 'employees' && e.col === 'id');
     expect(eq).toBeUndefined();
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// /api/employees/[id] GET — row-level scope filter
+// ════════════════════════════════════════════════════════════
+describe('/api/employees/[id] GET — row-level scope filter', () => {
+  it('員工查自己 → 通過(200)', async () => {
+    overrides.caller = EMP;
+    const [req, res] = makeReqRes({ query: { id: 'E1' } });
+    await employeesByIdHandler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('員工查他人 → 403', async () => {
+    overrides.caller = EMP;
+    const [req, res] = makeReqRes({ query: { id: 'E_other' } });
+    await employeesByIdHandler(req, res);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('主管查自己 → 200(scope.selfId 永遠通過)', async () => {
+    overrides.caller = MGR;
+    const [req, res] = makeReqRes({ query: { id: 'M1' } });
+    await employeesByIdHandler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('主管查不在本部門的他人 → 403(mock deptEmpIds 為空)', async () => {
+    overrides.caller = MGR;
+    const [req, res] = makeReqRes({ query: { id: 'E_other_dept' } });
+    await employeesByIdHandler(req, res);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('HR 查任何人 → 200(scope.mode=all、永遠通過)', async () => {
+    overrides.caller = HR;
+    const [req, res] = makeReqRes({ query: { id: 'E_any' } });
+    await employeesByIdHandler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('未登入查任何 id → 401(requireAuth 擋)', async () => {
+    // overrides.caller = null(beforeEach 預設)
+    const [req, res] = makeReqRes({ query: { id: 'E1' } });
+    await employeesByIdHandler(req, res);
+    expect(res.statusCode).toBe(401);
   });
 });
 

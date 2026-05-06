@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 import { syncDeptFields } from '../../lib/dept-sync.js';
 import { addDeptNameSingle } from '../../lib/dept-name-mapper.js';
+import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -29,6 +30,14 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const caller = await requireAuth(req, res);
     if (!caller) return;
+
+    // Phase 2 收尾:row-level scope filter 對齊通用 GET (commit 20602d1)
+    // 員工 → 只能查自己;主管 → 自己 + 本部門;HR/CEO/admin → 任何人
+    // 放在 column 計算之前、403 時可省一次 .from('employees').select 的 DB round-trip
+    const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+    if (!canSeeEmployee(scope, id)) {
+      return res.status(403).json({ error: 'Forbidden:無權看此員工' });
+    }
 
     const isSelf = caller.id === id;
     const isHR = isBackofficeRole(caller);
