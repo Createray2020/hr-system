@@ -60,10 +60,11 @@
     {
       title: '人員管理',
       items: [
-        { page:'employees',          icon:'👥', label:'員工資料', href:'/employees.html', gate: u => window.Roles?.isBackofficeRole(u) },
-        { page:'orgchart',           icon:'🗂️', label:'組織圖',   href:'/orgchart.html', gate: isMgrOrHR },
-        { page:'departments',        icon:'🏢', label:'部門管理', href:'/departments.html', gate: isHRish },
-        { page:'announcement-admin', icon:'📝', label:'公告管理', href:'/announcement-admin.html', gate: u => window.Roles?.canManageAnnouncements(u) },
+        { page:'employees',          icon:'👥', label:'員工資料',     href:'/employees.html', gate: u => window.Roles?.isBackofficeRole(u) },
+        { page:'orgchart',           icon:'🗂️', label:'組織圖',       href:'/orgchart.html', gate: isMgrOrHR },
+        { page:'departments',        icon:'🏢', label:'部門管理',     href:'/departments.html', gate: isHRish },
+        { page:'resigned-archive',   icon:'📁', label:'離職員工檔案', href:'/resigned-archive.html', gate: isHRish },
+        { page:'announcement-admin', icon:'📝', label:'公告管理',     href:'/announcement-admin.html', gate: u => window.Roles?.canManageAnnouncements(u) },
       ]
     },
     {
