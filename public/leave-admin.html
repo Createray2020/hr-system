@@ -380,20 +380,28 @@ async function openDetail(id) {
   // stage-aware 按鈕
   const buttons = document.getElementById('action-buttons');
   buttons.innerHTML = '';
+  // 移除前次的 hint(每次 openDetail 重置)
+  const oldHint = document.getElementById('action-hint');
+  if (oldHint) oldHint.remove();
+
   // Phase 1.6:proof_status='expired' + status pending_* → HR 終止 row(對齊 lib canTerminate)
   // 隱藏 approve / reject 按鈕、只顯示「📛 終止此申請」(後端 422 守、前端 fail-fast)
   const isExpiredPending = l.proof_status === 'expired'
                             && (stage === 'pending_mgr' || stage === 'pending_ceo');
   const canTerminateNow  = isExpiredPending && isHR(u);
 
-  // 主管 stage:caller 是直屬主管(同 dept_id)或 elevated 才能批
-  // 執行長 stage:elevated 才能批
-  // HR + status=approved:歸檔
-  const canApproveMgr = stage === 'pending_mgr'
-    && (isElevated(u) || (u.is_manager === true /* simplified:不在前端嚴格比 dept */ ));
-  const canApproveCeo = stage === 'pending_ceo' && isElevated(u);
-  const canApproveAny = (canApproveMgr || canApproveCeo) && !isExpiredPending;  // expired 不能 approve / reject
-  const canArchiveNow = isHR(u) && l.status === 'approved';
+  // Phase 2.x 嚴格 spec(對齊 lib canReview):
+  //   pending_mgr:同部門 + is_manager=true + 非自己
+  //   pending_ceo:role ∈ ('ceo','chairman') + 非自己
+  // 無 elevated bypass、HR/admin 不能審(但仍可看 audit + archive)
+  const isSelfReview     = u.id === l.employee_id;
+  const isSameDeptMgr    = u.is_manager === true && u.dept_id && l.employee_dept_id
+                           && u.dept_id === l.employee_dept_id;
+  const isCeoOrChairman2 = u.role === 'ceo' || u.role === 'chairman';
+  const canApproveMgr    = stage === 'pending_mgr' && isSameDeptMgr     && !isSelfReview;
+  const canApproveCeo    = stage === 'pending_ceo' && isCeoOrChairman2  && !isSelfReview;
+  const canApproveAny    = (canApproveMgr || canApproveCeo) && !isExpiredPending;
+  const canArchiveNow    = isHR(u) && l.status === 'approved';
 
   if (canTerminateNow) {
     buttons.innerHTML = `<button class="btn btn-danger" onclick="onTerminate()">📛 終止此申請</button>`;
@@ -405,6 +413,20 @@ async function openDetail(id) {
     `;
   } else if (canArchiveNow) {
     buttons.innerHTML = `<button class="btn btn-primary" onclick="onArchive()">📦 歸檔</button>`;
+  } else if (stage === 'pending_mgr' || stage === 'pending_ceo') {
+    // 不合法 actor 顯示 hint(優先順序:self-approval > stage hint)
+    let hintText;
+    if (isSelfReview) {
+      hintText = 'ℹ 不可審核自己的假單';
+    } else if (stage === 'pending_mgr') {
+      const mgrName = l.employee_manager_name || '部門主管';
+      hintText = `ℹ 此假單由 ${escHtml(mgrName)} 審核`;
+    } else {
+      hintText = 'ℹ 此假單由執行長 / 董事長審核';
+    }
+    buttons.insertAdjacentHTML('beforebegin',
+      `<div id="action-hint" style="font-size:12px;color:var(--text-dim);background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.2);padding:8px 12px;border-radius:6px;margin-right:auto">${hintText}</div>`
+    );
   }
 
   document.getElementById('detail-modal').classList.add('open');
