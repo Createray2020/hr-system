@@ -371,18 +371,40 @@ function updatePunchUI(data) {
   }
 }
 
+// GPS Phase A:取 GPS 座標(失敗回 null、soft mode 不擋打卡)
+async function getGeo() {
+  if (!navigator.geolocation) return null;
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      }),
+      (err) => {
+        console.warn('GPS fail:', err.code, err.message);
+        resolve(null);  // soft mode:失敗也送 punch
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  });
+}
+
 async function doPunch(type) {
   if (!currentUser) return;
   const btn = document.getElementById(type === 'in' ? 'btn-in' : 'btn-out');
   btn.disabled = true;
-  btn.textContent = '打卡中…';
+  btn.textContent = '📍 取得位置…';
   try {
-    // 改走新版 path:會自動 link schedule_id / segment_no、薪資結算才能正確 JOIN。
-    // employee_id 由後端從 JWT 取(不接受 client 傳)、timestamp 由 server 產生。
+    // GPS Phase A:先取 GPS、再 POST(soft mode、失敗回 null 也送)
+    const geo = await getGeo();
+    btn.textContent = '打卡中…';
+    // 改走新版 path：會自動 link schedule_id / segment_no、薪資結算才能正確 JOIN。
+    // employee_id 由後端從 JWT 取（不接受 client 傳）、timestamp 由 server 產生。
     const action = type === 'in' ? 'clock_in' : 'clock_out';
     await apiFetch('/api/attendance', {
       method: 'POST',
-      body: JSON.stringify({ action })
+      body: JSON.stringify({ action, geo })
     });
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;

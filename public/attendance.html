@@ -191,11 +191,40 @@ function renderHistory(rows) {
   `).join('');
 }
 
+// GPS Phase A:取 GPS 座標(失敗回 null、soft mode 不擋打卡)
+async function getGeo() {
+  if (!navigator.geolocation) return null;
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      }),
+      (err) => {
+        console.warn('GPS fail:', err.code, err.message);
+        resolve(null);  // soft mode:失敗也送 punch
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  });
+}
+
 async function doPunch(action) {
   const msg = document.getElementById('punch-msg');
-  msg.textContent = '處理中…';
+  const btnIn  = document.getElementById('btn-in');
+  const btnOut = document.getElementById('btn-out');
+  // disable 兩個 button、避免雙擊
+  btnIn.disabled  = true;
+  btnOut.disabled = true;
+  msg.textContent = '取得位置…';
   try {
-    const r = await api('/api/attendance', { method: 'POST', body: JSON.stringify({ action }) });
+    const geo = await getGeo();
+    msg.textContent = '送出中…';
+    const r = await api('/api/attendance', {
+      method: 'POST',
+      body: JSON.stringify({ action, geo }),
+    });
     msg.textContent = action === 'clock_in' ? '上班打卡成功' : '下班打卡成功';
     toast(msg.textContent);
     await load();
@@ -206,6 +235,9 @@ async function doPunch(action) {
     else if (t.includes('NO_OPEN_ATTENDANCE')) msg.textContent = '找不到要下班的紀錄(請先打上班卡)';
     else msg.textContent = '打卡失敗:' + t;
     toast(msg.textContent, 'error');
+    // 失敗時恢復按鈕,讓 user 可重試(load() 會 re-evaluate disabled state、不在這 reset)
+    btnIn.disabled  = false;
+    btnOut.disabled = false;
   }
 }
 
