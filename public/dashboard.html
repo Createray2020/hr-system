@@ -321,7 +321,7 @@ async function loadDashboard() {
         <span class="today-dot" style="background:${color}"></span>
         <span class="today-text">${emp?.name||a.employee_id}</span>
         <span style="font-size:12px;color:${color}">${label}</span>
-        <span class="today-time">${a.clock_in?a.clock_in.slice(11,16):'—'}</span>
+        <span class="today-time">${SU.fmtTaipeiTime(a.clock_in)}</span>
       </li>`;
     }).join('');
   }

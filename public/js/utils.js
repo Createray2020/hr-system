@@ -147,6 +147,20 @@
     return { ok: true, late: true, gapHours: gap, advanceHours: advance };
   }
 
+  // ─── 時區 helper:把 ISO timestamp 顯示成台灣 'HH:MM'(24hr)──
+  // 顯式鎖 Asia/Taipei、跟 server-side lib/attendance/clock.js 的 timezone-aware path(commit c9f1600)
+  // 對稱、不依賴 browser 本地 TZ(對 admin 海外 / VPN 也對)。
+  // 邊界:null / undefined / 無效字串 → '—'。
+  function fmtTaipeiTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleTimeString('en-GB', {
+      timeZone: 'Asia/Taipei',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  }
+
   window.HR_Utils = {
     loadLeaveTypeLabels,
     leaveTypeLabel,
@@ -159,5 +173,6 @@
     proofHintText,
     gapHoursClient,
     checkAdvanceClient,
+    fmtTaipeiTime,
   };
 })();

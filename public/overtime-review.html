@@ -172,7 +172,7 @@ function openReview(id, tier){
   document.getElementById('m-body').innerHTML = `
     <div style="display:grid;grid-template-columns:80px 1fr;gap:6px 12px">
       <div style="color:var(--text-dim)">日期</div><div>${escHtml(current.overtime_date)}</div>
-      <div style="color:var(--text-dim)">時段</div><div class="num">${escHtml(current.start_at?.slice(11,16)||'')} ~ ${escHtml(current.end_at?.slice(11,16)||'')}</div>
+      <div style="color:var(--text-dim)">時段</div><div class="num">${window.HR_Utils.fmtTaipeiTime(current.start_at)} ~ ${window.HR_Utils.fmtTaipeiTime(current.end_at)}</div>
       <div style="color:var(--text-dim)">時數</div><div class="num">${current.hours}h</div>
       <div style="color:var(--text-dim)">類別</div><div>${escHtml(current.request_kind)}</div>
       <div style="color:var(--text-dim)">補償</div><div>${escHtml(COMP_LABEL[current.compensation_type]||current.compensation_type)}</div>
@@ -235,6 +235,7 @@ async function doReview(decision){
 load();
 </script>
 <script src="/js/roles.js"></script>
+<script src="/js/utils.js"></script>
 <script src="/js/layout.js"></script>
 <script src="/js/pwa.js"></script>
 <script>PWA.init();</script>
