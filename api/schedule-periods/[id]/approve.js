@@ -3,10 +3,15 @@
 //
 // 對應設計文件：docs/attendance-system-design-v1.md §4.2.1
 // 對應實作計畫：docs/attendance-system-implementation-plan-v1.md §5.8
+//
+// Phase 2.x.3 修補:
+//   - 拔 isBackofficeRole bypass(原 HR/admin/CEO/chairman 任何 backoffice 都能批跨部門)
+//   - 嚴格 dept+is_manager(對齊 leave canReview)
+//   - 加 self-approval guard:caller.id !== period.employee_id
+//   - 寫 approved_by = caller.id audit(原本 legacy 欄位有沒人寫)
 
 import { supabaseAdmin } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
-import { isBackofficeRole } from '../../../lib/roles.js';
 import { canTransition } from '../../../lib/schedule/period-state.js';
 import { logScheduleChange } from '../../../lib/schedule/change-logger.js';
 import { sendPushToEmployees, createNotifications } from '../../../lib/push.js';
@@ -26,16 +31,24 @@ export default async function handler(req, res) {
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'period not found' });
 
-  // 必須是同部門主管或 HR
-  const isHR = isBackofficeRole(caller);
-  let isInSameDept = false;
-  if (caller.is_manager === true && caller.dept_id) {
-    const { data: emp } = await supabaseAdmin
-      .from('employees').select('dept_id').eq('id', period.employee_id).maybeSingle();
-    isInSameDept = !!emp && emp.dept_id === caller.dept_id;
+  // Phase 2.x.3:self-approval guard
+  if (caller.id && caller.id === period.employee_id) {
+    return res.status(403).json({ error: 'CANNOT_APPROVE_OWN_PERIOD' });
   }
-  if (!isHR && !isInSameDept) {
-    return res.status(403).json({ error: 'not in same dept or HR' });
+
+  // Phase 2.x.3:嚴格 dept+is_manager(拔 isBackofficeRole bypass)
+  if (caller.is_manager !== true || !caller.dept_id) {
+    return res.status(403).json({ error: 'NOT_MANAGER', detail: '只有部門主管可定案' });
+  }
+  const { data: emp } = await supabaseAdmin
+    .from('employees').select('dept_id').eq('id', period.employee_id).maybeSingle();
+  const employeeDeptId = emp?.dept_id || null;
+  if (!employeeDeptId || caller.dept_id !== employeeDeptId) {
+    return res.status(403).json({
+      error: 'NOT_SAME_DEPT',
+      detail: '只有同部門主管可定案',
+      employee_dept_id: employeeDeptId,
+    });
   }
 
   const tr = canTransition(period.status, 'approve', { is_manager: true });
@@ -44,7 +57,7 @@ export default async function handler(req, res) {
   const now = new Date().toISOString();
   const { data: updated, error: uErr } = await supabaseAdmin
     .from('schedule_periods')
-    .update({ status: tr.nextState, approved_at: now })
+    .update({ status: tr.nextState, approved_at: now, approved_by: caller.id })
     .eq('id', id).eq('status', 'submitted')
     .select().maybeSingle();
   if (uErr) return res.status(500).json({ error: uErr.message });

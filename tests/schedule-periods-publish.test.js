@@ -63,20 +63,18 @@ function setupMocks({ period, updated, empDeptId, withDeptLookup = false, withUp
   }
 }
 
-describe('POST /api/schedule-periods/:id/publish', () => {
+describe('POST /api/schedule-periods/:id/publish — Phase 2.x.3 嚴格 spec', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('HR + approved period → 200, status published', async () => {
+  it('HR(is_manager=false)→ 403 NOT_MANAGER(原 isBackofficeRole bypass 拔)', async () => {
     requireAuth.mockResolvedValue({ id: 'HR1', role: 'hr', is_manager: false });
     setupMocks({
       period: { id: 'P1', employee_id: 'E001', status: 'approved' },
-      updated: { id: 'P1', status: 'published' },
-      withUpdate: true,  // HR 直接通過權限、會走 update
     });
     const res = makeRes();
     await handler(makeReq(), res);
-    expect(res.statusCode).toBe(200);
-    expect(res.body.period.status).toBe('published');
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('NOT_MANAGER');
   });
 
   it('同部門主管 + approved → 200', async () => {
@@ -93,20 +91,20 @@ describe('POST /api/schedule-periods/:id/publish', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it('非同部門主管 → 403 NOT_MANAGER_OR_HR', async () => {
+  it('非同部門主管 → 403 NOT_SAME_DEPT(原 NOT_MANAGER_OR_HR rename)', async () => {
     requireAuth.mockResolvedValue({ id: 'M2', role: 'employee', is_manager: true, dept_id: 'D2' });
     setupMocks({
       period: { id: 'P1', employee_id: 'E001', status: 'approved' },
       empDeptId: 'D1',
-      withDeptLookup: true,  // 撈 dept 但比對失敗
+      withDeptLookup: true,
     });
     const res = makeRes();
     await handler(makeReq(), res);
     expect(res.statusCode).toBe(403);
-    expect(res.body.error).toBe('NOT_MANAGER_OR_HR');
+    expect(res.body.error).toBe('NOT_SAME_DEPT');
   });
 
-  it('一般員工 → 403', async () => {
+  it('一般員工 → 403 NOT_MANAGER', async () => {
     requireAuth.mockResolvedValue({ id: 'E002', role: 'employee', is_manager: false });
     setupMocks({
       period: { id: 'P1', employee_id: 'E001', status: 'approved' },
@@ -114,20 +112,23 @@ describe('POST /api/schedule-periods/:id/publish', () => {
     const res = makeRes();
     await handler(makeReq(), res);
     expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('NOT_MANAGER');
   });
 
-  it('period status=submitted → 409 INVALID_TRANSITION', async () => {
-    requireAuth.mockResolvedValue({ id: 'HR1', role: 'hr' });
+  it('period status=submitted + 真主管 → 409 INVALID_TRANSITION(approve 才 submitted→approved、publish 只接 approved)', async () => {
+    requireAuth.mockResolvedValue({ id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' });
     setupMocks({
       period: { id: 'P1', employee_id: 'E001', status: 'submitted' },
+      empDeptId: 'D1',
+      withDeptLookup: true,
     });
     const res = makeRes();
     await handler(makeReq(), res);
     expect(res.statusCode).toBe(409);
   });
 
-  it('period 不存在 → 404', async () => {
-    requireAuth.mockResolvedValue({ id: 'HR1', role: 'hr' });
+  it('period 不存在 → 404(auth 雖過、period 沒撈到)', async () => {
+    requireAuth.mockResolvedValue({ id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' });
     setupMocks({ period: null });
     const res = makeRes();
     await handler(makeReq(), res);
@@ -135,7 +136,7 @@ describe('POST /api/schedule-periods/:id/publish', () => {
   });
 
   it('Method GET → 405', async () => {
-    requireAuth.mockResolvedValue({ id: 'HR1', role: 'hr' });
+    requireAuth.mockResolvedValue({ id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' });
     const res = makeRes();
     await handler(makeReq({ method: 'GET' }), res);
     expect(res.statusCode).toBe(405);

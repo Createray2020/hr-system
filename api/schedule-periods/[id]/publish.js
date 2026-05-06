@@ -1,10 +1,15 @@
 // api/schedule-periods/[id]/publish.js
 // POST /api/schedule-periods/:id/publish
-// C12-2：主管/HR 公告班表（approved → published）、通知員工開始打卡
+// C12-2：主管 公告班表（approved → published）、通知員工開始打卡
+//
+// Phase 2.x.3 修補:
+//   - 拔 isBackofficeRole bypass
+//   - 嚴格 dept+is_manager(對齊 approve.js)
+//   - 加 self-approval guard
+//   - 寫 published_by + published_at audit
 
 import { supabaseAdmin } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
-import { isBackofficeRole } from '../../../lib/roles.js';
 import { canTransition } from '../../../lib/schedule/period-state.js';
 import { logScheduleChange } from '../../../lib/schedule/change-logger.js';
 import { sendPushToEmployees, createNotifications } from '../../../lib/push.js';
@@ -38,26 +43,35 @@ export default async function handler(req, res) {
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'PERIOD_NOT_FOUND' });
 
-  // 權限：HR / CEO / chairman / admin OR 同部門主管
-  const isHR = isBackofficeRole(caller);
-  let inSameDept = false;
-  if (caller.is_manager === true && caller.dept_id) {
-    const { data: emp } = await supabaseAdmin
-      .from('employees').select('dept_id').eq('id', period.employee_id).maybeSingle();
-    inSameDept = !!emp && emp.dept_id === caller.dept_id;
+  // Phase 2.x.3:self-approval guard
+  if (caller.id && caller.id === period.employee_id) {
+    return res.status(403).json({ error: 'CANNOT_PUBLISH_OWN_PERIOD' });
   }
-  if (!isHR && !inSameDept) {
-    return res.status(403).json({ error: 'NOT_MANAGER_OR_HR' });
+
+  // Phase 2.x.3:嚴格 dept+is_manager(拔 isBackofficeRole bypass)
+  if (caller.is_manager !== true || !caller.dept_id) {
+    return res.status(403).json({ error: 'NOT_MANAGER', detail: '只有部門主管可公告' });
+  }
+  const { data: emp } = await supabaseAdmin
+    .from('employees').select('dept_id').eq('id', period.employee_id).maybeSingle();
+  const employeeDeptId = emp?.dept_id || null;
+  if (!employeeDeptId || caller.dept_id !== employeeDeptId) {
+    return res.status(403).json({
+      error: 'NOT_SAME_DEPT',
+      detail: '只有同部門主管可公告',
+      employee_dept_id: employeeDeptId,
+    });
   }
 
   // state transition：approved → published（actor key=is_manager）
   const tr = canTransition(period.status, 'publish', { is_manager: true });
   if (!tr.ok) return res.status(409).json({ error: tr.reason || 'INVALID_TRANSITION' });
 
-  // update status (optimistic：避免 race)
+  // update status (optimistic：避免 race) + Phase 2.x.3 published_by/at audit
+  const now = new Date().toISOString();
   const { data: updated, error: uErr } = await supabaseAdmin
     .from('schedule_periods')
-    .update({ status: tr.nextState })
+    .update({ status: tr.nextState, published_by: caller.id, published_at: now })
     .eq('id', id).eq('status', 'approved')
     .select().maybeSingle();
   if (uErr) return res.status(500).json({ error: uErr.message });
