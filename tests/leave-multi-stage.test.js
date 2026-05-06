@@ -621,3 +621,130 @@ describe("Flow H' — proof 過期分流(Phase 1.5 升級)", () => {
     expect(actions[0].original_leave_type).toBe('sick');
   });
 });
+
+// ════════════════════════════════════════════════════════════
+// 流程 I:Phase 1.6 — HR 終止 expired row
+// ════════════════════════════════════════════════════════════
+import {
+  canTerminate, transitionTerminate, canApprove, canReject,
+} from '../lib/leave/stages.js';
+
+const HR_ACTOR  = { id: 'HR1', role: 'hr' };
+const EMP_ACTOR = { id: 'E001' };
+
+// 把 cron sweep mark_expired 後的 row state 設好(emulate Phase 1.5 cron 跑完)
+async function emulateMarkExpired(repo, requestId) {
+  return repo.updateLeaveRequest(requestId, {
+    proof_status: 'expired',
+    handler_note: '[2026-05-10] 原假別 marriage、未補證明、HR 個案處理',
+  });
+}
+
+// emulate api/leaves/[id].js handleTerminate(走 lib gate + 寫 patch)
+async function hrTerminate(repo, requestId, hrId) {
+  const row = await repo.findLeaveRequestById(requestId);
+  if (!canTerminate({ id: hrId, role: 'hr' }, row)) {
+    return { ok: false, reason: 'NOT_ELIGIBLE_TO_TERMINATE',
+             actual_status: row.status, actual_proof_status: row.proof_status };
+  }
+  const nextStage = transitionTerminate(row.status);
+  const now = '2026-05-10T12:00:00.000Z';
+  const updated = await repo.updateLeaveRequest(requestId, {
+    status: nextStage,
+    terminated_by: hrId,
+    terminated_at: now,
+    handler_note: `${row.handler_note || ''}\n[2026-05-10] HR 終止申請(證明已過期)`,
+  });
+  return { ok: true, request: updated };
+}
+
+describe("Flow I — HR 終止 expired row(Phase 1.6)", () => {
+  it('婚假 mark_expired + HR terminate → status=terminated、proof_status 保留 expired、terminated_by/at 寫入', async () => {
+    const { repo, state } = makeStatefulRepo();
+    // 婚假 advance_hours=168(7 天)、grace=0、submitted 11 天前 ok
+    const r = await submit(repo, {
+      leave_type: 'marriage',
+      submitted_at: '2026-04-20T00:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.proof_status).toBe('required');
+    // emulate cron sweep mark_expired
+    await emulateMarkExpired(repo, r.request.id);
+    expect(state.row.proof_status).toBe('expired');
+    expect(state.row.status).toBe(r.request.status);  // 仍 pending(cron 不動 status)
+
+    // HR terminate
+    const t = await hrTerminate(repo, r.request.id, HR_ACTOR.id);
+    expect(t.ok).toBe(true);
+    expect(state.row.status).toBe('terminated');
+    expect(state.row.proof_status).toBe('expired');   // 保留歷史紀錄
+    expect(state.row.terminated_by).toBe('HR1');
+    expect(state.row.terminated_at).toBeTruthy();
+    expect(state.row.handler_note).toContain('HR 終止申請');
+    expect(state.row.handler_note).toContain('原假別 marriage');  // cron note 仍在
+  });
+
+  it('病假 not expired + HR terminate → NOT_ELIGIBLE_TO_TERMINATE(對應 422)', async () => {
+    const { repo } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'sick',
+      submitted_at: '2026-05-01T08:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    expect(r.request.proof_status).toBe('required');  // 未過期、cron 沒掃到
+    const t = await hrTerminate(repo, r.request.id, HR_ACTOR.id);
+    expect(t.ok).toBe(false);
+    expect(t.reason).toBe('NOT_ELIGIBLE_TO_TERMINATE');
+    expect(t.actual_proof_status).toBe('required');
+  });
+
+  it('婚假 expired + HR approve → canApprove=false(對應 422 NOT_ELIGIBLE_TO_APPROVE)', async () => {
+    const { repo } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'marriage',
+      submitted_at: '2026-04-20T00:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    await emulateMarkExpired(repo, r.request.id);
+    const row = await repo.findLeaveRequestById(r.request.id);
+    // canApprove 走 canReview + expired guard;HR 過 canReview、被 expired guard 擋
+    const reviewable = { ...row, employee_manager_id: 'M1' };
+    expect(canApprove(HR_ACTOR, reviewable)).toBe(false);
+  });
+
+  it('婚假 expired + HR reject → canReject=false(對應 422 NOT_ELIGIBLE_TO_REJECT)', async () => {
+    const { repo } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'marriage',
+      submitted_at: '2026-04-20T00:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    await emulateMarkExpired(repo, r.request.id);
+    const row = await repo.findLeaveRequestById(r.request.id);
+    const reviewable = { ...row, employee_manager_id: 'M1' };
+    expect(canReject(HR_ACTOR, reviewable)).toBe(false);
+  });
+
+  it('婚假 expired + 員工本人 cancel → 200 OK(canCancel 不擋、員工自撤合理)', async () => {
+    const { repo, state } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'marriage',
+      submitted_at: '2026-04-20T00:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    await emulateMarkExpired(repo, r.request.id);
+    // 員工撤回(走 lib cancelLeaveRequest、不過 canApprove/canReject)
+    const c = await cancelLeaveRequest(repo, { request_id: r.request.id, cancelled_by: EMP_ACTOR.id });
+    expect(c.ok).toBe(true);
+    expect(state.row.status).toBe('cancelled');
+    // 守:proof_status 仍 expired(歷史)、不會被撤回路徑覆寫
+    expect(state.row.proof_status).toBe('expired');
+  });
+});
+
