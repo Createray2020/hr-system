@@ -82,6 +82,24 @@ describe('api/attendance routing — dead-code regression', () => {
     expect(calls.updates.filter(u => u.table === 'attendance').length).toBe(0);
   });
 
+  it('manual punch shape body { employee_id, work_date, clock_in_time } → 4xx(已拔、防 revive 安全洞)', async () => {
+    const [req, res] = makeReqRes({
+      body: {
+        employee_id: 'E_VICTIM',
+        work_date: '2026-05-07',
+        clock_in_time: '09:00',
+        clock_out_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBeGreaterThanOrEqual(400);
+    expect(res.statusCode).toBeLessThan(500);
+    expect(res.body?.error).toBe('INVALID_ACTION');
+    // 守:不該寫進 attendance(原 dead code 沒 auth 會直接 INSERT/UPDATE)
+    expect(calls.inserts.filter(i => i.table === 'attendance').length).toBe(0);
+    expect(calls.updates.filter(u => u.table === 'attendance').length).toBe(0);
+  });
+
   it('新 path body { action: \'clock_in\' } 仍正常 work(不被 legacy 拔影響)', async () => {
     // 新 path 走 handleNewPunch → lib clockIn:
     // 預期會撈 schedules、撈 holiday、upsert attendance
