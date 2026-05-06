@@ -67,6 +67,31 @@ async function handleDetail(req, res, id) {
   const startDate = startIso.slice(0, 10);   // 'YYYY-MM-DD'
   const endDate   = anchorIso.slice(0, 10);
 
+  // ── Phase 1.7.2:回推離職時部門(employee_change_logs audit 表)──
+  // 找最後一筆 dept_id 變更、changed_at <= resigned_at 的 after_value;
+  // 沒紀錄 → fallback 當前 emp.dept_id(flag isHistoricalDept=false 給 frontend hint)
+  let deptIdAtResignation = emp.dept_id;
+  let deptNameAtResignation = emp.dept_name;
+  let isHistoricalDept = false;
+  try {
+    const { data: deptLog } = await supabaseAdmin
+      .from('employee_change_logs')
+      .select('after_value, changed_at')
+      .eq('employee_id', id)
+      .eq('changed_field', 'dept_id')
+      .lte('changed_at', anchorIso)
+      .order('changed_at', { ascending: false })
+      .limit(1).maybeSingle();
+    if (deptLog?.after_value && deptLog.after_value !== '(空)') {
+      deptIdAtResignation = deptLog.after_value;
+      isHistoricalDept = true;
+      // 撈離職時 dept name(若還在 departments 表)
+      const { data: deptRow } = await supabaseAdmin
+        .from('departments').select('name').eq('id', deptIdAtResignation).maybeSingle();
+      deptNameAtResignation = deptRow?.name || deptIdAtResignation;
+    }
+  } catch (_) { /* table not exist (migration 沒跑) → fallback */ }
+
   // ── 聚合資料(平行撈)───────────────────────────────────
   const [
     salaryRes, attendanceRes, leavesRes, overtimeRes, compBalanceRes,
@@ -121,6 +146,11 @@ async function handleDetail(req, res, id) {
 
   return res.status(200).json({
     employee: emp,
+    dept_at_resignation: {
+      dept_id: deptIdAtResignation || null,
+      dept_name: deptNameAtResignation || null,
+      is_historical: isHistoricalDept,
+    },
     history: {
       window: { start: startDate, end: endDate, anchor: anchorIso },
       salary: salaryRes.data || [],

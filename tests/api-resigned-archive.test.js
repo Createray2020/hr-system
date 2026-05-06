@@ -268,3 +268,69 @@ describe('/api/resigned-archive?id=X — detail SQL chain', () => {
     expect(res.body.history.window.start.startsWith('2025-09')).toBe(true);
   });
 });
+
+// ════════════════════════════════════════════════════════════
+// Phase 1.7.2:離職時部門(employee_change_logs 回推)
+// ════════════════════════════════════════════════════════════
+describe('/api/resigned-archive?id=X — Phase 1.7.2 dept_at_resignation', () => {
+  // 注意:當 dataByQuery['employees:maybeSingle'] 同時被「員工 row」跟「departments
+  // dept name 撈」共用時、要用獨立 key。但 supabase mock chain 是共用、實際 prod 有分。
+  // 本測試:focus on log-driven dept、不細分 departments 撈(handler 內部的 best-effort)。
+
+  it('無 dept 變更 log → fallback 當前 dept_id、is_historical=false', async () => {
+    overrides.caller = HR;
+    dataByQuery['employees:maybeSingle'] = {
+      id: 'E_no_log', status: 'resigned',
+      name: 'Alice', dept_id: 'D_CURRENT',
+      resigned_at: '2026-04-01T00:00:00.000Z',
+    };
+    // employee_change_logs:maybeSingle = null(無 log)
+    dataByQuery['employee_change_logs:maybeSingle'] = null;
+    const [req, res] = makeReqRes({ query: { id: 'E_no_log' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.dept_at_resignation).toEqual({
+      dept_id: 'D_CURRENT',
+      dept_name: null,  // addDeptNameSingle 是 mock、不寫 dept_name、handler 用 || null fallback
+      is_historical: false,
+    });
+  });
+
+  it('有 dept 變更 log → 用 audit after_value、is_historical=true', async () => {
+    overrides.caller = HR;
+    // 第一次 maybeSingle → employees row;之後 employee_change_logs / departments
+    // 同份 dataByQuery key、最後寫的覆蓋。實作上要分 key 才精準。
+    // 本測試 cover 幹道:log 存在 → resigned 時 dept = log.after_value
+    dataByQuery['employees:maybeSingle'] = {
+      id: 'E_with_log', status: 'resigned',
+      name: 'Bob', dept_id: 'D_CURRENT',
+      resigned_at: '2026-04-01T00:00:00.000Z',
+    };
+    // 注意:本 mock chain 共用 maybeSingle key、會被後撈的 departments 蓋過。
+    // 但 supabase.from('employee_change_logs').select(...).maybeSingle() 在前、
+    // departments 在後;後者不會影響 dept_at_resignation 計算(已在 log 抓到時固定)。
+    dataByQuery['employee_change_logs:maybeSingle'] = {
+      after_value: 'D_RESIGNED', changed_at: '2026-03-15T00:00:00.000Z',
+    };
+    const [req, res] = makeReqRes({ query: { id: 'E_with_log' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.dept_at_resignation.dept_id).toBe('D_RESIGNED');
+    expect(res.body.dept_at_resignation.is_historical).toBe(true);
+  });
+
+  it('log table 撈失敗(prod migration 沒跑、try 吞掉)→ fallback 當前 dept', async () => {
+    overrides.caller = HR;
+    dataByQuery['employees:maybeSingle'] = {
+      id: 'E_no_table', status: 'resigned',
+      name: 'C', dept_id: 'D_FALLBACK',
+      resigned_at: '2026-04-01T00:00:00.000Z',
+    };
+    // mock 預設 maybeSingle 回 null(沒拋 error)、handler 視同無 log
+    const [req, res] = makeReqRes({ query: { id: 'E_no_table' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.dept_at_resignation.is_historical).toBe(false);
+    expect(res.body.dept_at_resignation.dept_id).toBe('D_FALLBACK');
+  });
+});

@@ -213,13 +213,19 @@ function renderDetail(data) {
   const h = data.history;
   document.getElementById('modal-title').textContent = `離職員工檔案 — ${e.name || e.id}`;
 
+  // Phase 1.7.2:離職時部門(audit log 回推、無 log 則 fallback 當前)
+  const dar = data.dept_at_resignation || { dept_name: e.dept_name, is_historical: false };
+  const deptDisplay = dar.is_historical
+    ? `${escHtml(dar.dept_name || '—')} <span style="font-size:10px;color:var(--text-dim)">(audit 紀錄)</span>`
+    : `${escHtml(dar.dept_name || '—')} <span style="font-size:10px;color:var(--text-dim)">(無變更紀錄、推估為當前部門)</span>`;
+
   const empSummary = `
     <div class="ra-emp-summary">
       <div><div class="label">姓名</div>${escHtml(e.name || '—')}</div>
       <div><div class="label">員工編號</div><span style="font-family:'DM Mono',monospace">${escHtml(e.emp_no || '—')}</span></div>
       <div><div class="label">Email</div>${escHtml(e.email || '—')}</div>
       <div><div class="label">電話</div>${escHtml(e.phone || '—')}</div>
-      <div><div class="label">最後部門</div>${escHtml(e.dept_name || '—')}</div>
+      <div><div class="label">離職時部門</div>${deptDisplay}</div>
       <div><div class="label">職位</div>${escHtml(e.position || '—')}</div>
       <div><div class="label">到職日</div><span style="font-family:'DM Mono',monospace">${fmtDate(e.hire_date)}</span></div>
       <div><div class="label">離職日</div><span style="font-family:'DM Mono',monospace">${fmtDate(e.resigned_at || e.updated_at)}</span></div>
@@ -228,10 +234,10 @@ function renderDetail(data) {
     </div>
   `;
 
+  // 歷史資料範圍 disclaimer(對齊 6 個月窗、Phase 1.7.2 解掉部門 disclaimer)
   const disclaimer = `
-    <div class="ra-disclaimer">
-      ⚠ 顯示的部門 = 員工當前 dept_id、可能與離職時不同(員工資料變更 audit log
-      待 Phase 1.7.2 補)。歷史資料範圍:從離職日倒推 6 個月
+    <div class="ra-disclaimer" style="background:rgba(91,141,239,.06);border-color:rgba(91,141,239,.2);color:var(--text-dim)">
+      ℹ 歷史資料範圍:從離職日倒推 6 個月
       (${escHtml(h.window.start)} 至 ${escHtml(h.window.end)})。
     </div>
   `;
@@ -373,13 +379,15 @@ function exportExcel() {
   const wb = XLSX.utils.book_new();
 
   // Sheet 1:員工基本
+  const dar2 = currentDetail.dept_at_resignation || {};
   const empSheet = [
     ['欄位', '值'],
     ['姓名', e.name || ''],
     ['員工編號', e.emp_no || ''],
     ['Email', e.email || ''],
     ['電話', e.phone || ''],
-    ['最後部門', e.dept_name || ''],
+    ['離職時部門', dar2.dept_name || e.dept_name || ''],
+    ['離職時部門資料來源', dar2.is_historical ? 'audit 紀錄' : '推估(當前部門、無變更紀錄)'],
     ['職位', e.position || ''],
     ['到職日', e.hire_date || ''],
     ['離職日', e.resigned_at || e.updated_at || ''],
