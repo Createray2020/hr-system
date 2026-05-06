@@ -7,6 +7,7 @@ import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 import { syncDeptFields } from '../../lib/dept-sync.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
+import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo } from '../../lib/auth-scope.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -233,6 +234,17 @@ export default async function handler(req, res) {
     if (status) q = q.eq('status', status);
     if (dept_id) q = q.eq('dept_id', dept_id);
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+
+    // Phase 2:row-level scope filter(取代既有「無 row filter」、防主管 / 員工看全公司)
+    // 員工本人 / 主管本部門 / HR 全部。?_resource=orgchart 已 caller-aware、不走此分支。
+    const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+    if (scope.mode === 'self') {
+      q = q.eq('id', scope.selfId);
+    } else if (scope.mode === 'dept') {
+      q = q.in('id', [scope.selfId, ...(scope.deptEmpIds || [])]);
+    }
+    // mode='all' 不加 filter
+
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
     addDeptName(data);
