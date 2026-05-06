@@ -26,6 +26,12 @@ export default async function handler(req, res) {
   const repo = makeAttendancePenaltyRepo();
   const cur = await repo.findPenaltyRecordById(id);
   if (!cur) return res.status(404).json({ error: 'record not found' });
+
+  // Phase 2.x.4:self-guard、HR 不可豁免自己的懲罰(防權力濫用)
+  if (caller.id && caller.id === cur.employee_id) {
+    return res.status(403).json({ error: 'CANNOT_WAIVE_OWN_PENALTY' });
+  }
+
   if (cur.status === 'waived') {
     return res.status(409).json({ error: 'already waived' });
   }

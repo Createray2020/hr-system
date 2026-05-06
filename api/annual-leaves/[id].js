@@ -35,6 +35,11 @@ export default async function handler(req, res) {
   const cur = list.find(r => r.id === recId);
   if (!cur) return res.status(404).json({ error: 'record not found' });
 
+  // Phase 2.x.4:self-guard、HR 不可調整自己的特休(防自肥)
+  if (caller.id && caller.id === cur.employee_id) {
+    return res.status(403).json({ error: 'CANNOT_ADJUST_OWN_ANNUAL_LEAVE' });
+  }
+
   const { granted_days, settle, note } = req.body || {};
 
   // 1. settle:結算為 paid_out
