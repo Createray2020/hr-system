@@ -49,7 +49,7 @@ function makeStatefulRepo(over = {}) {
     findActiveAnnualRecord: vi.fn(async () => over.annualRecord ?? { id: 1, granted_days: 14, used_days: 0 }),
     findActiveCompBalances: vi.fn(async () => over.compBalances || []),
     findEmployeeById: vi.fn(async (id) => over.employees?.[id]
-                                          || { id, role: 'employee', is_manager: false, manager_id: 'M1' }),
+                                          || { id, role: 'employee', is_manager: false, dept_id: 'D1', manager_id: 'M1' }),
     insertLeaveRequest: vi.fn(async (row) => { state.row = { ...row }; return { ...state.row }; }),
     findLeaveRequestById: vi.fn(async () => state.row ? { ...state.row } : null),
     updateLeaveRequest: vi.fn(async (_id, patch) => {
@@ -179,7 +179,7 @@ describe('Flow A — 一般員工 happy path:submit → mgr → ceo → archived
 describe('Flow B — 主管自己請假:跳 mgr 階直接 pending_ceo', () => {
   it('is_manager=true 員工 submit → status=pending_ceo(跳階)', async () => {
     const { repo } = makeStatefulRepo({
-      employees: { E001: { id: 'E001', role: 'employee', is_manager: true, manager_id: null } },
+      employees: { E001: { id: 'E001', role: 'employee', is_manager: true, dept_id: 'D1', manager_id: null } },
     });
     const r = await submit(repo);
     expect(r.request.status).toBe('pending_ceo');
@@ -188,7 +188,7 @@ describe('Flow B — 主管自己請假:跳 mgr 階直接 pending_ceo', () => {
 
   it('CEO approve → status=approved、mgr_* 維持 null(沒走過)', async () => {
     const { repo, state } = makeStatefulRepo({
-      employees: { E001: { id: 'E001', role: 'employee', is_manager: true, manager_id: null } },
+      employees: { E001: { id: 'E001', role: 'employee', is_manager: true, dept_id: 'D1', manager_id: null } },
     });
     const r = await submit(repo);
     const r2 = await ceoApprove(repo, r.request.id, 'C1');
@@ -701,7 +701,9 @@ describe("Flow I — HR 終止 expired row(Phase 1.6)", () => {
     expect(t.actual_proof_status).toBe('required');
   });
 
-  it('婚假 expired + HR approve → canApprove=false(對應 422 NOT_ELIGIBLE_TO_APPROVE)', async () => {
+  it('婚假 expired + 真主管 approve → canApprove=false(對應 422 NOT_ELIGIBLE_TO_APPROVE,expired guard)', async () => {
+    // Phase 2.x:HR 已不能審任何 row、改用真主管(同部門 + is_manager)、expired guard 仍擋
+    const MGR_ACTOR = { id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' };
     const { repo } = makeStatefulRepo();
     const r = await submit(repo, {
       leave_type: 'marriage',
@@ -711,12 +713,12 @@ describe("Flow I — HR 終止 expired row(Phase 1.6)", () => {
     });
     await emulateMarkExpired(repo, r.request.id);
     const row = await repo.findLeaveRequestById(r.request.id);
-    // canApprove 走 canReview + expired guard;HR 過 canReview、被 expired guard 擋
-    const reviewable = { ...row, employee_manager_id: 'M1' };
-    expect(canApprove(HR_ACTOR, reviewable)).toBe(false);
+    const reviewable = { ...row, employee_dept_id: 'D1' };
+    expect(canApprove(MGR_ACTOR, reviewable)).toBe(false);
   });
 
-  it('婚假 expired + HR reject → canReject=false(對應 422 NOT_ELIGIBLE_TO_REJECT)', async () => {
+  it('婚假 expired + 真主管 reject → canReject=false(對應 422 NOT_ELIGIBLE_TO_REJECT,expired guard)', async () => {
+    const MGR_ACTOR = { id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' };
     const { repo } = makeStatefulRepo();
     const r = await submit(repo, {
       leave_type: 'marriage',
@@ -726,8 +728,8 @@ describe("Flow I — HR 終止 expired row(Phase 1.6)", () => {
     });
     await emulateMarkExpired(repo, r.request.id);
     const row = await repo.findLeaveRequestById(r.request.id);
-    const reviewable = { ...row, employee_manager_id: 'M1' };
-    expect(canReject(HR_ACTOR, reviewable)).toBe(false);
+    const reviewable = { ...row, employee_dept_id: 'D1' };
+    expect(canReject(MGR_ACTOR, reviewable)).toBe(false);
   });
 
   it('婚假 expired + 員工本人 cancel → 200 OK(canCancel 不擋、員工自撤合理)', async () => {

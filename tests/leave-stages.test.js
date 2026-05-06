@@ -37,61 +37,97 @@ describe('getInitialStage', () => {
   });
 });
 
-describe('canReview', () => {
+describe('canReview — Phase 2.x dept+is_manager 嚴格設計', () => {
+  // employee 在 dept_id='D1';真主管 M1(D1+is_manager)、跨部門主管 M2(D2+is_manager)
   const empReq = (over = {}) => ({
     employee_id: 'E1',
-    employee_manager_id: 'M1',
+    employee_dept_id: 'D1',
     status: 'pending_mgr',
     ...over,
   });
 
-  it('直屬主管在 pending_mgr → true', () => {
-    expect(canReview({ id: 'M1', role: 'employee', is_manager: true }, empReq())).toBe(true);
+  // ── pending_mgr ─────────────────────────────────────────────
+  it('同部門 is_manager=true 主管在 pending_mgr → true', () => {
+    expect(canReview({ id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' }, empReq())).toBe(true);
   });
 
-  it('別部門主管在 pending_mgr → false', () => {
-    expect(canReview({ id: 'M2', role: 'employee', is_manager: true }, empReq())).toBe(false);
+  it('別部門 is_manager=true 主管在 pending_mgr → false(dept 不同)', () => {
+    expect(canReview({ id: 'M2', role: 'employee', is_manager: true, dept_id: 'D2' }, empReq())).toBe(false);
   });
 
-  it('HR 在 pending_mgr → true(elevated 往下批)', () => {
-    expect(canReview({ id: 'HR1', role: 'hr' }, empReq())).toBe(true);
+  it('HR 在 pending_mgr → false(嚴格無 elevated bypass、HR 不該審審核流程)', () => {
+    expect(canReview({ id: 'HR1', role: 'hr', dept_id: 'D_HR' }, empReq())).toBe(false);
   });
 
-  it('admin 在 pending_mgr → true', () => {
-    expect(canReview({ id: 'A1', role: 'admin' }, empReq())).toBe(true);
+  it('admin 在 pending_mgr → false(嚴格無 bypass)', () => {
+    expect(canReview({ id: 'A1', role: 'admin', dept_id: 'D_HR' }, empReq())).toBe(false);
   });
 
+  it('CEO 在 pending_mgr(別部門員工)→ false(CEO 不是該員工真主管)', () => {
+    expect(canReview({ id: 'C1', role: 'ceo', dept_id: 'D_EXEC' }, empReq())).toBe(false);
+  });
+
+  it('一般員工(同部門 is_manager=false)→ false', () => {
+    expect(canReview({ id: 'E2', role: 'employee', is_manager: false, dept_id: 'D1' }, empReq())).toBe(false);
+  });
+
+  it('員工自己審自己(actor.id === employee_id)→ false(self-approval guard)', () => {
+    expect(canReview({ id: 'E1', role: 'employee', is_manager: true, dept_id: 'D1' }, empReq())).toBe(false);
+  });
+
+  it('reviewer 缺 dept_id → false', () => {
+    expect(canReview({ id: 'M1', role: 'employee', is_manager: true /* no dept_id */ }, empReq())).toBe(false);
+  });
+
+  it('leaveRequest 缺 employee_dept_id → false(safe fallback、防 caller 漏 flatten)', () => {
+    expect(canReview({ id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' },
+                     empReq({ employee_dept_id: null }))).toBe(false);
+  });
+
+  // ── pending_ceo ─────────────────────────────────────────────
   it('CEO 在 pending_ceo → true', () => {
     expect(canReview({ id: 'C1', role: 'ceo' }, empReq({ status: 'pending_ceo' }))).toBe(true);
-  });
-
-  it('CEO 在 pending_mgr → true(高層也能往下批)', () => {
-    expect(canReview({ id: 'C1', role: 'ceo' }, empReq())).toBe(true);
   });
 
   it('chairman 在 pending_ceo → true', () => {
     expect(canReview({ id: 'CH1', role: 'chairman' }, empReq({ status: 'pending_ceo' }))).toBe(true);
   });
 
-  it('一般員工 → false', () => {
-    expect(canReview({ id: 'E2', role: 'employee' }, empReq())).toBe(false);
+  it('HR 在 pending_ceo → false(嚴格 spec、HR 不審 ceo 階)', () => {
+    expect(canReview({ id: 'HR1', role: 'hr' }, empReq({ status: 'pending_ceo' }))).toBe(false);
   });
 
-  it('直屬主管在 pending_ceo → false(只有 elevated 能批)', () => {
-    expect(canReview({ id: 'M1', role: 'employee', is_manager: true }, empReq({ status: 'pending_ceo' }))).toBe(false);
+  it('admin 在 pending_ceo → false', () => {
+    expect(canReview({ id: 'A1', role: 'admin' }, empReq({ status: 'pending_ceo' }))).toBe(false);
   });
 
+  it('CEO 對自己 row(self-approval)→ false', () => {
+    expect(canReview({ id: 'C1', role: 'ceo' },
+                     empReq({ status: 'pending_ceo', employee_id: 'C1' }))).toBe(false);
+  });
+
+  it('chairman 對自己 row → false(理論 case、實際 chairman 自送會跳到 approved)', () => {
+    expect(canReview({ id: 'CH1', role: 'chairman' },
+                     empReq({ status: 'pending_ceo', employee_id: 'CH1' }))).toBe(false);
+  });
+
+  it('同部門 is_manager 主管在 pending_ceo → false(只 ceo/chairman 可批)', () => {
+    expect(canReview({ id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' },
+                     empReq({ status: 'pending_ceo' }))).toBe(false);
+  });
+
+  // ── 非 pending_* 階 ─────────────────────────────────────────
   it('已 approved 的 → false(非 pending_* 不能批)', () => {
-    expect(canReview({ id: 'HR1', role: 'hr' }, empReq({ status: 'approved' }))).toBe(false);
+    expect(canReview({ id: 'C1', role: 'ceo' }, empReq({ status: 'approved' }))).toBe(false);
   });
 
   it('已 archived 的 → false', () => {
-    expect(canReview({ id: 'HR1', role: 'hr' }, empReq({ status: 'archived' }))).toBe(false);
+    expect(canReview({ id: 'C1', role: 'ceo' }, empReq({ status: 'archived' }))).toBe(false);
   });
 
   it('null reviewer / request → false', () => {
     expect(canReview(null, empReq())).toBe(false);
-    expect(canReview({ id: 'M1', role: 'employee', is_manager: true }, null)).toBe(false);
+    expect(canReview({ id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' }, null)).toBe(false);
   });
 });
 
@@ -295,36 +331,42 @@ describe('transitionTerminate', () => {
 });
 
 describe('canApprove / canReject — proof_status=expired guard', () => {
+  // Phase 2.x:用真主管(同部門 + is_manager)、HR/admin 已不能通過 canReview
+  const MGR = { id: 'M1', role: 'employee', is_manager: true, dept_id: 'D1' };
   const baseReq = (over = {}) => ({
     employee_id: 'E1',
-    employee_manager_id: 'M1',
+    employee_dept_id: 'D1',
     status: 'pending_mgr',
     proof_status: 'required',
     ...over,
   });
 
-  it('canApprove:HR + pending + proof_required → true(既有行為)', () => {
-    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq())).toBe(true);
+  it('canApprove:真主管 + pending + proof_required → true(既有行為)', () => {
+    expect(canApprove(MGR, baseReq())).toBe(true);
   });
 
-  it('canApprove:HR + pending + proof_expired → false(強迫走 terminate)', () => {
-    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq({ proof_status: 'expired' }))).toBe(false);
+  it('canApprove:真主管 + pending + proof_expired → false(強迫走 terminate)', () => {
+    expect(canApprove(MGR, baseReq({ proof_status: 'expired' }))).toBe(false);
   });
 
-  it('canApprove:HR + pending + proof_submitted → true(員工已交、可批)', () => {
-    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq({ proof_status: 'submitted' }))).toBe(true);
+  it('canApprove:真主管 + pending + proof_submitted → true(員工已交、可批)', () => {
+    expect(canApprove(MGR, baseReq({ proof_status: 'submitted' }))).toBe(true);
   });
 
   it('canApprove:已 archived → false(委任 canReview)', () => {
-    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq({ status: 'archived' }))).toBe(false);
+    expect(canApprove(MGR, baseReq({ status: 'archived' }))).toBe(false);
   });
 
-  it('canReject:HR + pending + proof_required → true(既有行為)', () => {
-    expect(canReject({ id: 'HR1', role: 'hr' }, baseReq())).toBe(true);
+  it('canApprove:HR + pending + proof_required → false(Phase 2.x 嚴格、HR 不審)', () => {
+    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq())).toBe(false);
   });
 
-  it('canReject:HR + pending + proof_expired → false(強迫走 terminate)', () => {
-    expect(canReject({ id: 'HR1', role: 'hr' }, baseReq({ proof_status: 'expired' }))).toBe(false);
+  it('canReject:真主管 + pending + proof_required → true(既有行為)', () => {
+    expect(canReject(MGR, baseReq())).toBe(true);
+  });
+
+  it('canReject:真主管 + pending + proof_expired → false(強迫走 terminate)', () => {
+    expect(canReject(MGR, baseReq({ proof_status: 'expired' }))).toBe(false);
   });
 
   it('canReject:一般員工 → false(委任 canReview)', () => {
