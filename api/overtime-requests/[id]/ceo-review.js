@@ -3,6 +3,14 @@
 // body: { decision: 'approved'|'rejected', note?, compensation_type? }
 //
 // CEO 審核超時案件(status='pending_ceo')。
+//
+// Phase 2.x.2 修補:
+//   - 拔 admin 視同 CEO(嚴格 spec、admin 不能批 CEO 階)
+//   - chairman 視同 ceo 保留
+//   - approvals_v2_role_assignments fallback 保留(config 驅動的 ceo assignment)
+//   - 加 self-approval guard:caller.id !== employee_id
+//   - 加 cross-stage 連簽 guard:caller.id !== row.manager_id(同人不能 mgr + ceo 連簽)
+//   - ceo_id 強制 caller.id、不接受 client 傳
 
 import { requireAuth } from '../../../lib/auth.js';
 import { canTransition } from '../../../lib/overtime/request-state.js';
@@ -11,10 +19,10 @@ import { makeOvertimeRepo } from '../_repo.js';
 
 const COMP_TYPES = new Set(['comp_leave', 'overtime_pay', 'undecided']);
 
-async function isCallerCEO(repo, caller) {
-  // CEO 認定:role='ceo' 或 approvals_v2_role_assignments 中 role='ceo' 的成員
-  if (caller.role === 'ceo') return true;
-  if (caller.role === 'admin') return true;  // admin 視同 CEO
+async function isCallerCEO(caller) {
+  // CEO 認定:role='ceo' 或 'chairman'(視同)、或 approvals_v2_role_assignments 配 'ceo'
+  // Phase 2.x.2 嚴格 spec:admin **不**視同 CEO
+  if (caller.role === 'ceo' || caller.role === 'chairman') return true;
   if (!caller.id) return false;
   try {
     const { supabaseAdmin } = await import('../../../lib/supabase.js');
@@ -49,8 +57,22 @@ export default async function handler(req, res) {
   const reqRow = await repo.findOvertimeRequestById(id);
   if (!reqRow) return res.status(404).json({ error: 'request not found' });
 
-  const isCEO = await isCallerCEO(repo, caller);
-  if (!isCEO) return res.status(403).json({ error: 'CEO only' });
+  // Phase 2.x.2:self-approval guard
+  if (caller.id && caller.id === reqRow.employee_id) {
+    return res.status(403).json({ error: 'CANNOT_REVIEW_OWN_REQUEST' });
+  }
+
+  // Phase 2.x.2:cross-stage 連簽 guard
+  // 同人不能在 mgr 階段簽完又在 ceo 階段繼續簽(雙重 audit、防權力集中)
+  if (caller.id && reqRow.manager_id && caller.id === reqRow.manager_id) {
+    return res.status(403).json({
+      error: 'CROSS_STAGE_SELF_REVIEW',
+      detail: '你已在主管階段簽過、不可再審執行長階段',
+    });
+  }
+
+  const isCEO = await isCallerCEO(caller);
+  if (!isCEO) return res.status(403).json({ error: 'CEO only', your_role: caller.role });
 
   const action = decision === 'approved' ? 'ceo_approve' : 'ceo_reject';
   const tr = canTransition(reqRow.status, action, { is_ceo: true }, {
@@ -75,7 +97,7 @@ export default async function handler(req, res) {
   const now = new Date().toISOString();
   const patch = {
     status: tr.nextState,
-    ceo_id: caller.id || null,
+    ceo_id: caller.id,                 // 強制 caller.id、不接受 client 傳
     ceo_reviewed_at: now,
     ceo_decision: decision,
     ceo_note: note || null,

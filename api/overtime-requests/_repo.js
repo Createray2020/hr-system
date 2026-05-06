@@ -159,7 +159,7 @@ export function makeOvertimeRepo() {
 
     async findEmployeeManager(employee_id) {
       const { data, error } = await supabaseAdmin
-        .from('employees').select('id, manager_id, name').eq('id', employee_id).maybeSingle();
+        .from('employees').select('id, manager_id, name, dept_id').eq('id', employee_id).maybeSingle();
       if (error) throw error;
       return data || null;
     },

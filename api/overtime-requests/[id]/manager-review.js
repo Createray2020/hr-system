@@ -2,15 +2,21 @@
 // POST  /api/overtime-requests/:id/manager-review
 // body: { decision: 'approved'|'rejected', note?, compensation_type? }
 //
-// 流程(規範 §9.6):
-//   1. 驗證 actor 是該員工的主管 / HR
+// 流程(規範 §9.6 + Phase 2.x.2 嚴格 spec):
+//   1. 驗證 actor:dept_id 同 employee + is_manager=true + 非自己(對齊 leave canReview)
 //   2. canTransition:依 is_over_limit 決定 next state
 //   3. compensation_type='undecided' 時 body 可帶 compensation_type 改寫
 //   4. UPDATE overtime_requests:status / manager_id / manager_reviewed_at / manager_decision / manager_note
 //   5. 若直接 approved + comp_leave → 觸發 convertOvertimeToCompTime
+//
+// Phase 2.x.2 修補:
+//   - 拔 isHR fallback bypass(原本 HR/admin/CEO/chairman 任何 backoffice 都能批、跨部門誤審)
+//   - 從 manager_id pointer 改 dept+is_manager(prod 普遍 manager_id=null、不可靠)
+//   - 加 self-approval guard
+//   - manager_id 強制 caller.id、不接受 client 傳
 
+import { supabaseAdmin } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
-import { isBackofficeRole } from '../../../lib/roles.js';
 import { canTransition } from '../../../lib/overtime/request-state.js';
 import { convertOvertimeToCompTime } from '../../../lib/overtime/comp-conversion.js';
 import { makeOvertimeRepo } from '../_repo.js';
@@ -39,15 +45,26 @@ export default async function handler(req, res) {
   const reqRow = await repo.findOvertimeRequestById(id);
   if (!reqRow) return res.status(404).json({ error: 'request not found' });
 
-  // 主管權限:該員工 manager_id == caller.id 或 caller is HR
-  const isHR = isBackofficeRole(caller);
-  let isDirectManager = false;
-  if (caller.id) {
-    const emp = await repo.findEmployeeManager(reqRow.employee_id);
-    isDirectManager = !!emp && emp.manager_id === caller.id;
+  // Phase 2.x.2:self-approval guard(本人不能批自己的加班)
+  if (caller.id && caller.id === reqRow.employee_id) {
+    return res.status(403).json({ error: 'CANNOT_REVIEW_OWN_REQUEST' });
   }
-  if (!isHR && !isDirectManager) {
-    return res.status(403).json({ error: 'not manager or HR' });
+
+  // Phase 2.x.2:dept+is_manager(對齊 leave canReview),拔 isHR / manager_id bypass
+  if (caller.is_manager !== true || !caller.dept_id) {
+    return res.status(403).json({
+      error: 'NOT_MANAGER',
+      detail: '只有部門主管可審',
+    });
+  }
+  const emp = await repo.findEmployeeManager(reqRow.employee_id);
+  const employeeDeptId = emp?.dept_id || null;
+  if (!employeeDeptId || caller.dept_id !== employeeDeptId) {
+    return res.status(403).json({
+      error: 'NOT_SAME_DEPT',
+      detail: '只有同部門主管可審',
+      employee_dept_id: employeeDeptId,
+    });
   }
 
   // 狀態機
@@ -75,7 +92,7 @@ export default async function handler(req, res) {
   const now = new Date().toISOString();
   const patch = {
     status: tr.nextState,
-    manager_id: caller.id || null,
+    manager_id: caller.id,             // 強制 caller.id、不接受 client 傳
     manager_reviewed_at: now,
     manager_decision: decision,
     manager_note: note || null,
