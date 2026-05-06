@@ -466,3 +466,87 @@ describe('Flow G — Override 紀錄', () => {
     expect(r2.request.override_reason).toBe('CEO 確認可以');
   });
 });
+
+// ════════════════════════════════════════════════════════════
+// 流程 H:Phase 1.5 — proof 過期 → cron 自動轉事假
+// ════════════════════════════════════════════════════════════
+import { sweepExpiredProofs } from '../lib/leave/proof-sweep.js';
+
+describe('Flow H — proof 過期 → cron 轉事假(Phase 1.5)', () => {
+  it('病假 submit → proof_status=required + due 過期 → sweep 出 convert action', async () => {
+    const { repo } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'sick',
+      submitted_at: '2026-05-01T08:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.proof_status).toBe('required');
+    // 病假 grace=5、end=2026-05-01 → due=2026-05-06、模擬 5/10 跑 cron(已過期)
+    const now = '2026-05-10T00:00:00+08:00';
+    const actions = sweepExpiredProofs([r.request], now);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      id: r.request.id,
+      action: 'convert',
+      leave_type: 'personal',
+      proof_status: 'converted_to_personal',
+      original_leave_type: 'sick',
+    });
+    expect(actions[0].note_suffix).toContain('原假別 sick');
+  });
+
+  it('病假 submit + 員工已交 proof_url → sweep 不轉(submitted 不在 required)', async () => {
+    const { repo } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'sick',
+      submitted_at: '2026-05-01T08:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    // 模擬員工提交證明
+    await repo.updateLeaveRequest(r.request.id, {
+      proof_url: 'https://example.com/sick-cert.pdf',
+      proof_status: 'submitted',
+    });
+    const updated = await repo.findLeaveRequestById(r.request.id);
+    const actions = sweepExpiredProofs([updated], '2026-05-10T00:00:00+08:00');
+    expect(actions).toEqual([]);
+  });
+
+  it('事假 submit → proof_status=not_required → sweep 不動', async () => {
+    const { repo } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'personal',
+      submitted_at: '2026-04-26T12:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    expect(r.request.proof_status).toBe('not_required');
+    const actions = sweepExpiredProofs([r.request], '2026-05-10T00:00:00+08:00');
+    expect(actions).toEqual([]);
+  });
+
+  it('cron 轉事假(模擬 UPDATE)→ leave_type=personal + proof_status=converted_to_personal', async () => {
+    const { repo, state } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'sick',
+      submitted_at: '2026-05-01T08:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    const actions = sweepExpiredProofs([r.request], '2026-05-10T00:00:00+08:00');
+    // 模擬 cron handler 套用 action
+    for (const a of actions) {
+      await repo.updateLeaveRequest(a.id, {
+        leave_type: a.leave_type,
+        proof_status: a.proof_status,
+        handler_note: `[2026-05-10] ${a.note_suffix}`,
+      });
+    }
+    expect(state.row.leave_type).toBe('personal');
+    expect(state.row.proof_status).toBe('converted_to_personal');
+    expect(state.row.handler_note).toContain('原假別 sick');
+  });
+});
