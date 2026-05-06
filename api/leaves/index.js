@@ -33,6 +33,44 @@ import { makeLeaveRepo } from './_repo.js';
 import { addDeptName, addDeptNameSingle } from '../../lib/dept-name-mapper.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
 
+/**
+ * Phase 2.x:批次補 employee_manager_name(同部門 active is_manager=true 員工 name 串)
+ * + employee_dept_id alias(對齊 canReview 期待的 reviewable shape)。
+ *
+ * Two-step:不動 schema、純 application-side join。
+ *   1. 撈所有 unique dept_id 的 active managers
+ *   2. 串成 ', ' 用、空 → null(同部門無 manager 時 frontend 顯示 '—')
+ *
+ * @param {Array<{ employee_id, dept_id?, ... }>} rows  rows 已 flatten employee 的 dept_id
+ * @returns {Promise<Array>} rows + employee_dept_id + employee_manager_name
+ */
+async function attachManagerNames(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows || [];
+  const deptIds = [...new Set(rows.map(r => r.dept_id).filter(Boolean))];
+  if (deptIds.length === 0) {
+    return rows.map(r => ({ ...r, employee_dept_id: r.dept_id || null, employee_manager_name: null }));
+  }
+  const { data: managers } = await supabaseAdmin
+    .from('employees')
+    .select('id, name, dept_id')
+    .in('dept_id', deptIds)
+    .eq('is_manager', true)
+    .eq('status', 'active')
+    .order('name');
+  const deptToManagers = {};
+  for (const m of managers || []) {
+    if (!deptToManagers[m.dept_id]) deptToManagers[m.dept_id] = [];
+    deptToManagers[m.dept_id].push(m.name);
+  }
+  return rows.map(r => ({
+    ...r,
+    employee_dept_id: r.dept_id || null,
+    employee_manager_name: r.dept_id && deptToManagers[r.dept_id]
+      ? deptToManagers[r.dept_id].join(', ')
+      : null,
+  }));
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -88,10 +126,12 @@ export default async function handler(req, res) {
         .from('employees').select('name, dept_id, position, avatar, departments(name)')
         .eq('id', leave.employee_id).single();
       addDeptNameSingle(emp);
-      return res.status(200).json({
+      const flat = {
         ...leave,
         emp_name: emp?.name, dept_id: emp?.dept_id, dept_name: emp?.dept_name, position: emp?.position, avatar: emp?.avatar,
-      });
+      };
+      const [withMgr] = await attachManagerNames([flat]);
+      return res.status(200).json(withMgr);
     }
 
     if (req.query.stats === 'true') {
@@ -140,6 +180,7 @@ export default async function handler(req, res) {
     });
     if (dept_id)   rows = rows.filter(r => r.dept_id === dept_id);
     if (search) rows = rows.filter(r => (r.emp_name || '').includes(search));
+    rows = await attachManagerNames(rows);
     return res.status(200).json(rows);
   }
 
