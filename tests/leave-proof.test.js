@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeProofDueAt,
   getInitialProofStatus,
-  shouldAutoConvertToPersonal,
+  isProofExpired,
 } from '../lib/leave/proof.js';
 
 // 假別 fixture(對齊 Phase 1.1 backfill 後的真實值)
@@ -71,36 +71,36 @@ describe('getInitialProofStatus', () => {
   });
 });
 
-describe('shouldAutoConvertToPersonal', () => {
+describe('isProofExpired', () => {
   const now = '2026-05-20T00:00:00+08:00';
 
   it('required + due 已過 → true', () => {
     const req = { proof_status: 'required', proof_due_at: '2026-05-15T23:59:59+08:00' };
-    expect(shouldAutoConvertToPersonal(req, now)).toBe(true);
+    expect(isProofExpired(req, now)).toBe(true);
   });
 
   it('submitted + due 已過 → false(已交不用轉)', () => {
     const req = { proof_status: 'submitted', proof_due_at: '2026-05-15T23:59:59+08:00' };
-    expect(shouldAutoConvertToPersonal(req, now)).toBe(false);
+    expect(isProofExpired(req, now)).toBe(false);
   });
 
   it('required + due 未過 → false', () => {
     const req = { proof_status: 'required', proof_due_at: '2026-05-25T23:59:59+08:00' };
-    expect(shouldAutoConvertToPersonal(req, now)).toBe(false);
+    expect(isProofExpired(req, now)).toBe(false);
   });
 
   it('not_required → false(不用看 due)', () => {
     const req = { proof_status: 'not_required', proof_due_at: '2026-05-15T23:59:59+08:00' };
-    expect(shouldAutoConvertToPersonal(req, now)).toBe(false);
+    expect(isProofExpired(req, now)).toBe(false);
   });
 
   it('converted_to_personal → false(已轉)', () => {
     const req = { proof_status: 'converted_to_personal', proof_due_at: '2026-05-15T23:59:59+08:00' };
-    expect(shouldAutoConvertToPersonal(req, now)).toBe(false);
+    expect(isProofExpired(req, now)).toBe(false);
   });
 
   it('proof_due_at 為 null → false', () => {
     const req = { proof_status: 'required', proof_due_at: null };
-    expect(shouldAutoConvertToPersonal(req, now)).toBe(false);
+    expect(isProofExpired(req, now)).toBe(false);
   });
 });

@@ -10,7 +10,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { submitLeaveRequest, approveLeaveRequest, rejectLeaveRequest, cancelLeaveRequest } from '../lib/leave/request-flow.js';
-import { shouldAutoConvertToPersonal } from '../lib/leave/proof.js';
+import { isProofExpired } from '../lib/leave/proof.js';
 
 // ─── 假別 fixture(對齊 Phase 1.1 prod 值)─────────────────────
 const SEED_LT = {
@@ -316,9 +316,9 @@ describe('Flow E — 證明文件', () => {
     expect(updated.proof_url).toBe('https://example.com/sick-cert.pdf');
   });
 
-  it('proof_status=required + due 已過 → shouldAutoConvertToPersonal=true', async () => {
+  it('proof_status=required + due 已過 → isProofExpired=true', async () => {
     const row = { proof_status: 'required', proof_due_at: '2026-05-06T23:59:59+08:00' };
-    expect(shouldAutoConvertToPersonal(row, '2026-05-10T00:00:00+08:00')).toBe(true);
+    expect(isProofExpired(row, '2026-05-10T00:00:00+08:00')).toBe(true);
   });
 
   it('事假(requires_proof=false)→ proof_status=not_required + proof_due_at=null', async () => {
@@ -472,6 +472,12 @@ describe('Flow G — Override 紀錄', () => {
 // ════════════════════════════════════════════════════════════
 import { sweepExpiredProofs } from '../lib/leave/proof-sweep.js';
 
+// Phase 1.5 升級:sweepExpiredProofs 簽名 (rows, leaveTypesByCode, now)、依 leaveType.proof_expiry_action 分流
+const SWEEP_LT = {
+  sick:     { code: 'sick',     proof_expiry_action: 'convert' },
+  marriage: { code: 'marriage', proof_expiry_action: 'mark_expired' },
+};
+
 describe('Flow H — proof 過期 → cron 轉事假(Phase 1.5)', () => {
   it('病假 submit → proof_status=required + due 過期 → sweep 出 convert action', async () => {
     const { repo } = makeStatefulRepo();
@@ -485,7 +491,7 @@ describe('Flow H — proof 過期 → cron 轉事假(Phase 1.5)', () => {
     expect(r.request.proof_status).toBe('required');
     // 病假 grace=5、end=2026-05-01 → due=2026-05-06、模擬 5/10 跑 cron(已過期)
     const now = '2026-05-10T00:00:00+08:00';
-    const actions = sweepExpiredProofs([r.request], now);
+    const actions = sweepExpiredProofs([r.request], SWEEP_LT, now);
     expect(actions).toHaveLength(1);
     expect(actions[0]).toMatchObject({
       id: r.request.id,
@@ -511,7 +517,7 @@ describe('Flow H — proof 過期 → cron 轉事假(Phase 1.5)', () => {
       proof_status: 'submitted',
     });
     const updated = await repo.findLeaveRequestById(r.request.id);
-    const actions = sweepExpiredProofs([updated], '2026-05-10T00:00:00+08:00');
+    const actions = sweepExpiredProofs([updated], SWEEP_LT, '2026-05-10T00:00:00+08:00');
     expect(actions).toEqual([]);
   });
 
@@ -524,7 +530,7 @@ describe('Flow H — proof 過期 → cron 轉事假(Phase 1.5)', () => {
       end_at:   '2026-05-01T18:00:00+08:00',
     });
     expect(r.request.proof_status).toBe('not_required');
-    const actions = sweepExpiredProofs([r.request], '2026-05-10T00:00:00+08:00');
+    const actions = sweepExpiredProofs([r.request], SWEEP_LT, '2026-05-10T00:00:00+08:00');
     expect(actions).toEqual([]);
   });
 
@@ -536,7 +542,7 @@ describe('Flow H — proof 過期 → cron 轉事假(Phase 1.5)', () => {
       start_at: '2026-05-01T09:00:00+08:00',
       end_at:   '2026-05-01T18:00:00+08:00',
     });
-    const actions = sweepExpiredProofs([r.request], '2026-05-10T00:00:00+08:00');
+    const actions = sweepExpiredProofs([r.request], SWEEP_LT, '2026-05-10T00:00:00+08:00');
     // 模擬 cron handler 套用 action
     for (const a of actions) {
       await repo.updateLeaveRequest(a.id, {
