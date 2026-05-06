@@ -31,6 +31,7 @@ import { submitLeaveRequest } from '../../lib/leave/request-flow.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from './_repo.js';
 import { addDeptName, addDeptNameSingle } from '../../lib/dept-name-mapper.js';
+import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -73,9 +74,16 @@ export default async function handler(req, res) {
   // GET
   if (req.method === 'GET') {
     if (id) {
+      // Phase 2:?id=X 加 requireAuth + scope check(原本完全裸奔、任何人能看任何假單)
+      const caller = await requireAuth(req, res);
+      if (!caller) return;
       const { data: leave, error } = await supabaseAdmin
         .from('leave_requests').select('*').eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到假單' });
+      const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+      if (!canSeeEmployee(scope, leave.employee_id)) {
+        return res.status(403).json({ error: 'Forbidden: 無權看此假單' });
+      }
       const { data: emp } = await supabaseAdmin
         .from('employees').select('name, dept_id, position, avatar, departments(name)')
         .eq('id', leave.employee_id).single();
@@ -87,6 +95,9 @@ export default async function handler(req, res) {
     }
 
     if (req.query.stats === 'true') {
+      // Phase 2:?stats=true 加 requireAuth(原本裸奔、不該外洩聚合 count)
+      const caller = await requireAuth(req, res);
+      if (!caller) return;
       const { data, error } = await supabaseAdmin.from('leave_requests').select('status');
       if (error) return res.status(500).json({ error: error.message });
       const stats = { pending: 0, approved: 0, rejected: 0, total: data.length };
@@ -99,10 +110,18 @@ export default async function handler(req, res) {
     if (status) q = q.eq('status',     status);
     if (type)   q = q.eq('leave_type', type);
 
-    // 員工只能看自己已核准/送審的假;主管/HR 看全公司(leave-admin 等頁面靠 dept_id 再篩)
+    // Phase 2:legacy GET list 加 dept-scope filter
+    // 既有 canAccessBackoffice 包 is_manager、主管被當 HR 看全公司、漏網。
+    // 改用 resolveAuthScope:HR 看全部、主管 dept-scope、員工本人。
     const caller = await requireAuth(req, res);
     if (!caller) return;
-    if (!canAccessBackoffice(caller) && caller.id) q = q.eq('employee_id', caller.id);
+    const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+    if (scope.mode === 'self') {
+      q = q.eq('employee_id', scope.selfId);
+    } else if (scope.mode === 'dept') {
+      q = q.in('employee_id', [scope.selfId, ...(scope.deptEmpIds || [])]);
+    }
+    // mode='all' 不加 filter
 
     const { data: leaves, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
@@ -159,8 +178,17 @@ export default async function handler(req, res) {
 // ─────────────────────────────────────────────────────────────────
 
 async function handleGetAnnualBalance(req, res) {
+  // Phase 2:加 requireAuth + scope check(原本完全裸奔、可猜 employee_id 撈他人特休)
+  const caller = await requireAuth(req, res);
+  if (!caller) return;
   const { employee_id } = req.query;
   if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+
+  const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+  if (!canSeeEmployee(scope, employee_id)) {
+    return res.status(403).json({ error: 'Forbidden: 無權看此員工特休餘額' });
+  }
+
   try {
     const balance = await getAnnualBalance(makeLeaveRepo(), employee_id);
     return res.status(200).json({ balance });
@@ -170,13 +198,33 @@ async function handleGetAnnualBalance(req, res) {
 }
 
 async function handleNewGet(req, res) {
+  // Phase 2:加 requireAuth + scope check(原本完全裸奔、可猜 employee_id 撈他人假單)
+  const caller = await requireAuth(req, res);
+  if (!caller) return;
+
   const { employee_id, year, month } = req.query;
   const y = parseInt(year);
   if (!Number.isInteger(y)) return res.status(400).json({ error: 'invalid year' });
 
+  // 顯式帶 employee_id 才檢 scope;沒帶就走 caller 自身視角
+  const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+  if (employee_id) {
+    if (!canSeeEmployee(scope, employee_id)) {
+      return res.status(403).json({ error: 'Forbidden: 無權看此員工假單' });
+    }
+  }
+
   let q = supabaseAdmin.from('leave_requests').select('*')
-    .eq('employee_id', employee_id)
     .order('start_at', { ascending: false });
+
+  if (employee_id) {
+    q = q.eq('employee_id', employee_id);
+  } else if (scope.mode === 'self') {
+    q = q.eq('employee_id', scope.selfId);
+  } else if (scope.mode === 'dept') {
+    q = q.in('employee_id', [scope.selfId, ...(scope.deptEmpIds || [])]);
+  }
+  // mode='all' + 沒帶 employee_id → 不加 filter、HR 看全公司
 
   // 用 start_at 範圍篩選(新欄位)
   const yearStart = `${y}-01-01T00:00:00+08:00`;

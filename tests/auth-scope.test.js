@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   resolveAuthScope,
   resolveAuthScopeWithDeptIds,
+  canSeeEmployee,
 } from '../lib/auth-scope.js';
 
 const HR = { id: 'HR1', role: 'hr',       is_manager: false, dept_id: 'D_HR' };
@@ -115,5 +116,38 @@ describe('resolveAuthScopeWithDeptIds — async + repo', () => {
     const repo = { findActiveEmployeeIdsByDept: vi.fn().mockResolvedValue(null) };
     const scope = await resolveAuthScopeWithDeptIds(MGR, 'selfOrDept', repo);
     expect(scope.deptEmpIds).toEqual([]);
+  });
+});
+
+describe('canSeeEmployee', () => {
+  it("mode='all' → 任何 empId 都 true", () => {
+    const scope = { mode: 'all' };
+    expect(canSeeEmployee(scope, 'E1')).toBe(true);
+    expect(canSeeEmployee(scope, 'E_other')).toBe(true);
+  });
+
+  it("mode='self' → 只 selfId 通過", () => {
+    const scope = { mode: 'self', selfId: 'E1' };
+    expect(canSeeEmployee(scope, 'E1')).toBe(true);
+    expect(canSeeEmployee(scope, 'E_other')).toBe(false);
+  });
+
+  it("mode='dept' → selfId 或 deptEmpIds 內", () => {
+    const scope = { mode: 'dept', selfId: 'M1', deptId: 'D1', deptEmpIds: ['E1','E2'] };
+    expect(canSeeEmployee(scope, 'M1')).toBe(true);
+    expect(canSeeEmployee(scope, 'E1')).toBe(true);
+    expect(canSeeEmployee(scope, 'E2')).toBe(true);
+    expect(canSeeEmployee(scope, 'E_other')).toBe(false);
+  });
+
+  it("mode='dept' + deptEmpIds 缺 → 只 selfId 通過", () => {
+    const scope = { mode: 'dept', selfId: 'M1', deptId: 'D1' };  // 沒撈 deptEmpIds
+    expect(canSeeEmployee(scope, 'M1')).toBe(true);
+    expect(canSeeEmployee(scope, 'E1')).toBe(false);
+  });
+
+  it('null scope / null empId → false', () => {
+    expect(canSeeEmployee(null, 'E1')).toBe(false);
+    expect(canSeeEmployee({ mode: 'all' }, null)).toBe(false);
   });
 });
