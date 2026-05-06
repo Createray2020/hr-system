@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS schedule_periods (
   status      TEXT DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','locked')),
   created_by  TEXT,
   approved_by TEXT,
+  -- 2026-05-07 Phase 2.x.3: 加 published_by / published_at audit 欄位
+  -- 詳見 migrations/2026_05_07_schedule_periods_audit.sql
+  published_by TEXT REFERENCES employees(id),
+  published_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE schedule_periods ENABLE ROW LEVEL SECURITY;
