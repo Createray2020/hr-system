@@ -25,7 +25,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import {
-  clockIn, clockOut,
+  clockIn, clockOut, pickSegmentForClockIn,
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
 } from '../../lib/attendance/clock.js';
 import { recomputeAttendanceStatus } from '../../lib/attendance/recompute.js';
@@ -170,16 +170,24 @@ export default async function handler(req, res) {
       workHours = Math.round((new Date(clockOutIso) - new Date(clockInIso)) / 36000) / 100;
     }
 
-    // 撈當天員工的 schedule(取 segment_no 最小那筆、單段班一定中)、給 recompute 算
-    // 找不到時 schedule=null、recompute 不算 late/early、status 走 fallback
+    // 撈當天員工**所有** schedules、用 clock_in(或 fallback clock_out)挑對的 segment、
+    // 給 recompute 算 late/early。找不到時 schedule=null、recompute 不算 late/early。
+    //
+    // 多段班 bug fix(原本死取 segment_no=1):重用 lib/attendance/clock.js::pickSegmentForClockIn、
+    // 跟即時打卡 segment 邏輯一致。員工 14:00 補登第二段時不會誤用第一段算成 late=6h。
     let manualSchedule = null;
     try {
       const { data: scheds } = await supabaseAdmin
         .from('schedules')
         .select('id, start_time, end_time, crosses_midnight, scheduled_work_minutes, segment_no')
         .eq('employee_id', employee_id).eq('work_date', work_date)
-        .order('segment_no').limit(1);
-      manualSchedule = (scheds && scheds[0]) || null;
+        .order('segment_no');
+      if (scheds && scheds.length > 0) {
+        const pickAt = clockInIso || clockOutIso;
+        manualSchedule = pickAt
+          ? pickSegmentForClockIn(scheds, pickAt)   // 多段班正確選段
+          : scheds[0];                              // 沒任何時間 → 退回第一段
+      }
     } catch (_) {}
 
     // recompute late/early/status(timezone-aware、跟 clockIn/clockOut 同算法)
@@ -198,10 +206,18 @@ export default async function handler(req, res) {
       late_minutes:        computed.late_minutes,
       early_leave_minutes: computed.early_leave_minutes,
       note:           note   || '',
+      // 對齊 clockIn 行為:寫入 schedule_id + segment_no(多段班需要 segment_no 區分 row)
+      ...(manualSchedule
+        ? { schedule_id: manualSchedule.id, segment_no: manualSchedule.segment_no }
+        : {}),
     };
 
-    const { data: existing } = await supabaseAdmin
-      .from('attendance').select('id').eq('employee_id', employee_id).eq('work_date', work_date).single();
+    // 多段班:用 (employee_id, work_date, segment_no) 找既有 row、避免 .single() 對多 row throw
+    let existingQuery = supabaseAdmin
+      .from('attendance').select('id')
+      .eq('employee_id', employee_id).eq('work_date', work_date);
+    if (manualSchedule) existingQuery = existingQuery.eq('segment_no', manualSchedule.segment_no);
+    const { data: existing } = await existingQuery.maybeSingle();
 
     let error;
     if (existing) {
