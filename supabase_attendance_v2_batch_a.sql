@@ -53,6 +53,12 @@ CREATE TABLE leave_types (
   advance_rule     TEXT    NOT NULL DEFAULT 'soft' CHECK (advance_rule IN ('hard','soft')),
   requires_proof   BOOLEAN NOT NULL DEFAULT false,
   proof_grace_days INTEGER NOT NULL DEFAULT 0,
+  -- 2026-05-06 Phase 1.5 升級: 證明過期分流動作
+  --   convert      — 過期自動轉事假(短假、員工該負責補:sick / hospital_unpaid)
+  --   mark_expired — 過期只標 proof_status=expired、leave_type 不動、HR 個案處理(法定假)
+  -- 詳見 migrations/2026_05_06_leave_proof_expiry_action.sql
+  proof_expiry_action TEXT NOT NULL DEFAULT 'convert'
+    CHECK (proof_expiry_action IN ('convert','mark_expired')),
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
@@ -62,48 +68,49 @@ CREATE TABLE leave_types (
 INSERT INTO leave_types (
   code, name_zh, is_paid, pay_rate, affects_attendance_bonus, affects_attendance_rate,
   has_balance, legal_max_days_per_year, legal_reference,
-  advance_hours, advance_rule, requires_proof, proof_grace_days
+  advance_hours, advance_rule, requires_proof, proof_grace_days, proof_expiry_action
 ) VALUES
-  ('annual',    '特休',    true,  1.00, false, false, true,  NULL, '勞基法 §38',          72,  'hard', false, 0),
-  ('sick',      '病假',    true,  0.50, true,  true,  false, 30,   '勞工請假規則 §4',     0,   'soft', true,  5),
-  ('personal',  '事假',    false, 0.00, true,  true,  false, 14,   '勞工請假規則 §7',     24,  'hard', false, 0),
-  ('maternity', '產假',    true,  1.00, false, false, false, NULL, '勞基法 §50',          336, 'hard', true,  0),
-  ('funeral',   '喪假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §3',     0,   'soft', true,  5),
-  ('marriage',  '婚假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §2',     168, 'hard', true,  0),
-  ('comp',      '補休',    true,  1.00, false, false, true,  NULL, '勞基法 §32-1',        72,  'hard', false, 0),
-  ('public',    '公假',    true,  1.00, false, false, false, NULL, '勞工請假規則 §8',     120, 'hard', true,  0)
+  ('annual',    '特休',    true,  1.00, false, false, true,  NULL, '勞基法 §38',          72,  'hard', false, 0, 'convert'),
+  ('sick',      '病假',    true,  0.50, true,  true,  false, 30,   '勞工請假規則 §4',     0,   'soft', true,  5, 'convert'),
+  ('personal',  '事假',    false, 0.00, true,  true,  false, 14,   '勞工請假規則 §7',     24,  'hard', false, 0, 'convert'),
+  ('maternity', '產假',    true,  1.00, false, false, false, NULL, '勞基法 §50',          336, 'hard', true,  0, 'mark_expired'),
+  ('funeral',   '喪假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §3',     0,   'soft', true,  5, 'mark_expired'),
+  ('marriage',  '婚假',    true,  1.00, false, false, false, 8,    '勞工請假規則 §2',     168, 'hard', true,  0, 'mark_expired'),
+  ('comp',      '補休',    true,  1.00, false, false, true,  NULL, '勞基法 §32-1',        72,  'hard', false, 0, 'convert'),
+  ('public',    '公假',    true,  1.00, false, false, false, NULL, '勞工請假規則 §8',     120, 'hard', true,  0, 'mark_expired')
 ON CONFLICT (code) DO UPDATE SET
-  advance_hours    = EXCLUDED.advance_hours,
-  advance_rule     = EXCLUDED.advance_rule,
-  requires_proof   = EXCLUDED.requires_proof,
-  proof_grace_days = EXCLUDED.proof_grace_days;
+  advance_hours       = EXCLUDED.advance_hours,
+  advance_rule        = EXCLUDED.advance_rule,
+  requires_proof      = EXCLUDED.requires_proof,
+  proof_grace_days    = EXCLUDED.proof_grace_days,
+  proof_expiry_action = EXCLUDED.proof_expiry_action;
 
 -- 2026-05-05 Phase 1.1: 新增 5 種假別（產檢 / 陪產 / 流產 / 安胎 / 育嬰）
 -- 來源：migrations/2026_05_05_leave_phase1_schema.sql C 段
 INSERT INTO leave_types (
   code, name_zh, is_paid, pay_rate, has_balance,
   legal_max_days_per_year, is_active, display_order,
-  advance_hours, advance_rule, requires_proof, proof_grace_days
+  advance_hours, advance_rule, requires_proof, proof_grace_days, proof_expiry_action
 ) VALUES
-  ('paternity_prenatal', '產檢假',       true,  1.00, false, 7,    true, 81, 24,  'hard', false, 0),
-  ('paternity',          '陪產假',       true,  1.00, false, 7,    true, 82, 0,   'soft', true,  5),
-  ('miscarriage',        '流產假',       true,  1.00, false, NULL, true, 83, 0,   'soft', true,  5),
-  ('pregnancy_rest',     '安胎假',       true,  0.50, false, NULL, true, 84, 0,   'soft', true,  5),
-  ('parental',           '育嬰留職停薪', false, 0.00, false, NULL, true, 85, 240, 'hard', true,  0)
+  ('paternity_prenatal', '產檢假',       true,  1.00, false, 7,    true, 81, 24,  'hard', false, 0, 'convert'),
+  ('paternity',          '陪產假',       true,  1.00, false, 7,    true, 82, 0,   'soft', true,  5, 'mark_expired'),
+  ('miscarriage',        '流產假',       true,  1.00, false, NULL, true, 83, 0,   'soft', true,  5, 'mark_expired'),
+  ('pregnancy_rest',     '安胎假',       true,  0.50, false, NULL, true, 84, 0,   'soft', true,  5, 'mark_expired'),
+  ('parental',           '育嬰留職停薪', false, 0.00, false, NULL, true, 85, 240, 'hard', true,  0, 'mark_expired')
 ON CONFLICT (code) DO NOTHING;
 
 -- 2026-05-05: prod 才有的 7 種假別（在 batch_a 之後手動於 prod 加入）
 -- 注意：本 INSERT 只覆蓋 code / name_zh / display_order / 4 個 Phase 1.1 欄位、其他欄位
 --   (is_paid / pay_rate / affects_* / has_balance / legal_max_days / legal_reference)
 --   取 CREATE TABLE 預設值。fresh setup 跑這段後若需要校正、請對照 prod 匯出。
-INSERT INTO leave_types (code, name_zh, display_order, advance_hours, advance_rule, requires_proof, proof_grace_days) VALUES
-  ('work_injury',      '公傷病假',           50, 0,  'soft', true,  0),
-  ('menstrual',        '生理假',             51, 0,  'soft', false, 0),
-  ('family_care',      '家庭照顧假',         52, 0,  'soft', false, 0),
-  ('typhoon',          '颱風假',             53, 0,  'soft', false, 0),
-  ('voting',           '投票日',             54, 24, 'hard', false, 0),
-  ('hospital_unpaid',  '住院傷病假(不支薪)', 55, 0,  'soft', true,  5),
-  ('job_seeking',      '謀職假',             56, 24, 'hard', false, 0)
+INSERT INTO leave_types (code, name_zh, display_order, advance_hours, advance_rule, requires_proof, proof_grace_days, proof_expiry_action) VALUES
+  ('work_injury',      '公傷病假',           50, 0,  'soft', true,  0, 'mark_expired'),
+  ('menstrual',        '生理假',             51, 0,  'soft', false, 0, 'convert'),
+  ('family_care',      '家庭照顧假',         52, 0,  'soft', false, 0, 'convert'),
+  ('typhoon',          '颱風假',             53, 0,  'soft', false, 0, 'convert'),
+  ('voting',           '投票日',             54, 24, 'hard', false, 0, 'convert'),
+  ('hospital_unpaid',  '住院傷病假(不支薪)', 55, 0,  'soft', true,  5, 'convert'),
+  ('job_seeking',      '謀職假',             56, 24, 'hard', false, 0, 'convert')
 ON CONFLICT (code) DO NOTHING;
 
 
