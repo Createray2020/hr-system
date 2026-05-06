@@ -13,8 +13,9 @@ import {
   approveLeaveRequest, rejectLeaveRequest, cancelLeaveRequest,
 } from '../../lib/leave/request-flow.js';
 import {
-  canReview, canCancel, canArchive,
-  transitionApprove, transitionArchive,
+  canReview, canCancel, canArchive, canTerminate,
+  canApprove, canReject,
+  transitionApprove, transitionArchive, transitionTerminate,
 } from '../../lib/leave/stages.js';
 import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { makeLeaveRepo } from './_repo.js';
@@ -44,6 +45,7 @@ async function notifyLeaveStatus(repo, requestRow, id) {
       cancelled: '↩ 假單已撤回',
       archived:  '📦 假單已歸檔',
       pending_ceo: '⏳ 已轉給執行長',
+      terminated: '📛 假單已由 HR 終止',
     };
     const status = requestRow.status;
     const bodyMap = {
@@ -52,6 +54,7 @@ async function notifyLeaveStatus(repo, requestRow, id) {
       cancelled: '已撤回',
       archived: '已歸檔',
       pending_ceo: '主管已批、轉執行長審核',
+      terminated: '因證明逾期已由 HR 終止',
     };
     const payload = {
       title: titleMap[status] || '假單異動',
@@ -155,9 +158,9 @@ export default async function handler(req, res) {
     }
   }
 
-  // ─── PUT decision approve / reject / cancel ──────────────────
-  if (!['approve', 'reject', 'cancel'].includes(decision)) {
-    return res.status(400).json({ error: 'decision must be approve / reject / cancel (or action archive / submit_proof)' });
+  // ─── PUT decision approve / reject / cancel / terminate ──────
+  if (!['approve', 'reject', 'cancel', 'terminate'].includes(decision)) {
+    return res.status(400).json({ error: 'decision must be approve / reject / cancel / terminate (or action archive / submit_proof)' });
   }
 
   try {
@@ -166,15 +169,24 @@ export default async function handler(req, res) {
       r = await handleApprove({ repo, id, callerId, caller, body, override_reason });
     } else if (decision === 'reject') {
       r = await handleReject({ repo, id, callerId, caller, reject_reason });
+    } else if (decision === 'terminate') {
+      r = await handleTerminate({ repo, id, callerId, caller });
     } else {
-      // HR 強制撤回 = 走 cancelLeaveRequest(用 employee_id 當 cancelled_by 繞過 own-check)
+      // Phase 1.6.1 backlog:HR 強制撤回語義應改走 decision='terminate'、
+      // 本路徑保留作 fallback、未來移除。新 prod use case 應全走 terminate。
       const req_ = await repo.findLeaveRequestById(id);
       if (!req_) return res.status(404).json({ error: 'NOT_FOUND' });
       r = await cancelLeaveRequest(repo, { request_id: id, cancelled_by: req_.employee_id });
     }
     if (!r.ok) {
-      // canReview / canArchive 失敗的特殊回 403
+      // canReview / canArchive / canTerminate 失敗的特殊回 403
       if (r.reason === 'FORBIDDEN') return res.status(403).json(r);
+      // Phase 1.6:proof_status='expired' guard 擋下的 approve / reject / 不合格的 terminate
+      if (r.reason === 'NOT_ELIGIBLE_TO_APPROVE'   ||
+          r.reason === 'NOT_ELIGIBLE_TO_REJECT'    ||
+          r.reason === 'NOT_ELIGIBLE_TO_TERMINATE') {
+        return res.status(422).json(r);
+      }
       return res.status(400).json(r);
     }
     await notifyLeaveStatus(repo, r.request, id);
@@ -203,6 +215,11 @@ async function handleApprove({ repo, id, callerId, caller, body, override_reason
   };
   if (!canReview(caller, reviewable)) {
     return { ok: false, reason: 'FORBIDDEN', detail: 'Cannot review at stage ' + stage };
+  }
+  // Phase 1.6:proof 過期的 row 強迫走 terminate、不能 approve
+  if (!canApprove(caller, reviewable)) {
+    return { ok: false, reason: 'NOT_ELIGIBLE_TO_APPROVE',
+             detail: 'Cannot approve row with proof_status=expired (use decision=terminate)' };
   }
 
   let nextStage;
@@ -268,6 +285,11 @@ async function handleReject({ repo, id, callerId, caller, reject_reason }) {
   if (!canReview(caller, reviewable)) {
     return { ok: false, reason: 'FORBIDDEN', detail: 'Cannot reject at stage ' + stage };
   }
+  // Phase 1.6:proof 過期的 row 強迫走 terminate、不能 reject
+  if (!canReject(caller, reviewable)) {
+    return { ok: false, reason: 'NOT_ELIGIBLE_TO_REJECT',
+             detail: 'Cannot reject row with proof_status=expired (use decision=terminate)' };
+  }
 
   const now = new Date().toISOString();
   const trimmedReason = String(reject_reason).trim();
@@ -282,4 +304,36 @@ async function handleReject({ repo, id, callerId, caller, reject_reason }) {
     expected_status: leaveRequest.status,
     patch_extras: stageExtras,
   });
+}
+
+// ─── Phase 1.6:HR 終止 expired row ──────────────────────────────
+async function handleTerminate({ repo, id, callerId, caller }) {
+  const leaveRequest = await repo.findLeaveRequestById(id);
+  if (!leaveRequest) return { ok: false, reason: 'NOT_FOUND' };
+
+  if (!canTerminate(caller, leaveRequest)) {
+    return { ok: false, reason: 'NOT_ELIGIBLE_TO_TERMINATE',
+             detail: 'terminate requires hr/admin + status pending_* + proof_status=expired',
+             actual_status: leaveRequest.status,
+             actual_proof_status: leaveRequest.proof_status };
+  }
+
+  let nextStage;
+  try { nextStage = transitionTerminate(leaveRequest.status); }
+  catch (e) { return { ok: false, reason: 'INVALID_TRANSITION', detail: e.message }; }
+
+  const now = new Date().toISOString();
+  const noteAppendix = `[${now.slice(0,10)}] HR 終止申請(證明已過期)`;
+  const newNote = leaveRequest.handler_note
+    ? `${leaveRequest.handler_note}\n${noteAppendix}`
+    : noteAppendix;
+
+  const updated = await repo.updateLeaveRequest(id, {
+    status: nextStage,            // 'terminated'
+    terminated_by: callerId,
+    terminated_at: now,
+    handler_note: newNote,
+    // proof_status 保留 'expired'(歷史紀錄、為「為何被終止」的依據)
+  });
+  return { ok: true, request: updated };
 }
