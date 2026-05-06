@@ -12,7 +12,7 @@ describe('recomputeAttendanceStatus — 9-5 班', () => {
       work_date: '2026-05-05',
       status: 'normal',
     }, dayShift);
-    expect(r).toEqual({ late_minutes: 0, early_leave_minutes: 0, status: 'normal' });
+    expect(r).toEqual({ late_minutes: 0, early_arrival_minutes: 0, early_leave_minutes: 0, status: 'normal' });
   });
 
   it('遲到 09:05 / 準時 18:00 → late / 5 / 0', () => {
@@ -22,7 +22,7 @@ describe('recomputeAttendanceStatus — 9-5 班', () => {
       work_date: '2026-05-05',
       status: 'normal',
     }, dayShift);
-    expect(r).toEqual({ late_minutes: 5, early_leave_minutes: 0, status: 'late' });
+    expect(r).toEqual({ late_minutes: 5, early_arrival_minutes: 0, early_leave_minutes: 0, status: 'late' });
   });
 
   it('準時 / 早退 17:30 → early_leave / 0 / 30', () => {
@@ -32,7 +32,7 @@ describe('recomputeAttendanceStatus — 9-5 班', () => {
       work_date: '2026-05-05',
       status: 'early_leave',  // 既有舊狀態(被 bug 寫過)、會被重算覆寫
     }, dayShift);
-    expect(r).toEqual({ late_minutes: 0, early_leave_minutes: 30, status: 'early_leave' });
+    expect(r).toEqual({ late_minutes: 0, early_arrival_minutes: 0, early_leave_minutes: 30, status: 'early_leave' });
   });
 
   it('遲到 + 早退 09:05 / 17:30 → late 優先(取 late、early_leave_minutes 仍寫)', () => {
@@ -42,7 +42,7 @@ describe('recomputeAttendanceStatus — 9-5 班', () => {
       work_date: '2026-05-05',
       status: 'normal',
     }, dayShift);
-    expect(r).toEqual({ late_minutes: 5, early_leave_minutes: 30, status: 'late' });
+    expect(r).toEqual({ late_minutes: 5, early_arrival_minutes: 0, early_leave_minutes: 30, status: 'late' });
   });
 
   it('UTC Z 形式 18:09 台灣 → normal / 0 / 0(修補前 bug 會誤算 471 早退)', () => {
@@ -52,7 +52,55 @@ describe('recomputeAttendanceStatus — 9-5 班', () => {
       work_date: '2026-05-05',
       status: 'early_leave',  // 被 bug 寫成這個、應重算為 normal
     }, dayShift);
-    expect(r).toEqual({ late_minutes: 0, early_leave_minutes: 0, status: 'normal' });
+    expect(r).toEqual({ late_minutes: 0, early_arrival_minutes: 0, early_leave_minutes: 0, status: 'normal' });
+  });
+});
+
+describe('recomputeAttendanceStatus — early_arrival_minutes audit(純記錄、不影響 status)', () => {
+  it('早到 30min(08:30 / 18:00)→ early_arrival=30、status=normal、late=0', () => {
+    const r = recomputeAttendanceStatus({
+      clock_in:  '2026-05-05T08:30:00+08:00',
+      clock_out: '2026-05-05T18:00:00+08:00',
+      work_date: '2026-05-05',
+      status: 'normal',
+    }, dayShift);
+    expect(r.early_arrival_minutes).toBe(30);
+    expect(r.late_minutes).toBe(0);
+    expect(r.early_leave_minutes).toBe(0);
+    expect(r.status).toBe('normal');
+  });
+
+  it('早到 + 早退(08:30 / 17:30)→ early_arrival=30、early_leave=30、status=early_leave', () => {
+    const r = recomputeAttendanceStatus({
+      clock_in:  '2026-05-05T08:30:00+08:00',
+      clock_out: '2026-05-05T17:30:00+08:00',
+      work_date: '2026-05-05',
+      status: 'normal',
+    }, dayShift);
+    expect(r.early_arrival_minutes).toBe(30);
+    expect(r.early_leave_minutes).toBe(30);
+    expect(r.status).toBe('early_leave');
+  });
+
+  it("PRESERVED status='leave' + 早到 → leave 保留、early_arrival 仍計算回傳", () => {
+    const r = recomputeAttendanceStatus({
+      clock_in:  '2026-05-05T08:30:00+08:00',
+      clock_out: '2026-05-05T17:30:00+08:00',
+      work_date: '2026-05-05',
+      status: 'leave',
+    }, dayShift);
+    expect(r.status).toBe('leave');
+    expect(r.early_arrival_minutes).toBe(30);
+  });
+
+  it('schedule=null → early_arrival=0(算不出、safe fallback)', () => {
+    const r = recomputeAttendanceStatus({
+      clock_in:  '2026-05-05T08:30:00+08:00',
+      clock_out: '2026-05-05T17:30:00+08:00',
+      work_date: '2026-05-05',
+      status: 'normal',
+    }, null);
+    expect(r.early_arrival_minutes).toBe(0);
   });
 });
 

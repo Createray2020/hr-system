@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   clockIn, clockOut,
   pickSegmentForClockIn, calculateLateMinutes, calculateEarlyLeaveMinutes,
+  calculateEarlyArrivalMinutes,
   isoToMinutesOfDay, isoToTaipeiDateString,
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
 } from '../lib/attendance/clock.js';
@@ -317,5 +318,81 @@ describe('calculateLateMinutes / EarlyLeaveMinutes — UTC ISO 輸入(live punch
   it('calculateEarlyLeaveMinutes:跨日班、UTC 隔日 21:30 = 台灣隔日 05:30、end=06:00 → 30', () => {
     // 跨日班 work_date='2026-04-26'、隔日 5:30 台灣打卡
     expect(calculateEarlyLeaveMinutes('2026-04-26T21:30:00.000Z', '2026-04-26', '06:00', true)).toBe(30);
+  });
+});
+
+// ─── early_arrival_minutes audit 欄位(純記錄、不影響 status / overtime)───
+describe('calculateEarlyArrivalMinutes — 純 audit 早到分鐘', () => {
+  it('準時 09:00 → 0', () => {
+    expect(calculateEarlyArrivalMinutes('2026-05-05T09:00:00+08:00', '2026-05-05', '09:00')).toBe(0);
+  });
+
+  it('早到 30min(08:30、scheduled 09:00)→ 30', () => {
+    expect(calculateEarlyArrivalMinutes('2026-05-05T08:30:00+08:00', '2026-05-05', '09:00')).toBe(30);
+  });
+
+  it('早到 60min(08:00、scheduled 09:00)→ 60', () => {
+    expect(calculateEarlyArrivalMinutes('2026-05-05T08:00:00+08:00', '2026-05-05', '09:00')).toBe(60);
+  });
+
+  it('遲到 5min → 0(本欄位純正向、不跟 late 互補)', () => {
+    expect(calculateEarlyArrivalMinutes('2026-05-05T09:05:00+08:00', '2026-05-05', '09:00')).toBe(0);
+  });
+
+  it('UTC 形式 08:30 台灣(00:30 UTC)、start=09:00 → 30', () => {
+    expect(calculateEarlyArrivalMinutes('2026-05-05T00:30:00.000Z', '2026-05-05', '09:00')).toBe(30);
+  });
+
+  it('startTime 解析失敗 → 0(safe fallback)', () => {
+    expect(calculateEarlyArrivalMinutes('2026-05-05T08:30:00+08:00', '2026-05-05', 'bad')).toBe(0);
+  });
+});
+
+describe('clockIn — early_arrival_minutes 寫入', () => {
+  it('員工 08:30 早到、scheduled 09:00 → late=0、early_arrival=30、status=normal', async () => {
+    const repo = makeRepo();
+    const att = await clockIn(repo, { employee_id: 'E001', timestamp: '2026-04-26T08:30:00+08:00' });
+    expect(att.late_minutes).toBe(0);
+    expect(att.early_arrival_minutes).toBe(30);
+    expect(att.status).toBe('normal');
+  });
+
+  it('員工 09:00 準時 → late=0、early_arrival=0', async () => {
+    const repo = makeRepo();
+    const att = await clockIn(repo, { employee_id: 'E001', timestamp: '2026-04-26T09:00:00+08:00' });
+    expect(att.late_minutes).toBe(0);
+    expect(att.early_arrival_minutes).toBe(0);
+  });
+
+  it('員工 09:30 遲到 → late=30、early_arrival=0(不耦合)、status=late', async () => {
+    const repo = makeRepo();
+    const att = await clockIn(repo, { employee_id: 'E001', timestamp: '2026-04-26T09:30:00+08:00' });
+    expect(att.late_minutes).toBe(30);
+    expect(att.early_arrival_minutes).toBe(0);
+    expect(att.status).toBe('late');
+  });
+
+  it('多段班員工 14:00 打第二段 → 用 segment.start_time=14:00 算 early_arrival(=0)', async () => {
+    const seg1 = dayShift({ id: 'S1', segment_no: 1, start_time: '09:00', end_time: '12:00' });
+    const seg2 = dayShift({ id: 'S2', segment_no: 2, start_time: '14:00', end_time: '18:00' });
+    const repo = makeRepo({ findSchedulesForDate: vi.fn().mockResolvedValue([seg1, seg2]) });
+    const att = await clockIn(repo, { employee_id: 'E001', timestamp: '2026-04-26T14:00:00+08:00' });
+    expect(att.segment_no).toBe(2);
+    expect(att.early_arrival_minutes).toBe(0);
+  });
+});
+
+describe('clockOut overtime — 守護:early_arrival 不影響現有算法(Phase B 才改)', () => {
+  it('08:30 早到 + 18:00 下班 → workHours=9.5、overtime=1.5(維持現況、Phase B 才改算法)', async () => {
+    const repo = makeRepo({
+      findOpenAttendanceForEmployee: vi.fn().mockResolvedValue({
+        id: 'A1', work_date: '2026-04-26', clock_in: '2026-04-26T08:30:00+08:00',
+        schedule_id: 'S1', segment_no: 1, status: 'normal',
+      }),
+      findScheduleById: vi.fn().mockResolvedValue(dayShift()),
+    });
+    const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T18:00:00+08:00' });
+    expect(att.work_hours).toBe(9.5);
+    expect(att.overtime_hours).toBe(1.5);  // Phase B 待重評估、本階不動
   });
 });

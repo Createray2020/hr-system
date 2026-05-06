@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS attendance (
   clock_out      TIMESTAMPTZ,
   work_hours     NUMERIC(4,2),
   overtime_hours NUMERIC(4,2) DEFAULT 0,
+  -- 2026-05-07: early_arrival_minutes audit 欄位(純記錄、不影響 overtime/工時算法)
+  -- 詳見 migrations/2026_05_07_attendance_early_arrival.sql
+  early_arrival_minutes INT NOT NULL DEFAULT 0,
   status         TEXT DEFAULT 'normal'
                  CHECK (status IN ('normal','late','early_leave','absent','leave','holiday')),
   note           TEXT DEFAULT '',

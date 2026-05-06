@@ -203,8 +203,9 @@ export default async function handler(req, res) {
       work_hours:     workHours,
       overtime_hours: parseFloat(overtime_hours) || 0,
       status:         status || computed.status,
-      late_minutes:        computed.late_minutes,
-      early_leave_minutes: computed.early_leave_minutes,
+      late_minutes:          computed.late_minutes,
+      early_arrival_minutes: computed.early_arrival_minutes,
+      early_leave_minutes:   computed.early_leave_minutes,
       note:           note   || '',
       // 對齊 clockIn 行為:寫入 schedule_id + segment_no(多段班需要 segment_no 區分 row)
       ...(manualSchedule
