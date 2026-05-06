@@ -65,6 +65,26 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   terminated_at TIMESTAMPTZ
 );
 
+-- ── 3.5 員工變更稽核 log ────────────────────────────────
+-- 2026-05-07 Phase 1.7.2:audit 員工關鍵欄位變更
+-- 詳見 migrations/2026_05_07_employee_change_logs.sql
+CREATE TABLE IF NOT EXISTS employee_change_logs (
+  id            BIGSERIAL PRIMARY KEY,
+  employee_id   TEXT NOT NULL REFERENCES employees(id),
+  changed_field TEXT NOT NULL CHECK (changed_field IN (
+    'name', 'dept_id', 'role', 'is_manager',
+    'base_salary', 'position', 'manager_id'
+  )),
+  before_value  TEXT,
+  after_value   TEXT,
+  changed_by    TEXT REFERENCES employees(id),
+  changed_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_employee_change_logs_employee
+  ON employee_change_logs(employee_id, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_employee_change_logs_time
+  ON employee_change_logs(changed_at DESC);
+
 -- ── 4. 出勤紀錄 ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS attendance (
   id             TEXT PRIMARY KEY,
