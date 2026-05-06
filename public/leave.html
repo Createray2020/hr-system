@@ -37,6 +37,8 @@
   .mini-tag{padding:2px 6px;border-radius:3px;font-size:10px;font-family:'DM Mono',monospace;margin-left:4px}
   .mini-tag-late{background:rgba(251,146,60,.15);color:#FB923C}
   .mini-tag-proof{background:rgba(251,191,36,.15);color:#FBBF24}
+  /* Phase 1.5 升級:expired tag 灰底紅字、與 required 黃 ⏳ tag 區分 */
+  .mini-tag-expired{background:rgba(107,114,128,.18);color:#F87171}
 </style>
 </head>
 <body data-page="leave">
@@ -194,8 +196,11 @@ function renderList(rows) {
     const cancellable = ['pending','pending_mgr','pending_ceo'].includes(r.status)
                         && r.employee_id === currentUser.id;
     const lateTag = r.late_application ? `<span class="mini-tag mini-tag-late">⚠ 補申請</span>` : '';
+    // Phase 1.5 升級:expired 顯示灰底紅字、與 required 黃 ⏳ tag 區分
     const proofTag = r.proof_status === 'required'
-      ? `<span class="mini-tag mini-tag-proof" title="需於 ${fmtDt(r.proof_due_at)} 前補繳">⏳ 待補證明</span>` : '';
+      ? `<span class="mini-tag mini-tag-proof" title="需於 ${fmtDt(r.proof_due_at)} 前補繳">⏳ 待補證明</span>`
+      : r.proof_status === 'expired'
+      ? `<span class="mini-tag mini-tag-expired" title="證明已過期、HR 處理中">證明已過期、HR 處理中</span>` : '';
     const proofBtn = (r.proof_status === 'required' && r.employee_id === currentUser.id)
       ? `<button class="btn btn-ghost btn-sm" onclick="uploadProof('${escHtml(r.id)}')">📎 提交證明</button>` : '';
     const cancelBtn = cancellable

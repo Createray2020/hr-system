@@ -32,6 +32,8 @@
   .mini-tag{padding:2px 6px;border-radius:3px;font-size:10px;font-family:'DM Mono',monospace;margin-left:4px}
   .mini-tag-late{background:rgba(251,146,60,.15);color:#FB923C}
   .mini-tag-proof{background:rgba(251,191,36,.15);color:#FBBF24}
+  /* Phase 1.5 升級:proof_status=expired(法定假未補、HR 待處理) */
+  .mini-tag-expired{background:rgba(248,113,113,.12);color:#F87171}
   .override-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:#FB923C;cursor:pointer;margin:6px 0}
 </style>
 </head>
@@ -59,6 +61,7 @@
           <option value="archived">已歸檔</option>
           <option value="rejected">已退回</option>
           <option value="cancelled">已撤回</option>
+          <option value="expired">證明過期(待 HR 處理)</option>
           <option value="history">歷史(歸檔/退回/撤回)</option>
           <option value="">全部</option>
         </select>
@@ -212,6 +215,8 @@ function statusMatches(filter, l, u) {
   if (filter === 'my_pending')   return myPendingStatuses(u).includes(l.status);
   if (filter === 'all_pending')  return ['pending', 'pending_mgr', 'pending_ceo'].includes(l.status);
   if (filter === 'history')      return ['archived', 'rejected', 'cancelled'].includes(l.status);
+  // Phase 1.5 升級:expired filter 撈 proof_status=expired(法定假未補、HR 待處理)
+  if (filter === 'expired')      return l.proof_status === 'expired';
   return l.status === filter;
 }
 
@@ -243,7 +248,9 @@ function render() {
     const tName = SU.leaveTypeLabel(l.leave_type);
     const hours = l.finalized_hours ?? l.hours ?? (l.days ? l.days * 8 : '—');
     const lateTag = l.late_application ? `<span class="mini-tag mini-tag-late">⚠</span>` : '';
-    const proofTag = l.proof_status === 'required' ? `<span class="mini-tag mini-tag-proof">⏳證明</span>` : '';
+    // Phase 1.5 升級:expired tag 紅色、與 required 黃 ⏳ tag 區分
+    const proofTag = l.proof_status === 'required'  ? `<span class="mini-tag mini-tag-proof">⏳證明</span>`
+                   : l.proof_status === 'expired'   ? `<span class="mini-tag mini-tag-expired">證明過期</span>` : '';
     // HR + status='approved' → 列表直接顯示「📦 歸檔」按鈕
     const archiveBtn = (isHR(u) && l.status === 'approved')
       ? `<button class="btn btn-primary btn-sm" onclick="quickArchive('${escHtml(l.id)}')">📦 歸檔</button>` : '';

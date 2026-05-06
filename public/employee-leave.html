@@ -127,6 +127,8 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 .mini-tag{padding:2px 6px;border-radius:3px;font-size:10px;font-family:'DM Mono',monospace;margin-left:4px}
 .mini-tag-late{background:rgba(251,146,60,.15);color:#FB923C}
 .mini-tag-proof{background:rgba(251,191,36,.15);color:#FBBF24}
+/* Phase 1.5 升級:expired tag 灰底紅字、與 required 黃 ⏳ tag 區分 */
+.mini-tag-expired{background:rgba(107,114,128,.18);color:#F87171}
 
 /* ── 底部導航 ── */
 .mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
@@ -891,8 +893,11 @@ function renderLeaves() {
     const stageCls  = SU.stageBadgeClass(l.status);
     const statusBadge = `<span class="status-badge ${stageCls}">${stageText}</span>`;
     const lateTag  = l.late_application ? `<span class="mini-tag mini-tag-late">⚠ 補申請</span>` : '';
+    // Phase 1.5 升級:expired 顯示灰底紅字、與 required 黃 ⏳ tag 區分
     const proofTag = l.proof_status === 'required'
-      ? `<span class="mini-tag mini-tag-proof">⏳ 待補證明</span>` : '';
+      ? `<span class="mini-tag mini-tag-proof">⏳ 待補證明</span>`
+      : l.proof_status === 'expired'
+      ? `<span class="mini-tag mini-tag-expired">證明已過期、HR 處理中</span>` : '';
     const proofBtn = (l.proof_status === 'required' && l.employee_id === currentUser.id)
       ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="uploadProofMobile('${l.id}')">📎 提交證明</button>` : '';
     const cancelBtn = (['pending','pending_mgr','pending_ceo'].includes(l.status) && l.employee_id === currentUser.id)
