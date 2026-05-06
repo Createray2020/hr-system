@@ -57,6 +57,7 @@ vi.mock('../lib/push.js', () => ({
 }));
 
 const { default: leavesHandler } = await import('../api/leaves/index.js');
+const { default: leavesByIdHandler } = await import('../api/leaves/[id].js');
 const { default: employeesHandler } = await import('../api/employees/index.js');
 const { default: employeesByIdHandler } = await import('../api/employees/[id].js');
 const { default: schedulesHandler } = await import('../api/schedules/index.js');
@@ -248,5 +249,22 @@ describe('/api/schedules legacy GET — scope dispatch', () => {
     await schedulesHandler(req, res);
     const eq = calls.eqs.find(e => e.table === 'schedules' && e.col === 'employee_id');
     expect(eq).toBeUndefined();
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// Phase 1.6.1 regression — admin cancel hack 拔除守
+// ════════════════════════════════════════════════════════════
+describe('/api/leaves/[id] PUT decision=cancel — Phase 1.6.1 regression', () => {
+  it('HR PUT decision=cancel → 400 BAD_REQUEST(死 code 已拔、白名單只剩 approve/reject/terminate)', async () => {
+    overrides.caller = HR;
+    const [req, res] = makeReqRes({
+      method: 'PUT',
+      query: { id: 'L_any' },
+      body: { decision: 'cancel' },
+    });
+    await leavesByIdHandler(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body?.error).toMatch(/decision must be approve \/ reject \/ terminate/);
   });
 });

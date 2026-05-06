@@ -1,11 +1,14 @@
 // api/leaves/[id].js
-// PUT    /api/leaves/:id  body { decision: 'approve'|'reject'|'cancel', reject_reason?, override_reason? }
+// PUT    /api/leaves/:id  body { decision: 'approve'|'reject'|'terminate', reject_reason?, override_reason? }
 //                          body { action: 'archive' }                       — HR 歸檔
 //                          body { action: 'submit_proof', proof_url: ... }  — 員工 / HR 上傳證明
 // DELETE /api/leaves/:id  → 員工本人撤回 pending_mgr / pending_ceo
 //
 // Phase 1.3:多階審核 stage-aware approve / reject + archive + submit_proof。
 // Backward compat:舊 'pending' status 視為 'pending_mgr' 處理。
+//
+// 員工撤回走 DELETE 路徑、admin cancel endpoint Phase 1.6.1 拔除
+// (YAGNI、真有需求再開新 endpoint、不要保留半成品 hack)
 
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
@@ -158,9 +161,9 @@ export default async function handler(req, res) {
     }
   }
 
-  // ─── PUT decision approve / reject / cancel / terminate ──────
-  if (!['approve', 'reject', 'cancel', 'terminate'].includes(decision)) {
-    return res.status(400).json({ error: 'decision must be approve / reject / cancel / terminate (or action archive / submit_proof)' });
+  // ─── PUT decision approve / reject / terminate ───────────────
+  if (!['approve', 'reject', 'terminate'].includes(decision)) {
+    return res.status(400).json({ error: 'decision must be approve / reject / terminate (or action archive / submit_proof)' });
   }
 
   try {
@@ -169,14 +172,8 @@ export default async function handler(req, res) {
       r = await handleApprove({ repo, id, callerId, caller, body, override_reason });
     } else if (decision === 'reject') {
       r = await handleReject({ repo, id, callerId, caller, reject_reason });
-    } else if (decision === 'terminate') {
-      r = await handleTerminate({ repo, id, callerId, caller });
     } else {
-      // Phase 1.6.1 backlog:HR 強制撤回語義應改走 decision='terminate'、
-      // 本路徑保留作 fallback、未來移除。新 prod use case 應全走 terminate。
-      const req_ = await repo.findLeaveRequestById(id);
-      if (!req_) return res.status(404).json({ error: 'NOT_FOUND' });
-      r = await cancelLeaveRequest(repo, { request_id: id, cancelled_by: req_.employee_id });
+      r = await handleTerminate({ repo, id, callerId, caller });
     }
     if (!r.ok) {
       // canReview / canArchive / canTerminate 失敗的特殊回 403
