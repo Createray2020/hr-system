@@ -618,11 +618,23 @@ function render() {
                      : '#5BA68F';
 
     // 操作欄
+    // Phase 2.x.3 frontend gate(對齊 backend 嚴格 spec):
+    //   approve / publish 都需要 同部門 + is_manager + 非自己
+    //   不合法 → 隱藏按鈕、顯示「待主管」hint
+    const u = window.currentUser || {};
+    const canManagePeriod = u.is_manager === true
+                            && !!u.dept_id
+                            && u.dept_id === emp.dept_id
+                            && u.id !== emp.id;
     let opHtml = '';
     if (periodStatus === 'submitted') {
-      opHtml = `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="approvePeriod('${escHtml(period.id)}')">定案</button>`;
+      opHtml = canManagePeriod
+        ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="approvePeriod('${escHtml(period.id)}')">定案</button>`
+        : `<span style="font-size:11px;padding:2px 8px;background:rgba(122,133,160,.12);color:var(--text-dim);border-radius:6px" title="只有同部門主管可定案">待主管定案</span>`;
     } else if (periodStatus === 'approved') {
-      opHtml = `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="publishPeriod('${escHtml(period.id)}')">公告</button>`;
+      opHtml = canManagePeriod
+        ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="publishPeriod('${escHtml(period.id)}')">公告</button>`
+        : `<span style="font-size:11px;padding:2px 8px;background:rgba(122,133,160,.12);color:var(--text-dim);border-radius:6px" title="只有同部門主管可公告">待主管公告</span>`;
     } else if (periodStatus === 'published' || periodStatus === 'locked') {
       opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已公告</span>`;
     } else if (periodStatus === 'draft') {
