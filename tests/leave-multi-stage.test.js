@@ -22,6 +22,9 @@ const SEED_LT = {
                advance_hours:24, advance_rule:'hard', requires_proof:false, proof_grace_days:0 },
   parental:  { code:'parental', name_zh:'育嬰留職停薪', is_paid:false, has_balance:false, is_active:true,
                advance_hours:240, advance_rule:'hard', requires_proof:true, proof_grace_days:0 },
+  // Phase 1.5 升級 Flow H' 守:婚假 mark_expired 路徑
+  marriage:  { code:'marriage', name_zh:'婚假', is_paid:true, has_balance:false, is_active:true,
+               advance_hours:168, advance_rule:'hard', requires_proof:true, proof_grace_days:0 },
   // hypothetical:soft + advance_hours > 0(目前 prod 沒這種、但 lib 要支援)
   fakeSoft:  { code:'fakeSoft', name_zh:'假設 soft', is_paid:true, has_balance:false, is_active:true,
                advance_hours:24, advance_rule:'soft', requires_proof:false, proof_grace_days:0 },
@@ -554,5 +557,67 @@ describe('Flow H — proof 過期 → cron 轉事假(Phase 1.5)', () => {
     expect(state.row.leave_type).toBe('personal');
     expect(state.row.proof_status).toBe('converted_to_personal');
     expect(state.row.handler_note).toContain('原假別 sick');
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// 流程 H':Phase 1.5 升級 — 法定假 vs 短假分流
+// ════════════════════════════════════════════════════════════
+describe("Flow H' — proof 過期分流(Phase 1.5 升級)", () => {
+  it('婚假 submit + 過期 → sweep 出 mark_expired → cron UPDATE proof_status=expired、leave_type 仍是 marriage', async () => {
+    const { repo, state } = makeStatefulRepo();
+    // marriage advance_hours=168(7 天)、grace=0、submitted 11 天前 ok
+    const r = await submit(repo, {
+      leave_type: 'marriage',
+      submitted_at: '2026-04-20T00:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.request.leave_type).toBe('marriage');
+    expect(r.request.proof_status).toBe('required');
+    // grace=0 → due = end = 2026-05-01;5/10 跑 cron 已過
+    const now = '2026-05-10T00:00:00+08:00';
+    const actions = sweepExpiredProofs([r.request], SWEEP_LT, now);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      id: r.request.id,
+      action: 'mark_expired',
+      proof_status: 'expired',
+      original_leave_type: 'marriage',
+    });
+    // mark_expired 不該帶 leave_type 欄位(下游不該誤覆蓋)
+    expect('leave_type' in actions[0]).toBe(false);
+
+    // 模擬 cron handler 套用 mark_expired patch(只動 proof_status + handler_note)
+    for (const a of actions) {
+      const patch = a.action === 'mark_expired'
+        ? { proof_status: a.proof_status, handler_note: `[2026-05-10] ${a.note_suffix}` }
+        : { leave_type: a.leave_type, proof_status: a.proof_status, handler_note: `[2026-05-10] ${a.note_suffix}` };
+      await repo.updateLeaveRequest(a.id, patch);
+    }
+    // 守:leave_type 仍是 marriage、status 不動、proof_status='expired'
+    expect(state.row.leave_type).toBe('marriage');
+    expect(state.row.proof_status).toBe('expired');
+    expect(state.row.status).toBe(r.request.status);  // 維持 submit 後的 stage(未動)
+    expect(state.row.handler_note).toContain('原假別 marriage');
+    expect(state.row.handler_note).toContain('HR 個案處理');
+  });
+
+  it('病假 submit + 過期 → sweep 路由 convert(SWEEP_LT 內 sick.proof_expiry_action=convert 守)', async () => {
+    // regression 守:Flow H 已覆蓋 convert 結果、本 case 確認 sweep 是真的「依 SWEEP_LT 路由」
+    // 而非 fallback。把 SWEEP_LT 換成只含 sick=convert(無 fallback 也走 convert)→ 結果一致才算路由正確
+    const { repo } = makeStatefulRepo();
+    const r = await submit(repo, {
+      leave_type: 'sick',
+      submitted_at: '2026-05-01T08:00:00+08:00',
+      start_at: '2026-05-01T09:00:00+08:00',
+      end_at:   '2026-05-01T18:00:00+08:00',
+    });
+    const explicitMap = { sick: { code: 'sick', proof_expiry_action: 'convert' } };
+    const actions = sweepExpiredProofs([r.request], explicitMap, '2026-05-10T00:00:00+08:00');
+    expect(actions).toHaveLength(1);
+    expect(actions[0].action).toBe('convert');
+    expect(actions[0].original_leave_type).toBe('sick');
   });
 });
