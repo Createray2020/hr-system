@@ -31,8 +31,6 @@ import {
 import { recomputeAttendanceStatus } from '../../lib/attendance/recompute.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
 
-const WORK_START_HOUR = 9;
-
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -108,55 +106,15 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    // ── 打卡 (_action=punch) ─── legacy(employee-app.html)
+    // legacy ?_action=punch 員工打卡 path 已拔(0 frontend caller、WORK_START_HOUR=9
+    // 寫死 ≠ 員工 schedule.start_time)。新路徑走 body { action: 'clock_in'|'clock_out' }
+    // → handleNewPunch、commit a347cf5 / dashboard fix 之後 attendance.html /
+    // employee-app.html 都已遷移。
     if (req.query._action === 'punch') {
-      const { employee_id, type } = req.body;
-      if (!employee_id || !['in','out'].includes(type))
-        return res.status(400).json({ error: '缺少必要參數' });
-
-      const emp = await requireAuth(req, res);
-      if (!emp) return;
-      if (emp.id !== employee_id) return res.status(403).json({ error: '無法替他人打卡' });
-
-      const now    = new Date();
-      const today  = now.toISOString().split('T')[0];
-      const timeStr = now.toISOString();
-      const id     = `A${Date.now()}`;
-
-      if (type === 'in') {
-        const isLate = now.getHours() > WORK_START_HOUR ||
-                       (now.getHours() === WORK_START_HOUR && now.getMinutes() > 5);
-        const { data: existing } = await supabaseAdmin
-          .from('attendance').select('id').eq('employee_id', employee_id).eq('work_date', today).single();
-        if (existing) {
-          const { error } = await supabaseAdmin.from('attendance')
-            .update({ clock_in: timeStr, status: isLate ? 'late' : 'normal' })
-            .eq('id', existing.id);
-          if (error) return res.status(500).json({ error: error.message });
-        } else {
-          const { error } = await supabaseAdmin.from('attendance').insert([{
-            id, employee_id, work_date: today,
-            clock_in: timeStr,
-            status: isLate ? 'late' : 'normal',
-          }]);
-          if (error) return res.status(500).json({ error: error.message });
-        }
-        return res.status(200).json({ message: '上班打卡成功', time: timeStr, status: isLate ? 'late' : 'normal' });
-      }
-
-      if (type === 'out') {
-        const { data: rec } = await supabaseAdmin
-          .from('attendance').select('*').eq('employee_id', employee_id).eq('work_date', today).single();
-        if (!rec) return res.status(400).json({ error: '尚未上班打卡' });
-        const clockIn   = rec.clock_in ? new Date(rec.clock_in) : null;
-        const workHours = clockIn ? Math.round((now - clockIn) / 36000) / 100 : 0;
-        const otHours   = Math.max(0, Math.round((workHours - 8) * 2) / 2);
-        const { error } = await supabaseAdmin.from('attendance')
-          .update({ clock_out: timeStr, work_hours: workHours, overtime_hours: otHours })
-          .eq('id', rec.id);
-        if (error) return res.status(500).json({ error: error.message });
-        return res.status(200).json({ message: '下班打卡成功', time: timeStr, work_hours: workHours, overtime_hours: otHours });
-      }
+      return res.status(410).json({
+        error: 'GONE',
+        detail: 'legacy ?_action=punch 已棄用、請改用 POST body { action: "clock_in"|"clock_out" }',
+      });
     }
 
     // ── 人工補登（原 manual.js 邏輯）───────────────────────────────────
