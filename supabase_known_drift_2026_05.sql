@@ -208,3 +208,52 @@
 --     舊檔保留當歷史 snapshot、不刪。
 --
 -- ============================================================
+
+
+-- ============================================================
+-- C8-C12: 2026-05-07 batch — Phase 1.6 / 1.7 / 1.7.2 / 2.x.3 / Attendance backlog
+-- ============================================================
+--
+-- 本批 5 條 migration 經 verify(migrations-verify/verify_*.sql)逐條確認 prod schema
+-- 已套用、跳過 ② ALTER 步驟、僅做 ③ POST 驗證對齊。各條 migration 檔頂部已加註解
+-- 「2026-05-07 prod drift audit 確認已套用」。
+--
+-- C8: attendance.early_arrival_minutes 欄位
+--   migration: migrations/2026_05_07_attendance_early_arrival.sql
+--   Phase: Attendance backlog(預備 Phase B 評估)
+--   ALTER: ADD COLUMN early_arrival_minutes INT NOT NULL DEFAULT 0
+--   verify: migrations-verify/verify_attendance_early_arrival.sql
+--   狀態: prod 已套用、所有 row 預設值=0
+--
+-- C9: employee_change_logs 新表
+--   migration: migrations/2026_05_07_employee_change_logs.sql
+--   Phase: 1.7.2(離職員工檔案頁解 disclaimer)
+--   ALTER: CREATE TABLE + 2 INDEX(7-field whitelist audit)
+--   verify: migrations-verify/verify_employee_change_logs.sql
+--   狀態: prod 已套用、空表(無 backfill、新動作起算)
+--
+-- C10: employees.resigned_at + resigned_reason 欄位
+--   migration: migrations/2026_05_07_employees_resigned_metadata.sql
+--   Phase: 1.7 MVP(離職員工檔案頁)
+--   ALTER: ADD COLUMN × 2 + UPDATE backfill(資料 migration、唯一一條)
+--   verify: migrations-verify/verify_employees_resigned_metadata.sql
+--   狀態: prod 已套用,A 選項保留:
+--     - 5 筆 resigned_at = updated_at(backfill 用 updated_at 當近似離職時間)
+--     - 4 筆 4/20 batch artifact(批次操作造成 updated_at 雜訊)、待後台離職管理頁面
+--       開發後 HR 個案補正、本批不動
+--
+-- C11: schedule_periods.published_by + published_at audit 欄位
+--   migration: migrations/2026_05_07_schedule_periods_audit.sql
+--   Phase: 2.x.3(approve.js / publish.js 嚴格 spec 配套)
+--   ALTER: ADD COLUMN × 2(無 backfill)
+--   verify: migrations-verify/verify_schedule_periods_audit.sql
+--   狀態: prod 已套用、新動作起算
+--
+-- C12: leave_requests 加 'terminated' status + terminated_by/at 欄位
+--   migration: migrations/2026_05_07_leave_terminated_status.sql
+--   Phase: 1.6(HR 終止 expired row 流程)
+--   ALTER: DROP/ADD CHECK constraint(6→7 值)+ ADD COLUMN × 2
+--   verify: migrations-verify/verify_leave_terminated_status.sql
+--   狀態: prod 已套用、HR 在 leave-admin 個案處理 expired pending row
+--
+-- ============================================================

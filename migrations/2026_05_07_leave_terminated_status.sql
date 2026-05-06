@@ -1,3 +1,4 @@
+-- 2026-05-07 prod drift audit 確認已套用(drift snapshot 對齊、無需重跑)
 -- Phase 1.6: HR 終止 expired row 流程
 --
 -- 背景:Phase 1.5 升級後 9 法定假 mark_expired:cron UPDATE proof_status='expired'、

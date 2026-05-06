@@ -1,3 +1,4 @@
+-- 2026-05-07 prod drift audit 確認已套用(drift snapshot 對齊、無需重跑)
 -- Phase Attendance backlog: early_arrival_minutes audit 欄位
 --
 -- 背景:既有 lib/attendance/clock.js 對「員工 clock_in 早於 schedule.start_time」

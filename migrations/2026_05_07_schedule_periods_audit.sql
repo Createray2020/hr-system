@@ -1,3 +1,4 @@
+-- 2026-05-07 prod drift audit 確認已套用(drift snapshot 對齊、無需重跑)
 -- Phase 2.x.3:schedule_periods 加 published_by + published_at 欄位
 --
 -- 背景:approve.js 既有寫 approved_at(legacy approved_by 欄位有但沒寫入)、

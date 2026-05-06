@@ -1,3 +1,4 @@
+-- 2026-05-07 prod drift audit 確認已套用(drift snapshot 對齊、無需重跑)
 -- Phase 1.7.2:employee_change_logs audit 表
 --
 -- 背景:Phase 1.7 MVP 離職員工檔案頁標 disclaimer「顯示部門 = 當前 dept_id、可能與

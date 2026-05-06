@@ -1,5 +1,14 @@
 # 2026-05-07 待跑 prod migration 總覽
 
+## 執行結果(2026-05-07 drift audit)
+
+全部 5 條經 verify 確認 prod 已套用、未在本批執行 ② ALTER。
+- #3 `employees_resigned_metadata`:保留 A 狀態(5 筆 `resigned_at = updated_at`),4 筆 4/20 batch artifact 待後台離職管理頁面開發後 HR 個案補正。
+
+各 migration 檔頂部已加註解「2026-05-07 prod drift audit 確認已套用」、`supabase_known_drift_2026_05.sql` 加 C8-C12 段落紀錄本批 5 條 drift snapshot。
+
+---
+
 對應 `migrations-verify/verify_*.sql` 的一站式 VERIFY-pre / ALTER / VERIFY-post script。User 在 Supabase SQL Editor 手動執行,跑前先看 ① 看現況,跑 ② 真執行,跑後 ③ 確認生效。
 
 ## 執行順序建議

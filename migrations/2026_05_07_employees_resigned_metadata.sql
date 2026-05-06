@@ -1,3 +1,4 @@
+-- 2026-05-07 prod drift audit 確認已套用(drift snapshot 對齊、無需重跑)
 -- Phase 1.7 MVP: employees 加 resigned_at + resigned_reason 欄位
 --
 -- 背景:既有 status='resigned' 已存在、但無「離職時間」、「離職原因」欄位。
