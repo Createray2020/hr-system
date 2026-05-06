@@ -156,15 +156,25 @@ async function handleNewPunch(req, res) {
   const employee_id = caller.id;
   if (!employee_id) return res.status(401).json({ error: 'caller has no employee id' });
 
+  // GPS Phase A:body.geo validation(三態 undefined / null / object)
+  // body.geo === undefined → 不傳給 lib(向後相容、lib 不動 GPS 欄位)
+  // body.geo === null      → pass null(denied 語意)
+  // body.geo === object    → 驗 lat/lng/accuracy 範圍、pass object
+  const geoValidation = validateGeoBody(req.body?.geo);
+  if (!geoValidation.ok) {
+    return res.status(400).json({ error: 'INVALID_GEO', detail: geoValidation.detail });
+  }
+  const geo = geoValidation.geo;  // undefined / null / { lat, lng, accuracy }
+
   const timestamp = new Date().toISOString();
 
   try {
     if (action === 'clock_in') {
-      const att = await clockIn(makeRepo(), { employee_id, timestamp });
+      const att = await clockIn(makeRepo(), { employee_id, timestamp, geo });
       return res.status(200).json({ ok: true, attendance: att });
     }
     if (action === 'clock_out') {
-      const att = await clockOut(makeRepo(), { employee_id, timestamp });
+      const att = await clockOut(makeRepo(), { employee_id, timestamp, geo });
       return res.status(200).json({ ok: true, attendance: att });
     }
     return res.status(400).json({ error: 'unknown action' });
@@ -175,6 +185,55 @@ async function handleNewPunch(req, res) {
     console.error('[attendance:newPunch]', e);
     return res.status(500).json({ error: 'internal', detail: e.message });
   }
+}
+
+// GPS Phase A:body.geo 三態驗證(undefined / null / object)
+//   undefined → ok、回 { ok:true, geo:undefined }
+//   null      → ok、回 { ok:true, geo:null }
+//   object    → 驗 lat/lng/accuracy 範圍(任一欄位可為 null、表示部分缺)
+//   string / array / number / boolean / function → 400 INVALID_GEO
+function validateGeoBody(g) {
+  if (g === undefined) return { ok: true, geo: undefined };
+  if (g === null)      return { ok: true, geo: null };
+  if (typeof g !== 'object' || Array.isArray(g)) {
+    return { ok: false, detail: 'geo must be object or null' };
+  }
+  // lat
+  if (g.lat !== undefined && g.lat !== null) {
+    if (typeof g.lat !== 'number' || !Number.isFinite(g.lat)) {
+      return { ok: false, detail: 'geo.lat must be number or null' };
+    }
+    if (g.lat < -90 || g.lat > 90) {
+      return { ok: false, detail: 'geo.lat must be in [-90, 90]' };
+    }
+  }
+  // lng
+  if (g.lng !== undefined && g.lng !== null) {
+    if (typeof g.lng !== 'number' || !Number.isFinite(g.lng)) {
+      return { ok: false, detail: 'geo.lng must be number or null' };
+    }
+    if (g.lng < -180 || g.lng > 180) {
+      return { ok: false, detail: 'geo.lng must be in [-180, 180]' };
+    }
+  }
+  // accuracy(>= 0、unit: meters)
+  if (g.accuracy !== undefined && g.accuracy !== null) {
+    if (typeof g.accuracy !== 'number' || !Number.isFinite(g.accuracy)) {
+      return { ok: false, detail: 'geo.accuracy must be number or null' };
+    }
+    if (g.accuracy < 0) {
+      return { ok: false, detail: 'geo.accuracy must be >= 0' };
+    }
+  }
+  // 多餘 key 忽略(向前相容)
+  return {
+    ok: true,
+    geo: {
+      lat: g.lat ?? null,
+      lng: g.lng ?? null,
+      accuracy: g.accuracy ?? null,
+    },
+  };
 }
 
 // 抽出去因為 [id].js 跟 anomaly.js 也用同一組 supabase repo 介面。
@@ -241,6 +300,16 @@ export function makeRepo() {
         .select().maybeSingle();
       if (error) throw error;
       return data;
+    },
+
+    async findActiveOfficeLocations() {
+      // GPS Phase A:lib/clock.js 用、撈所有 active 據點給 validateGeofence 比 radius
+      const { data, error } = await supabaseAdmin
+        .from('office_locations')
+        .select('id, lat, lng, radius_m')
+        .eq('is_active', true);
+      if (error) throw error;
+      return data || [];
     },
 
     async updateAttendance(id, patch) {
