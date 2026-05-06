@@ -5,6 +5,7 @@ import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 import { syncDeptFields } from '../../lib/dept-sync.js';
 import { addDeptNameSingle } from '../../lib/dept-name-mapper.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
+import { logEmployeeChanges } from '../../lib/employee/change-logger.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -59,12 +60,34 @@ export default async function handler(req, res) {
 
       const body = req.body;
       await syncDeptFields(supabaseAdmin, body);
-      // 前端負責計算薪資欄位後傳入，PUT 只負責寫入 employees 資料表
+
+      // Phase 1.7.2:撈 before、給 audit 比對用(7 個白名單欄位)
+      const { data: beforeRow } = await supabaseAdmin
+        .from('employees')
+        .select('id, name, dept_id, role, is_manager, base_salary, position, manager_id')
+        .eq('id', id).maybeSingle();
+
+      // 前端負責計算薪資欄位後傳入,PUT 只負責寫入 employees 資料表
       const { error } = await supabaseAdmin
         .from('employees')
         .update({ ...body, updated_at: new Date().toISOString() })
         .eq('id', id);
       if (error) return res.status(500).json({ error: error.message });
+
+      // Phase 1.7.2:寫 audit log(失敗不擋 update、log 是 audit、不卡業務)
+      // after 用 body 直接比、syncDeptFields 已 mutate body 對齊 dept_id 關聯欄位
+      try {
+        if (beforeRow) {
+          await logEmployeeChanges(makeChangeLogRepo(), {
+            employee_id: id,
+            before: beforeRow,
+            after: body,
+            changed_by: caller.id,
+          });
+        }
+      } catch (logErr) {
+        console.error('[employees PUT] audit log failed:', logErr.message);
+      }
 
       // ── 薪資變動時檢查勞健保級距是否需要更新 ──────────────────────────
       const salaryFields = ['base_salary','attendance_bonus','grade_allowance','manager_allowance','extra_allowance'];
@@ -171,4 +194,15 @@ export default async function handler(req, res) {
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
+}
+
+// Phase 1.7.2:repo 注入給 lib/employee/change-logger.js 用
+function makeChangeLogRepo() {
+  return {
+    async batchInsertChangeLogs(rows) {
+      if (!rows || rows.length === 0) return;
+      const { error } = await supabaseAdmin.from('employee_change_logs').insert(rows);
+      if (error) throw error;
+    },
+  };
 }
