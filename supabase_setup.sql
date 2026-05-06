@@ -46,11 +46,19 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   -- 2026-05-05: 改 NUMERIC 支援半天 / 自訂時段，見 migrations/2026_05_05_leave_days_to_numeric.sql
   days          NUMERIC(5,2) NOT NULL,
   reason        TEXT,
-  status        TEXT DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  -- 2026-05-07 Phase 1.6: 加 'terminated' (HR 終止 expired row)
+  -- 詳見 migrations/2026_05_07_leave_terminated_status.sql
+  status        TEXT DEFAULT 'pending_mgr' CHECK (status IN (
+                  'pending_mgr','pending_ceo','approved','archived',
+                  'rejected','cancelled','terminated'
+                )),
   applied_at    TIMESTAMPTZ DEFAULT NOW(),
   handler_note  TEXT DEFAULT '',
   handled_at    TIMESTAMPTZ,
-  handled_by    TEXT REFERENCES employees(id)
+  handled_by    TEXT REFERENCES employees(id),
+  -- 2026-05-07 Phase 1.6: HR 終止 expired row 的稽核欄位
+  terminated_by TEXT REFERENCES employees(id),
+  terminated_at TIMESTAMPTZ
 );
 
 -- ── 4. 出勤紀錄 ───────────────────────────────────────────
