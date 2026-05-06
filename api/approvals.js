@@ -5,12 +5,53 @@
 // GET  /api/approvals?type=pending&role=manager                → 待我審批
 // GET  /api/approvals                                          → 全部申請
 // POST /api/approvals { action: create|approve|reject|cancel|update_config }
+//
+// Phase 2.x.1 hotfix(CRITICAL):原本整支 handler 完全無 requireAuth,
+// 任何人(甚至 unauthed)可批 / 拒 / 取消任何 request、approver_id 由 client 傳。
+// 修補:
+//   1. 加 requireAuth(任何 authed user 都能讀、寫加分項權限)
+//   2. approve/reject 加 step role gate(對齊 effectiveApprovalRole + dept)
+//   3. self-approval guard(applicant 不能簽自己的 request)
+//   4. 跨 step 同人連簽 guard(避免主管 + ceo 同人雙簽)
+//   5. approver_id 強制用 caller.id、不接受 client 傳
+//   6. cancel 嚴守申請人本人(其他 role 不能取消別人的)
+
 import { supabaseAdmin } from '../lib/supabase.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendPushToEmployees, sendPushToRoles, createNotifications, createNotificationsForRoles } from '../lib/push.js';
 import { addDeptNameNested, addDeptNameSingle } from '../lib/dept-name-mapper.js';
 
+/**
+ * canApproveStep — caller 能否簽某 step。
+ *
+ * 規則(對齊 leave Phase 2.x dept+is_manager 嚴格設計):
+ *   step.approver_role='manager':caller.is_manager=true && caller.dept_id === applicant.dept_id
+ *   step.approver_role='ceo':    caller.role IN ('ceo','chairman')(admin 不視同)
+ *   step.approver_role='hr':     caller.role === 'hr'(admin 不視同)
+ *   其他 role:caller.role === step.approver_role 嚴格對等
+ *
+ * self-approval 在外層擋(此函式只檢 role + dept、不看 applicant id)。
+ */
+function canApproveStep(caller, step, applicantDeptId) {
+  if (!caller || !caller.id || !step) return false;
+  const r = step.approver_role;
+  if (r === 'manager') {
+    return caller.is_manager === true
+        && !!caller.dept_id
+        && !!applicantDeptId
+        && caller.dept_id === applicantDeptId;
+  }
+  if (r === 'ceo')  return caller.role === 'ceo' || caller.role === 'chairman';
+  if (r === 'hr')   return caller.role === 'hr';
+  return caller.role === r;
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // Phase 2.x.1:整支 handler 加 requireAuth(原本完全無 auth、CRITICAL bug)
+  const caller = await requireAuth(req, res);
+  if (!caller) return;
 
   if (req.method === 'GET') {
     const { type, id, applicant_id, role, request_type } = req.query;
@@ -84,6 +125,11 @@ export default async function handler(req, res) {
     // ── 建立新申請 ──────────────────────────────────────────────────────────
     if (body.action === 'create') {
       const { request_type, applicant_id, form_data, note, attachments } = body;
+      // applicant_id 強制用 caller.id(防客戶端代提別人的)
+      const realApplicantId = caller.id;
+      if (applicant_id && applicant_id !== caller.id) {
+        return res.status(403).json({ error: '不可代他人提出申請' });
+      }
 
       const { data: config, error: cfgErr } = await supabaseAdmin
         .from('approval_flow_configs').select('*').eq('request_type', request_type).single();
@@ -96,7 +142,7 @@ export default async function handler(req, res) {
         id: reqId,
         request_type,
         title: config.type_name,
-        applicant_id,
+        applicant_id: realApplicantId,
         current_step: 1,
         total_steps: steps.length,
         status: 'pending',
@@ -122,18 +168,58 @@ export default async function handler(req, res) {
 
     // ── 審批通過 ────────────────────────────────────────────────────────────
     if (body.action === 'approve') {
-      const { request_id, step_number, approver_id, note } = body;
+      const { request_id, step_number, note } = body;
+      // approver_id 強制用 caller.id、不接受 client 傳(防偽造)
 
-      await supabaseAdmin.from('approval_steps').update({
-        status: 'approved',
-        approver_id: approver_id || null,
-        note: note || '',
-        handled_at: new Date().toISOString(),
-      }).eq('request_id', request_id).eq('step_number', step_number);
-
+      // 撈 request + applicant dept_id(canApproveStep 需要)
       const { data: request } = await supabaseAdmin
         .from('approval_requests').select('*').eq('id', request_id).single();
       if (!request) return res.status(404).json({ error: '找不到申請' });
+
+      // self-approval guard
+      if (caller.id === request.applicant_id) {
+        return res.status(403).json({ error: '不可審核自己的申請' });
+      }
+
+      // 撈當下要簽的 step
+      const { data: step } = await supabaseAdmin
+        .from('approval_steps').select('*')
+        .eq('request_id', request_id).eq('step_number', step_number).maybeSingle();
+      if (!step) return res.status(404).json({ error: '找不到該步驟' });
+      if (step.status !== 'in_progress') {
+        return res.status(409).json({ error: '此步驟非進行中、無法簽', actual: step.status });
+      }
+
+      // role gate(canApproveStep + applicant dept_id)
+      const { data: applicant } = await supabaseAdmin
+        .from('employees').select('dept_id').eq('id', request.applicant_id).maybeSingle();
+      if (!canApproveStep(caller, step, applicant?.dept_id)) {
+        return res.status(403).json({
+          error: '無權審核此步驟',
+          step_role: step.approver_role,
+          your_role: caller.role,
+        });
+      }
+
+      // 跨 step 同人連簽 guard:caller.id 已在其他 step 簽過 → 403
+      const { data: priorSteps } = await supabaseAdmin
+        .from('approval_steps').select('approver_id, step_number, status')
+        .eq('request_id', request_id).neq('step_number', step_number);
+      const alreadySigned = (priorSteps || [])
+        .filter(s => s.status === 'approved' && s.approver_id === caller.id);
+      if (alreadySigned.length > 0) {
+        return res.status(403).json({
+          error: '同一人不可跨 step 連簽',
+          previous_step: alreadySigned[0].step_number,
+        });
+      }
+
+      await supabaseAdmin.from('approval_steps').update({
+        status: 'approved',
+        approver_id: caller.id,           // 強制用 caller.id
+        note: note || '',
+        handled_at: new Date().toISOString(),
+      }).eq('request_id', request_id).eq('step_number', step_number);
 
       const nextStep = step_number + 1;
       if (nextStep > request.total_steps) {
@@ -150,7 +236,7 @@ export default async function handler(req, res) {
           await applyPunchCorrection(request);
         }
 
-        // 通知申請人：審批完成
+        // 通知申請人:審批完成
         const _p1 = { title: '✅ 申請已全部通過', body: `你的「${request.title}」已完成所有審批流程`, url: '/approvals.html' };
         sendPushToEmployees([request.applicant_id], { ..._p1, tag: 'approval-' + request_id }).catch(() => {});
         createNotifications([request.applicant_id], { ..._p1, type: 'approval' }).catch(() => {});
@@ -164,8 +250,8 @@ export default async function handler(req, res) {
           .update({ status: 'in_progress' })
           .eq('request_id', request_id).eq('step_number', nextStep);
 
-        // 通知申請人：本步驟通過，等待下一步
-        const _p2 = { title: '✅ 審批步驟通過', body: `你的「${request.title}」第 ${step_number} 步已通過，進入下一審批`, url: '/approvals.html' };
+        // 通知申請人:本步驟通過,等待下一步
+        const _p2 = { title: '✅ 審批步驟通過', body: `你的「${request.title}」第 ${step_number} 步已通過,進入下一審批`, url: '/approvals.html' };
         sendPushToEmployees([request.applicant_id], { ..._p2, tag: 'approval-' + request_id }).catch(() => {});
         createNotifications([request.applicant_id], { ..._p2, type: 'approval' }).catch(() => {});
 
@@ -177,7 +263,7 @@ export default async function handler(req, res) {
           .eq('step_number', nextStep)
           .single();
         if (nextStepData?.approver_role) {
-          const _p3 = { title: '📋 有新的審批待辦', body: `「${request.title}」等待你審批（第 ${nextStep} 步）`, url: '/approvals.html' };
+          const _p3 = { title: '📋 有新的審批待辦', body: `「${request.title}」等待你審批(第 ${nextStep} 步)`, url: '/approvals.html' };
           sendPushToRoles([nextStepData.approver_role], { ..._p3, tag: 'pending-' + request_id }).catch(() => {});
           createNotificationsForRoles([nextStepData.approver_role], { ..._p3, type: 'approval' }).catch(() => {});
         }
@@ -188,11 +274,38 @@ export default async function handler(req, res) {
 
     // ── 退回 ────────────────────────────────────────────────────────────────
     if (body.action === 'reject') {
-      const { request_id, step_number, approver_id, note } = body;
+      const { request_id, step_number, note } = body;
+
+      const { data: request } = await supabaseAdmin
+        .from('approval_requests').select('*').eq('id', request_id).single();
+      if (!request) return res.status(404).json({ error: '找不到申請' });
+
+      // self-approval guard
+      if (caller.id === request.applicant_id) {
+        return res.status(403).json({ error: '不可退回自己的申請' });
+      }
+
+      const { data: step } = await supabaseAdmin
+        .from('approval_steps').select('*')
+        .eq('request_id', request_id).eq('step_number', step_number).maybeSingle();
+      if (!step) return res.status(404).json({ error: '找不到該步驟' });
+      if (step.status !== 'in_progress') {
+        return res.status(409).json({ error: '此步驟非進行中、無法退回', actual: step.status });
+      }
+
+      const { data: applicant } = await supabaseAdmin
+        .from('employees').select('dept_id').eq('id', request.applicant_id).maybeSingle();
+      if (!canApproveStep(caller, step, applicant?.dept_id)) {
+        return res.status(403).json({
+          error: '無權退回此步驟',
+          step_role: step.approver_role,
+          your_role: caller.role,
+        });
+      }
 
       await supabaseAdmin.from('approval_steps').update({
         status: 'rejected',
-        approver_id: approver_id || null,
+        approver_id: caller.id,
         note: note || '',
         handled_at: new Date().toISOString(),
       }).eq('request_id', request_id).eq('step_number', step_number);
@@ -202,29 +315,39 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString(),
       }).eq('id', request_id);
 
-      // 通知申請人：被退回
-      const { data: rejReq } = await supabaseAdmin
-        .from('approval_requests').select('applicant_id, title').eq('id', request_id).single();
-      if (rejReq) {
-        const _p4 = { title: '❌ 申請已被退回', body: `你的「${rejReq.title}」申請已被退回，請確認原因`, url: '/approvals.html' };
-        sendPushToEmployees([rejReq.applicant_id], { ..._p4, tag: 'approval-' + request_id }).catch(() => {});
-        createNotifications([rejReq.applicant_id], { ..._p4, type: 'approval' }).catch(() => {});
-      }
+      // 通知申請人:被退回
+      const _p4 = { title: '❌ 申請已被退回', body: `你的「${request.title}」申請已被退回,請確認原因`, url: '/approvals.html' };
+      sendPushToEmployees([request.applicant_id], { ..._p4, tag: 'approval-' + request_id }).catch(() => {});
+      createNotifications([request.applicant_id], { ..._p4, type: 'approval' }).catch(() => {});
 
       return res.status(200).json({ message: '已退回' });
     }
 
     // ── 取消申請 ────────────────────────────────────────────────────────────
     if (body.action === 'cancel') {
+      const { request_id } = body;
+      const { data: request } = await supabaseAdmin
+        .from('approval_requests').select('id, applicant_id, status').eq('id', request_id).maybeSingle();
+      if (!request) return res.status(404).json({ error: '找不到申請' });
+      if (caller.id !== request.applicant_id) {
+        return res.status(403).json({ error: '只有申請人本人能取消' });
+      }
+      if (!['pending', 'in_progress'].includes(request.status)) {
+        return res.status(409).json({ error: '此狀態不可取消', actual: request.status });
+      }
       await supabaseAdmin.from('approval_requests').update({
         status: 'cancelled',
         updated_at: new Date().toISOString(),
-      }).eq('id', body.request_id);
+      }).eq('id', request_id);
       return res.status(200).json({ message: '已取消' });
     }
 
     // ── 更新流程設定 ────────────────────────────────────────────────────────
     if (body.action === 'update_config') {
+      // 僅 hr / admin 可改流程設定(對齊 lib/roles.js::canEditApprovalConfig)
+      if (!['hr', 'admin'].includes(caller.role)) {
+        return res.status(403).json({ error: '無權修改流程設定' });
+      }
       const { config_id, steps } = body;
       const { error } = await supabaseAdmin.from('approval_flow_configs')
         .update({ steps }).eq('id', config_id);
