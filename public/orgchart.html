@@ -392,6 +392,7 @@ let allEmployees = [];
 let allDepts     = [];
 let deptColorMap = {};
 let deptNameMap  = {}; // dept_id → name（新 endpoint 不回 dept_name、由 departments 推導）
+let currentDetailEmpId = null; // detail panel race 防護:fetch 回來時對照、不是當前就 ignore
 
 const ROLE_PRIORITY = { chairman:0, ceo:1, admin:2, hr:2, manager:3, employee:4 };
 const ROLE_LABEL    = { chairman:'董事長', ceo:'執行長', manager:'主管', hr:'人資', admin:'管理員' };
@@ -699,19 +700,22 @@ const ROLE_FULL = {
   hr:'人資專員', admin:'管理員', employee:'員工',
 };
 
-function openDetail(empId) {
-  // 主管 / 員工不開 detail panel（新 endpoint 不回 email/phone/hire_date、
-  // 開了也是空白；同時防 backoffice 才有的薪資洩漏 surface）
+async function openDetail(empId) {
+  // 主管 / 員工不開 detail panel(防 backoffice 才有的薪資洩漏 surface)
   if (!window.Roles?.isBackofficeRole(window.currentUser)) return;
 
   const emp = allEmployees.find(e => e.id === empId);
   if (!emp) return;
   const color = deptColorMap[emp.dept_id] || '#5B8DEF';
 
+  // race 防護:標記目前面板的 empId、lazy-fetch 回來時對照、不是當前就 ignore
+  currentDetailEmpId = empId;
+
   document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
   const card = document.querySelector(`.node-card[data-id="${empId}"]`);
   if (card) card.classList.add('selected');
 
+  // 從 cache 立即顯示主資料、3 個 contact 欄留 placeholder「載入中…」、不 block UI
   document.getElementById('detail-body').innerHTML = `
     <div class="detail-avatar-wrap">
       <div class="detail-av-lg" style="background:${color}22;color:${color}">
@@ -724,13 +728,46 @@ function openDetail(empId) {
       </span>
     </div>
     <hr class="dp">
-    ${dRow('👤','角色',    ROLE_FULL[emp.role] || emp.role || '—')}
-    ${dRow('📧','電子郵件', emp.email || '—')}
-    ${dRow('📱','電話',    emp.phone || '—')}
-    ${dRow('📅','到職日',  emp.hire_date || '—')}
+    ${dRow('👤','角色', ROLE_FULL[emp.role] || emp.role || '—')}
+    <div class="detail-row">
+      <div class="detail-row-icon">📧</div>
+      <div><div class="detail-row-label">電子郵件</div>
+           <div class="detail-row-val" id="dr-email">載入中…</div></div>
+    </div>
+    <div class="detail-row">
+      <div class="detail-row-icon">📱</div>
+      <div><div class="detail-row-label">電話</div>
+           <div class="detail-row-val" id="dr-phone">載入中…</div></div>
+    </div>
+    <div class="detail-row">
+      <div class="detail-row-icon">📅</div>
+      <div><div class="detail-row-label">到職日</div>
+           <div class="detail-row-val" id="dr-hire">載入中…</div></div>
+    </div>
   `;
   document.getElementById('detail-panel').classList.add('open');
   document.getElementById('detail-overlay').classList.add('open');
+
+  // Lazy-fetch /api/employees/:id 拿 email / phone / hire_date
+  // 後端 by-design:HR 拿 *、其他拿 16 欄白名單(也含這 3 欄)、本頁 gate 已限 HR
+  try {
+    const full = await api('/api/employees/' + encodeURIComponent(empId));
+    if (currentDetailEmpId !== empId) return; // race:用戶已關 panel 或切別人
+    setDetailRow('dr-email', full?.email);
+    setDetailRow('dr-phone', full?.phone);
+    setDetailRow('dr-hire',  full?.hire_date);
+  } catch (e) {
+    console.warn('[orgchart] lazy-fetch detail fail:', empId, e.message);
+    if (currentDetailEmpId !== empId) return;
+    setDetailRow('dr-email', null);
+    setDetailRow('dr-phone', null);
+    setDetailRow('dr-hire',  null);
+  }
+}
+
+function setDetailRow(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val || '—';
 }
 
 function dRow(icon, label, value) {
@@ -742,6 +779,7 @@ function dRow(icon, label, value) {
 }
 
 function closeDetail() {
+  currentDetailEmpId = null; // 關掉就清掉、下個 fetch 回來判斷不是當前就 ignore
   document.getElementById('detail-panel').classList.remove('open');
   document.getElementById('detail-overlay').classList.remove('open');
   document.querySelectorAll('.node-card').forEach(c => c.classList.remove('selected'));
