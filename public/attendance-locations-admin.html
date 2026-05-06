@@ -1,0 +1,385 @@
+<!-- GPS Phase A:HR 後台據點管理 UI -->
+<!-- 對接 api/office-locations、Leaflet + OSM 地圖選點、軟刪 -->
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>據點管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<!-- Leaflet GPS Phase A -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .loc-tbl{width:100%;border-collapse:collapse;font-size:13px}
+  .loc-tbl th, .loc-tbl td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:left;vertical-align:middle}
+  .loc-tbl th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15)}
+  .loc-tbl tr.inactive{opacity:.45}
+  .loc-tbl tr.editing{background:rgba(91,141,239,.08)}
+  .pill-active{padding:2px 8px;border-radius:10px;font-size:10px;font-family:'DM Mono',monospace;background:rgba(74,222,128,.15);color:#4ADE80}
+  .pill-inactive{padding:2px 8px;border-radius:10px;font-size:10px;font-family:'DM Mono',monospace;background:rgba(122,133,160,.15);color:#7A85A0}
+  .grid-form-map{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .form-card{background:rgba(255,255,255,.03);border:0.5px solid rgba(255,255,255,.08);border-radius:10px;padding:18px}
+  .map-card{border:0.5px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden}
+  #loc-map{height:420px;width:100%}
+  .form-row-tight{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .section-h{font-size:14px;font-weight:600;color:var(--text-dim);margin:18px 0 10px}
+  .form-mode-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-family:'DM Mono',monospace;margin-left:8px}
+  .mode-create{background:rgba(74,222,128,.15);color:#4ADE80}
+  .mode-edit  {background:rgba(91,141,239,.15);color:#7FBBFF}
+  /* Leaflet 顏色微調對齊 dark theme */
+  .leaflet-container{background:#1a1f2c}
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip{background:#1a1f2c;color:#e5e7eb}
+</style>
+</head>
+<body data-page="attendance-locations-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">據點管理</div>
+        <div class="page-sub">GPS 打卡據點 CRUD、地圖選點、軟刪</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="section-h">據點清單</div>
+      <div class="table-wrap">
+        <table class="loc-tbl">
+          <thead><tr>
+            <th>id</th><th>名稱</th><th>座標</th><th>radius</th><th>狀態</th><th>備註</th><th>操作</th>
+          </tr></thead>
+          <tbody id="tbody-loc"><tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:20px">載入中…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="section-h">表單 <span id="form-mode-badge" class="form-mode-badge mode-create">新增</span></div>
+      <div class="grid-form-map">
+        <div class="form-card">
+          <div class="form-row">
+            <label class="form-label">id <span style="color:#F87171">*</span><span style="font-size:11px;color:var(--text-dim);margin-left:8px">建議 LOC_* 前綴、最多 50 字、不可空白</span></label>
+            <input type="text" class="form-input" id="f-id" placeholder="LOC_HQ" maxlength="50">
+          </div>
+          <div class="form-row">
+            <label class="form-label">名稱 <span style="color:#F87171">*</span></label>
+            <input type="text" class="form-input" id="f-name" placeholder="總公司" maxlength="100">
+          </div>
+          <div class="form-row form-row-tight">
+            <div>
+              <label class="form-label">緯度 lat <span style="color:#F87171">*</span></label>
+              <input type="number" class="form-input" id="f-lat" step="0.0000001" placeholder="25.0339">
+            </div>
+            <div>
+              <label class="form-label">經度 lng <span style="color:#F87171">*</span></label>
+              <input type="number" class="form-input" id="f-lng" step="0.0000001" placeholder="121.5645">
+            </div>
+          </div>
+          <div class="form-row form-row-tight">
+            <div>
+              <label class="form-label">radius (m)</label>
+              <input type="number" class="form-input" id="f-radius" min="1" max="5000" step="1" value="150">
+            </div>
+            <div>
+              <label class="form-label">狀態</label>
+              <label style="display:flex;gap:8px;align-items:center;padding:8px 0;font-size:13px">
+                <input type="checkbox" id="f-active" checked>
+                <span>active(可被打卡使用)</span>
+              </label>
+            </div>
+          </div>
+          <div class="form-row">
+            <label class="form-label">備註</label>
+            <textarea class="form-input" id="f-note" rows="2" placeholder="例:1F 大廳、後門入口"></textarea>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+            <button class="btn btn-ghost" onclick="resetForm()">取消 / 清除</button>
+            <button class="btn btn-primary" onclick="saveForm()">儲存</button>
+          </div>
+          <div id="form-msg" style="font-size:12px;color:var(--text-dim);margin-top:8px;min-height:18px"></div>
+        </div>
+
+        <div class="map-card">
+          <div id="loc-map"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ─── state ─────────────────────────────────────────────────
+let allLocations = [];
+let editingId = null;       // null = create mode、string = edit mode
+let map = null;
+let marker = null;
+let circle = null;
+
+const ELEVATED_ROLES = ['hr', 'admin', 'ceo', 'chairman'];
+function isHRish(u) { return u && ELEVATED_ROLES.includes(u.role); }
+
+async function waitForCurrentUser(maxMs = 5000) {
+  const step = 100;
+  for (let i = 0; i < maxMs / step; i++) {
+    if (window.currentUser) return window.currentUser;
+    await new Promise(r => setTimeout(r, step));
+  }
+  return null;
+}
+
+// ─── init ──────────────────────────────────────────────────
+async function init() {
+  const u = await waitForCurrentUser();
+  if (!u) return;
+  if (!isHRish(u)) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  initMap();
+  bindFormSync();
+  await loadList();
+}
+
+function initMap() {
+  // 預設中心:台中車站
+  map = L.map('loc-map').setView([24.1369, 120.6852], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap',
+  }).addTo(map);
+
+  // 點地圖 → 放 / 移 marker、填 form lat/lng
+  map.on('click', (e) => {
+    setMarker(e.latlng.lat, e.latlng.lng);
+    document.getElementById('f-lat').value = e.latlng.lat.toFixed(7);
+    document.getElementById('f-lng').value = e.latlng.lng.toFixed(7);
+    syncCircle();
+  });
+}
+
+function bindFormSync() {
+  // 表單 lat/lng/radius 改變 → marker / circle 跟著動
+  const onLatLngChange = () => {
+    const lat = parseFloat(document.getElementById('f-lat').value);
+    const lng = parseFloat(document.getElementById('f-lng').value);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      setMarker(lat, lng);
+      syncCircle();
+    }
+  };
+  document.getElementById('f-lat').addEventListener('input', onLatLngChange);
+  document.getElementById('f-lng').addEventListener('input', onLatLngChange);
+  document.getElementById('f-radius').addEventListener('input', syncCircle);
+}
+
+function setMarker(lat, lng) {
+  if (!map) return;
+  if (marker) marker.setLatLng([lat, lng]);
+  else {
+    marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+    marker.on('dragend', () => {
+      const ll = marker.getLatLng();
+      document.getElementById('f-lat').value = ll.lat.toFixed(7);
+      document.getElementById('f-lng').value = ll.lng.toFixed(7);
+      syncCircle();
+    });
+  }
+}
+
+function syncCircle() {
+  if (!map || !marker) return;
+  const lat = parseFloat(document.getElementById('f-lat').value);
+  const lng = parseFloat(document.getElementById('f-lng').value);
+  const radius = parseInt(document.getElementById('f-radius').value) || 150;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  if (circle) {
+    circle.setLatLng([lat, lng]);
+    circle.setRadius(radius);
+  } else {
+    circle = L.circle([lat, lng], {
+      radius, color: '#5B8DEF', fillColor: '#5B8DEF', fillOpacity: 0.12,
+    }).addTo(map);
+  }
+}
+
+// ─── list ──────────────────────────────────────────────────
+async function loadList() {
+  try {
+    allLocations = await window.api('/api/office-locations') || [];
+    renderList();
+  } catch (e) {
+    toast('載入失敗:' + e.message, 'error');
+  }
+}
+
+function renderList() {
+  const tbody = document.getElementById('tbody-loc');
+  if (!allLocations.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:20px">無資料</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = allLocations.map(loc => {
+    const cls = (loc.id === editingId) ? 'editing' : (loc.is_active ? '' : 'inactive');
+    const statusPill = loc.is_active
+      ? `<span class="pill-active">active</span>`
+      : `<span class="pill-inactive">inactive</span>`;
+    return `
+      <tr class="${cls}">
+        <td style="font-family:'DM Mono',monospace">${escHtml(loc.id)}</td>
+        <td>${escHtml(loc.name)}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:11px">${Number(loc.lat).toFixed(5)}, ${Number(loc.lng).toFixed(5)}</td>
+        <td style="font-family:'DM Mono',monospace">${loc.radius_m}m</td>
+        <td>${statusPill}</td>
+        <td style="color:var(--text-dim);font-size:12px">${escHtml(loc.note || '—')}</td>
+        <td style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="loadIntoForm('${escHtml(loc.id)}')">編輯</button>
+          ${loc.is_active
+            ? `<button class="btn btn-ghost btn-sm" onclick="softDelete('${escHtml(loc.id)}')">停用</button>`
+            : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ─── form ──────────────────────────────────────────────────
+function loadIntoForm(id) {
+  const loc = allLocations.find(l => l.id === id);
+  if (!loc) return;
+  editingId = id;
+  document.getElementById('f-id').value = loc.id;
+  document.getElementById('f-id').setAttribute('readonly', 'readonly');
+  document.getElementById('f-name').value = loc.name;
+  document.getElementById('f-lat').value = loc.lat;
+  document.getElementById('f-lng').value = loc.lng;
+  document.getElementById('f-radius').value = loc.radius_m;
+  document.getElementById('f-active').checked = !!loc.is_active;
+  document.getElementById('f-note').value = loc.note || '';
+  setBadge('edit', `編輯中: ${id}`);
+  document.getElementById('form-msg').textContent = '';
+
+  // 地圖跳到該座標
+  const lat = Number(loc.lat), lng = Number(loc.lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    map.panTo([lat, lng]);
+    map.setZoom(17);
+    setMarker(lat, lng);
+    syncCircle();
+  }
+  renderList();  // 高亮 editing row
+}
+
+function resetForm() {
+  editingId = null;
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-id').removeAttribute('readonly');
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-lat').value = '';
+  document.getElementById('f-lng').value = '';
+  document.getElementById('f-radius').value = '150';
+  document.getElementById('f-active').checked = true;
+  document.getElementById('f-note').value = '';
+  setBadge('create', '新增');
+  document.getElementById('form-msg').textContent = '';
+  if (marker) { marker.remove(); marker = null; }
+  if (circle) { circle.remove(); circle = null; }
+  renderList();
+}
+
+function setBadge(mode, text) {
+  const b = document.getElementById('form-mode-badge');
+  b.className = `form-mode-badge mode-${mode}`;
+  b.textContent = text;
+}
+
+function setMsg(text, isError = false) {
+  const el = document.getElementById('form-msg');
+  el.textContent = text;
+  el.style.color = isError ? '#F87171' : 'var(--text-dim)';
+}
+
+async function saveForm() {
+  const id = document.getElementById('f-id').value.trim();
+  const name = document.getElementById('f-name').value.trim();
+  const lat = parseFloat(document.getElementById('f-lat').value);
+  const lng = parseFloat(document.getElementById('f-lng').value);
+  const radius_m = parseInt(document.getElementById('f-radius').value);
+  const is_active = document.getElementById('f-active').checked;
+  const note = document.getElementById('f-note').value.trim() || null;
+
+  // 前端 validation(對齊 backend)
+  if (!id) return setMsg('id 必填', true);
+  if (id.length > 50) return setMsg('id 不可超過 50 字', true);
+  if (/\s/.test(id)) return setMsg('id 不可有空白', true);
+  if (!name) return setMsg('name 必填', true);
+  if (name.length > 100) return setMsg('name 不可超過 100 字', true);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) return setMsg('lat 必須 ∈ [-90, 90]', true);
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) return setMsg('lng 必須 ∈ [-180, 180]', true);
+  if (!Number.isInteger(radius_m) || radius_m < 1 || radius_m > 5000) return setMsg('radius_m 必須 ∈ [1, 5000]', true);
+
+  const body = { name, lat, lng, radius_m, is_active, note };
+  if (!editingId) body.id = id;
+
+  try {
+    if (editingId) {
+      await window.api(`/api/office-locations/${encodeURIComponent(editingId)}`, {
+        method: 'PUT', body: JSON.stringify(body),
+      });
+      toast('已更新');
+    } else {
+      await window.api('/api/office-locations', {
+        method: 'POST', body: JSON.stringify(body),
+      });
+      toast('已新增');
+    }
+    await loadList();
+    resetForm();
+  } catch (e) {
+    const msg = e.message || 'unknown';
+    if (msg.includes('DUPLICATE_ID')) setMsg('id 重複(已存在相同 id 的據點)', true);
+    else setMsg('儲存失敗:' + msg, true);
+    toast('儲存失敗:' + msg, 'error');
+  }
+}
+
+async function softDelete(id) {
+  if (!confirm(`確定停用 ${id}?\n(軟刪、可後續手動再啟用、不破壞既有打卡紀錄關聯)`)) return;
+  try {
+    await window.api(`/api/office-locations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    toast('已停用');
+    await loadList();
+    if (editingId === id) resetForm();
+  } catch (e) {
+    toast('停用失敗:' + e.message, 'error');
+  }
+}
+
+init();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

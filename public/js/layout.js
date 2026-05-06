@@ -86,6 +86,7 @@
         { page:'shift-types-admin',        icon:'🎨', label:'班別管理',     href:'/shift-types-admin.html',         gate: isHRish },
         { page:'overtime-review',          icon:'👔', label:'加班審核',     href:'/overtime-review.html',          gate: isMgrOrCEO },
         { page:'attendance-admin',         icon:'🛠️', label:'打卡管理',     href:'/attendance-admin.html',         gate: isHRish },
+        { page:'attendance-locations-admin', icon:'📍', label:'據點管理',   href:'/attendance-locations-admin.html', gate: isHRish },
         { page:'annual-leave-admin',       icon:'🏖️', label:'特休管理',     href:'/annual-leave-admin.html',       gate: isHRish },
         { page:'comp-time-admin',          icon:'🌅', label:'補休管理',     href:'/comp-time-admin.html',          gate: isHRish },
         { page:'overtime-admin',           icon:'⚙️', label:'加班管理',     href:'/overtime-admin.html',           gate: isHRish },
