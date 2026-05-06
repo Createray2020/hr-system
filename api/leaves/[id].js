@@ -203,12 +203,12 @@ async function handleApprove({ repo, id, callerId, caller, body, override_reason
     return { ok: false, reason: 'NOT_PENDING', actual: leaveRequest.status };
   }
 
-  // canReview 需要 employee_manager_id、從 employees 表撈
+  // canReview 需要 employee_dept_id(Phase 2.x dept+is_manager 嚴格設計)、從 employees 表撈
   const employee = await repo.findEmployeeById(leaveRequest.employee_id);
   const reviewable = {
     ...leaveRequest,
     status: stage,
-    employee_manager_id: employee?.manager_id || null,
+    employee_dept_id: employee?.dept_id || null,
   };
   if (!canReview(caller, reviewable)) {
     return { ok: false, reason: 'FORBIDDEN', detail: 'Cannot review at stage ' + stage };
@@ -277,7 +277,7 @@ async function handleReject({ repo, id, callerId, caller, reject_reason }) {
   const reviewable = {
     ...leaveRequest,
     status: stage,
-    employee_manager_id: employee?.manager_id || null,
+    employee_dept_id: employee?.dept_id || null,
   };
   if (!canReview(caller, reviewable)) {
     return { ok: false, reason: 'FORBIDDEN', detail: 'Cannot reject at stage ' + stage };
