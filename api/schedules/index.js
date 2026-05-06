@@ -20,6 +20,7 @@ import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
 import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
+import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
 import {
   listShiftTypes, createShiftType, updateShiftType, deleteShiftType,
 } from '../../lib/shift-types/handler.js';
@@ -81,10 +82,22 @@ export default async function handler(req, res) {
         .order('work_date');
       if (start)       q = q.gte('work_date', start);
       if (end)         q = q.lte('work_date', end);
-      if (employee_id) q = q.eq('employee_id', employee_id);
 
-      // 員工只能看自己;主管/HR 看全部(calendar 員工視角過濾)
-      if (!canAccessBackoffice(caller) && caller.id) q = q.eq('employee_id', caller.id);
+      // Phase 2:row-level scope filter
+      // 既有 canAccessBackoffice 包 is_manager、主管被當 HR 看全公司、漏網。
+      // 改 resolveAuthScope:HR 全部、主管 dept-scope、員工本人。
+      const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+      if (employee_id) {
+        if (!canSeeEmployee(scope, employee_id)) {
+          return res.status(403).json({ error: 'Forbidden: 無權看此員工班表' });
+        }
+        q = q.eq('employee_id', employee_id);
+      } else if (scope.mode === 'self') {
+        q = q.eq('employee_id', scope.selfId);
+      } else if (scope.mode === 'dept') {
+        q = q.in('employee_id', [scope.selfId, ...(scope.deptEmpIds || [])]);
+      }
+      // mode='all' + 沒帶 employee_id → 不加 filter
 
       const { data: schedules, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
@@ -146,7 +159,6 @@ async function handleNewGet(req, res) {
 
   let q = supabaseAdmin.from('schedules').select('*').order('work_date').order('segment_no');
   if (period_id) q = q.eq('period_id', period_id);
-  if (employee_id) q = q.eq('employee_id', employee_id);
   if (year)  q = q.gte('work_date', `${parseInt(year)}-01-01`).lte('work_date', `${parseInt(year)}-12-31`);
   if (year && month) {
     const y = parseInt(year), m = parseInt(month);
@@ -155,9 +167,20 @@ async function handleNewGet(req, res) {
     q = q.gte('work_date', start).lte('work_date', last);
   }
 
-  // 員工只能看自己（dev mode 寬鬆）
-  const callerIsManagerOrHR = canAccessBackoffice(caller);
-  if (!callerIsManagerOrHR && caller.id) q = q.eq('employee_id', caller.id);
+  // Phase 2:row-level scope filter(取代 canAccessBackoffice 包 is_manager 的漏網)
+  // 員工本人 / 主管本部門 / HR 全部
+  const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+  if (employee_id) {
+    if (!canSeeEmployee(scope, employee_id)) {
+      return res.status(403).json({ error: 'Forbidden: 無權看此員工班表' });
+    }
+    q = q.eq('employee_id', employee_id);
+  } else if (scope.mode === 'self') {
+    q = q.eq('employee_id', scope.selfId);
+  } else if (scope.mode === 'dept') {
+    q = q.in('employee_id', [scope.selfId, ...(scope.deptEmpIds || [])]);
+  }
+  // mode='all' + 沒帶 employee_id → 不加 filter
 
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
