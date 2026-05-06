@@ -98,6 +98,9 @@ tbody tr{transition:background .15s}tbody tr:hover{background:rgba(91,141,239,.0
 .badge-dot-confirmed,.badge-dot-late{background:var(--orange)}
 .badge-draft{background:rgba(122,133,160,.12);color:var(--text-dim)}
 .badge-dot-draft{background:var(--text-dim)}
+/* Phase 1.6: terminated(HR 終止 expired row)灰底紅邊、與 rejected/archived 區分 */
+.badge-terminated{background:rgba(122,133,160,.18);color:var(--red);border:1px solid rgba(248,113,113,.35)}
+.badge-dot-terminated{background:var(--red)}
 .type-chip{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:500;background:rgba(91,141,239,.15);color:var(--accent2)}
 .days-badge{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:22px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-family:'DM Mono',monospace;font-size:12px;padding:0 8px}
 .action-btns{display:flex;gap:6px}

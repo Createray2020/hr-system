@@ -8,6 +8,11 @@ import {
   canArchive,
   transitionArchive,
   canOverride,
+  // Phase 1.6
+  canTerminate,
+  transitionTerminate,
+  canApprove,
+  canReject,
 } from '../lib/leave/stages.js';
 
 describe('getInitialStage', () => {
@@ -215,5 +220,114 @@ describe('canOverride', () => {
 
   it('null actor → false', () => {
     expect(canOverride(null)).toBe(false);
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// Phase 1.6:HR 終止 expired row
+// ════════════════════════════════════════════════════════════
+describe('canTerminate', () => {
+  const expiredReq = (over = {}) => ({
+    employee_id: 'E1',
+    status: 'pending_mgr',
+    proof_status: 'expired',
+    ...over,
+  });
+
+  it('HR + pending_mgr + proof_expired → true', () => {
+    expect(canTerminate({ id: 'HR1', role: 'hr' }, expiredReq())).toBe(true);
+  });
+
+  it('HR + pending_ceo + proof_expired → true', () => {
+    expect(canTerminate({ id: 'HR1', role: 'hr' }, expiredReq({ status: 'pending_ceo' }))).toBe(true);
+  });
+
+  it('admin + pending + proof_expired → true', () => {
+    expect(canTerminate({ id: 'A1', role: 'admin' }, expiredReq())).toBe(true);
+  });
+
+  it('CEO + pending + proof_expired → false(只有 hr/admin 能 terminate)', () => {
+    expect(canTerminate({ id: 'C1', role: 'ceo' }, expiredReq())).toBe(false);
+  });
+
+  it('一般主管 + pending + proof_expired → false', () => {
+    expect(canTerminate({ id: 'M1', role: 'employee', is_manager: true }, expiredReq())).toBe(false);
+  });
+
+  it('HR + approved + proof_expired → false(非 pending_* 不能 terminate、走 archive)', () => {
+    expect(canTerminate({ id: 'HR1', role: 'hr' }, expiredReq({ status: 'approved' }))).toBe(false);
+  });
+
+  it('HR + pending_mgr + proof_required(未過期)→ false(沒 expired 不能 terminate、走 reject)', () => {
+    expect(canTerminate({ id: 'HR1', role: 'hr' }, expiredReq({ proof_status: 'required' }))).toBe(false);
+  });
+
+  it('HR + pending_mgr + proof_submitted → false(已交 proof 不能 terminate)', () => {
+    expect(canTerminate({ id: 'HR1', role: 'hr' }, expiredReq({ proof_status: 'submitted' }))).toBe(false);
+  });
+
+  it('null actor / request → false', () => {
+    expect(canTerminate(null, expiredReq())).toBe(false);
+    expect(canTerminate({ id: 'HR1', role: 'hr' }, null)).toBe(false);
+  });
+});
+
+describe('transitionTerminate', () => {
+  it('pending_mgr → terminated', () => {
+    expect(transitionTerminate('pending_mgr')).toBe('terminated');
+  });
+
+  it('pending_ceo → terminated', () => {
+    expect(transitionTerminate('pending_ceo')).toBe('terminated');
+  });
+
+  it('approved → throw(終止只接 pending_*、approved 該走 archive)', () => {
+    expect(() => transitionTerminate('approved')).toThrow(/cannot terminate/);
+  });
+
+  it('rejected → throw', () => {
+    expect(() => transitionTerminate('rejected')).toThrow(/cannot terminate/);
+  });
+
+  it('terminated → throw(已終結不能再 terminate)', () => {
+    expect(() => transitionTerminate('terminated')).toThrow(/cannot terminate/);
+  });
+});
+
+describe('canApprove / canReject — proof_status=expired guard', () => {
+  const baseReq = (over = {}) => ({
+    employee_id: 'E1',
+    employee_manager_id: 'M1',
+    status: 'pending_mgr',
+    proof_status: 'required',
+    ...over,
+  });
+
+  it('canApprove:HR + pending + proof_required → true(既有行為)', () => {
+    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq())).toBe(true);
+  });
+
+  it('canApprove:HR + pending + proof_expired → false(強迫走 terminate)', () => {
+    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq({ proof_status: 'expired' }))).toBe(false);
+  });
+
+  it('canApprove:HR + pending + proof_submitted → true(員工已交、可批)', () => {
+    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq({ proof_status: 'submitted' }))).toBe(true);
+  });
+
+  it('canApprove:已 archived → false(委任 canReview)', () => {
+    expect(canApprove({ id: 'HR1', role: 'hr' }, baseReq({ status: 'archived' }))).toBe(false);
+  });
+
+  it('canReject:HR + pending + proof_required → true(既有行為)', () => {
+    expect(canReject({ id: 'HR1', role: 'hr' }, baseReq())).toBe(true);
+  });
+
+  it('canReject:HR + pending + proof_expired → false(強迫走 terminate)', () => {
+    expect(canReject({ id: 'HR1', role: 'hr' }, baseReq({ proof_status: 'expired' }))).toBe(false);
+  });
+
+  it('canReject:一般員工 → false(委任 canReview)', () => {
+    expect(canReject({ id: 'E2', role: 'employee' }, baseReq())).toBe(false);
   });
 });

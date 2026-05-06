@@ -64,8 +64,9 @@
     return name ? `${name}(${code})` : code;
   }
 
-  // ─── stage label / badge class(Phase 1.4)──────────────────
+  // ─── stage label / badge class(Phase 1.4 / 1.6)──────────────
   // 'pending'(legacy)= 'pending_mgr'(向後相容)
+  // 'terminated' (Phase 1.6) = HR 終止 expired row
   const STAGE_LABEL = {
     pending:      '待主管審核',
     pending_mgr:  '待主管審核',
@@ -74,6 +75,7 @@
     archived:     '已歸檔',
     rejected:     '已退回',
     cancelled:    '已撤回',
+    terminated:   '已終結',
   };
   const STAGE_BADGE = {
     pending:     'badge-pending',
@@ -83,6 +85,7 @@
     archived:    'badge-archived',
     rejected:    'badge-rejected',
     cancelled:   'badge-cancelled',
+    terminated:  'badge-terminated',
   };
   function stageLabel(status) { return STAGE_LABEL[status] || status || ''; }
   function stageBadgeClass(status) { return STAGE_BADGE[status] || 'badge-pending'; }
