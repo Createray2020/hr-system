@@ -21,6 +21,8 @@
   .badge-archived{background:rgba(74,222,128,.10);color:#86efac}
   .badge-rejected{background:rgba(248,113,113,.12);color:#F87171}
   .badge-cancelled{background:rgba(107,114,128,.15);color:#9CA3AF}
+  /* Phase 1.6:terminated(HR 終止 expired row)灰底紅邊、跟 rejected/archived 區分 */
+  .badge-terminated{background:rgba(107,114,128,.18);color:#F87171;border:1px solid rgba(248,113,113,.35)}
   .l-row{display:grid;grid-template-columns:140px 80px 1fr 70px 110px 170px;gap:10px;padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);align-items:center;font-size:13px}
   .l-row.head{font-weight:600;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,.15)}
   .filter-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
@@ -62,7 +64,8 @@
           <option value="rejected">已退回</option>
           <option value="cancelled">已撤回</option>
           <option value="expired">證明過期(待 HR 處理)</option>
-          <option value="history">歷史(歸檔/退回/撤回)</option>
+          <option value="terminated">已終結(HR 終止)</option>
+          <option value="history">歷史(歸檔/退回/撤回/終結)</option>
           <option value="">全部</option>
         </select>
         <select class="form-select" id="f-type" onchange="render()" style="width:140px">
@@ -214,9 +217,11 @@ function statusMatches(filter, l, u) {
   if (!filter) return true;
   if (filter === 'my_pending')   return myPendingStatuses(u).includes(l.status);
   if (filter === 'all_pending')  return ['pending', 'pending_mgr', 'pending_ceo'].includes(l.status);
-  if (filter === 'history')      return ['archived', 'rejected', 'cancelled'].includes(l.status);
-  // Phase 1.5 升級:expired filter 撈 proof_status=expired(法定假未補、HR 待處理)
-  if (filter === 'expired')      return l.proof_status === 'expired';
+  // Phase 1.6:history 群組含 terminated(已終結也是最終狀態)
+  if (filter === 'history')      return ['archived', 'rejected', 'cancelled', 'terminated'].includes(l.status);
+  // Phase 1.5 升級 + 1.6:expired filter 限 status pending_*(防 HR 終止後仍出現在「待處理」)
+  if (filter === 'expired')      return l.proof_status === 'expired'
+                                     && ['pending', 'pending_mgr', 'pending_ceo'].includes(l.status);
   return l.status === filter;
 }
 
@@ -336,6 +341,13 @@ async function openDetail(id) {
          <div class="audit-label">HR 歸檔</div>
          <div>${escHtml(l.archived_by)} · ${fmtDt(l.archived_at)}</div>
        </div>` : '';
+  // Phase 1.6:HR 終止 expired row 稽核
+  const terminatedAudit = l.terminated_by
+    ? `<div class="audit-row" style="background:rgba(248,113,113,.06)">
+         <div class="audit-label" style="color:#F87171">HR 終止</div>
+         <div>${escHtml(l.terminated_by)} · ${fmtDt(l.terminated_at)}<br>
+              <span style="color:var(--text-dim);font-size:11px">原因:證明逾期、HR 個案處理</span></div>
+       </div>` : '';
 
   document.getElementById('modal-body').innerHTML = `
     <div style="display:grid;grid-template-columns:100px 1fr;gap:6px 12px;margin-bottom:12px">
@@ -346,7 +358,7 @@ async function openDetail(id) {
       <div style="color:var(--text-dim)">理由</div><div>${escHtml(l.reason || '—')}</div>
     </div>
     ${lateBlock}${proofBlock}
-    ${mgrAudit}${ceoAudit}${overrideAudit}${archivedAudit}
+    ${mgrAudit}${ceoAudit}${overrideAudit}${archivedAudit}${terminatedAudit}
     ${(stage === 'pending_mgr' || stage === 'pending_ceo') ? `
       <div class="live-recalc">
         ℹ 最終核准時會依當下排班即時重算時數,可能 ≠ 申請時的時數(${hours}h)。
@@ -368,16 +380,24 @@ async function openDetail(id) {
   // stage-aware 按鈕
   const buttons = document.getElementById('action-buttons');
   buttons.innerHTML = '';
+  // Phase 1.6:proof_status='expired' + status pending_* → HR 終止 row(對齊 lib canTerminate)
+  // 隱藏 approve / reject 按鈕、只顯示「📛 終止此申請」(後端 422 守、前端 fail-fast)
+  const isExpiredPending = l.proof_status === 'expired'
+                            && (stage === 'pending_mgr' || stage === 'pending_ceo');
+  const canTerminateNow  = isExpiredPending && isHR(u);
+
   // 主管 stage:caller 是直屬主管(同 dept_id)或 elevated 才能批
   // 執行長 stage:elevated 才能批
   // HR + status=approved:歸檔
   const canApproveMgr = stage === 'pending_mgr'
     && (isElevated(u) || (u.is_manager === true /* simplified:不在前端嚴格比 dept */ ));
   const canApproveCeo = stage === 'pending_ceo' && isElevated(u);
-  const canApproveAny = canApproveMgr || canApproveCeo;
+  const canApproveAny = (canApproveMgr || canApproveCeo) && !isExpiredPending;  // expired 不能 approve / reject
   const canArchiveNow = isHR(u) && l.status === 'approved';
 
-  if (canApproveAny) {
+  if (canTerminateNow) {
+    buttons.innerHTML = `<button class="btn btn-danger" onclick="onTerminate()">📛 終止此申請</button>`;
+  } else if (canApproveAny) {
     const approveLabel = stage === 'pending_mgr' ? '核准(轉執行長)' : '最終核准';
     buttons.innerHTML = `
       <button class="btn btn-ghost btn-sm" onclick="onReject()">退回</button>
@@ -393,6 +413,21 @@ async function openDetail(id) {
 function onOverrideToggle() {
   const check = document.getElementById('f-override-check').checked;
   document.getElementById('f-override-reason').style.display = check ? '' : 'none';
+}
+
+// Phase 1.6:HR 終止 expired row(後端走 PUT decision='terminate')
+async function onTerminate() {
+  const tName = window.HR_Utils.leaveTypeLabel(currentLeave.leave_type);
+  if (!confirm(`確定終止 ${currentLeave.emp_name || currentLeave.employee_id} 的 ${tName} 申請?\n(因證明逾期、員工本人需另開新單)`)) return;
+  try {
+    const r = await api(`/api/leaves/${encodeURIComponent(currentLeave.id)}`, {
+      method: 'PUT', body: JSON.stringify({ decision: 'terminate' }),
+    });
+    if (r && r.ok === false) { toast('終止失敗:' + (r.reason || r.error || 'unknown'), 'error'); return; }
+    toast('已終止');
+    closeModal();
+    await load();
+  } catch(e) { toast('終止失敗:' + e.message, 'error'); }
 }
 
 async function onArchive() {
