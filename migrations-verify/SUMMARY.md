@@ -44,6 +44,15 @@
 - 主管定案/公告 schedule period → approved_by + published_by 開始有資料
 - 員工 clockIn / 人工補登 → early_arrival_minutes 有非 0 值
 
+## GPS Phase A schema(2026-05-07、本批之外)
+
+新增 `office_locations` 表 + `attendance` ALTER 11 GPS columns + gps_flag CHECK。
+- migration:`migrations/2026_05_07_attendance_gps_phase_a.sql`
+- verify:`migrations-verify/verify_attendance_gps_phase_a.sql`
+- Phase recap:`docs/PHASE_A_GPS.md`(7 commits / 整條 flow / 設計決策 / Phase B checklist)
+
+獨立於本批的 5 條 drift confirmation、列在這裡只是給 user 看 attendance schema 的完整時間軸。
+
 ## 不在本批的 migration
 
 `2026_05_06_leave_proof_expiry_action.sql`(Phase 1.5 升級)— 已在 prod 跑過(commit message 提)、不在本批。
