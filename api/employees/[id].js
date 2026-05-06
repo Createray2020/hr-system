@@ -156,7 +156,16 @@ export default async function handler(req, res) {
   if (req.method === 'DELETE') {
     const caller = await requireRole(req, res, BACKOFFICE_ROLES);
     if (!caller) return;
-    const { error } = await supabaseAdmin.from('employees').update({ status: 'resigned' }).eq('id', id);
+    // Phase 1.7 MVP:寫入 resigned_at(精準)+ optional resigned_reason
+    const reason = (req.body?.resigned_reason && String(req.body.resigned_reason).trim()) || null;
+    const { error } = await supabaseAdmin
+      .from('employees')
+      .update({
+        status: 'resigned',
+        resigned_at: new Date().toISOString(),
+        resigned_reason: reason,
+      })
+      .eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已設為離職' });
   }

@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS employees (
   bank_account  TEXT,
   base_salary   NUMERIC(12,2) DEFAULT 0,
   status        TEXT DEFAULT 'active' CHECK (status IN ('active','inactive','resigned')),
+  -- 2026-05-07 Phase 1.7: 離職時間 / 原因稽核欄位
+  -- 詳見 migrations/2026_05_07_employees_resigned_metadata.sql
+  resigned_at     TIMESTAMPTZ,
+  resigned_reason TEXT,
   auth_user_id  UUID REFERENCES auth.users(id),
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW()
