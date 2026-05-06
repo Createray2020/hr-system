@@ -167,6 +167,7 @@ function openReview(id, tier){
   if (!current) return;
   currentTier = tier;
   const emp = empMap[current.employee_id] || {};
+  const u = window.currentUser;
 
   document.getElementById('m-title').textContent = `${tier === 'ceo' ? 'CEO' : '主管'}審核 — ${emp.name||current.employee_id}`;
   document.getElementById('m-body').innerHTML = `
@@ -200,6 +201,45 @@ function openReview(id, tier){
   }
 
   document.getElementById('m-note').value = '';
+
+  // Phase 2.x.2 frontend gate(對齊 backend 嚴格 spec):
+  //   manager 階:同部門 + is_manager + 非自己
+  //   ceo 階:role IN ('ceo','chairman') + 非自己 + 非已當 manager 簽過
+  // 不合法 → 隱藏核准 / 駁回按鈕、顯示 hint(優先 self > cross-stage > stage)
+  const isSelfReview = u.id === current.employee_id;
+  const isSameDeptMgr = u.is_manager === true && u.dept_id && current.employee_dept_id
+                        && u.dept_id === current.employee_dept_id;
+  const isCeoOrChairman = u.role === 'ceo' || u.role === 'chairman';
+  const isCrossStage    = current.manager_id && current.manager_id === u.id;
+  const canMgrReview    = tier === 'manager' && isSameDeptMgr && !isSelfReview;
+  const canCeoReview    = tier === 'ceo' && isCeoOrChairman && !isSelfReview && !isCrossStage;
+  const canReview       = canMgrReview || canCeoReview;
+
+  // 移除舊 hint
+  const oldHint = document.getElementById('m-action-hint');
+  if (oldHint) oldHint.remove();
+
+  const actions = document.querySelector('#review-modal .modal-actions > div');
+  if (canReview) {
+    actions.style.display = '';
+  } else {
+    actions.style.display = 'none';
+    let hintText;
+    if (isSelfReview) {
+      hintText = 'ℹ 不可審核自己的申請';
+    } else if (isCrossStage) {
+      hintText = 'ℹ 你已在主管階段簽過、不可再審執行長階段';
+    } else if (tier === 'manager') {
+      const mgrName = current.employee_manager_name || '部門主管';
+      hintText = `ℹ 此申請由 ${escHtml(mgrName)} 審核`;
+    } else {
+      hintText = 'ℹ 此申請由執行長 / 董事長審核';
+    }
+    actions.insertAdjacentHTML('beforebegin',
+      `<div id="m-action-hint" style="font-size:12px;color:var(--text-dim);background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.2);padding:8px 12px;border-radius:6px;margin-right:auto">${hintText}</div>`
+    );
+  }
+
   document.getElementById('review-modal').classList.add('open');
 }
 

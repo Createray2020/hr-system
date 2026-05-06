@@ -11,13 +11,42 @@
 //   4. 算 estimated_pay(供參考,即使選 comp_leave 也算)
 //   5. INSERT overtime_requests with status='pending'
 
+import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { checkOverLimit, isCrossMonth } from '../../lib/overtime/limits.js';
 import {
   calculateOvertimePay, getHourlyRate, pickFrozenPayMultiplier,
 } from '../../lib/overtime/pay-calc.js';
+import { attachManagerNames } from '../../lib/dept-name-mapper.js';
 import { makeOvertimeRepo } from './_repo.js';
+
+// Phase 2.x.2:overtime list response 補 employee_dept_id + employee_manager_name +
+// employee_name + dept_id flatten(對齊 leave Phase 2.x、給 frontend gate / hint 用)。
+async function attachEmployeeAndManager(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const empIds = [...new Set(rows.map(r => r.employee_id).filter(Boolean))];
+  if (empIds.length === 0) return rows;
+  const { data: emps } = await supabaseAdmin
+    .from('employees')
+    .select('id, name, dept_id, departments(name)')
+    .in('id', empIds);
+  const empMap = {};
+  for (const e of (emps || [])) {
+    empMap[e.id] = {
+      name: e.name,
+      dept_id: e.dept_id,
+      dept_name: e.departments?.name || null,
+    };
+  }
+  const enriched = rows.map(r => ({
+    ...r,
+    employee_name: empMap[r.employee_id]?.name || null,
+    dept_id:       empMap[r.employee_id]?.dept_id || null,
+    dept_name:     empMap[r.employee_id]?.dept_name || null,
+  }));
+  return attachManagerNames(enriched, supabaseAdmin, r => r.dept_id);
+}
 
 const COMP_TYPES = new Set(['comp_leave', 'overtime_pay', 'undecided']);
 const REQUEST_KINDS = new Set(['pre_approval', 'post_approval']);
@@ -53,6 +82,7 @@ async function handleGet(req, res, caller) {
       if (!caller.id) return res.status(400).json({ error: 'employee_id required' });
       rows = await repo.listOvertimeRequests({ employee_id: caller.id, status, year, month });
     }
+    rows = await attachEmployeeAndManager(rows);
     return res.status(200).json({ requests: rows });
   } catch (e) {
     return res.status(500).json({ error: e.message });

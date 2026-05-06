@@ -73,10 +73,16 @@ vi.mock('../lib/auth.js', () => ({
   }),
 }));
 
-vi.mock('../lib/dept-name-mapper.js', () => ({
-  addDeptName: vi.fn(),
-  addDeptNameSingle: vi.fn(),
-}));
+// 只 mock 名字 mapper、attachManagerNames 走真實實作(已抽 lib)
+vi.mock('../lib/dept-name-mapper.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    addDeptName: vi.fn(),
+    addDeptNameSingle: vi.fn(),
+    addDeptNameNested: vi.fn(),
+  };
+});
 
 vi.mock('../lib/auth-scope.js', () => ({
   resolveAuthScopeWithDeptIds: vi.fn(async () => ({ mode: 'all', selfId: 'HR1', deptEmpIds: [] })),
