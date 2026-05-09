@@ -187,6 +187,11 @@ function makeFullRepo(over = {}) {
     updateAnnualRecord: vi.fn(async () => undefined),
     updateCompBalance:  vi.fn(async () => undefined),
 
+    // ─── 階段 2.5.2 新增 mock ────────────────────────────
+    findEmployeeInsuranceSettings: vi.fn(async () => null),  // 預設無投保
+    findActivePayrollPeriod:       vi.fn(async () => null),  // 預設無 active period
+    findYtdAccumulatedBonusBefore: vi.fn(async () => 0),
+
     ...over,
   };
 }
@@ -318,5 +323,170 @@ describe('calculateMonthlySalary — daily_wage_snapshot 計算', () => {
     const upserted = repo.upsertSalaryRecord.mock.calls[0][0];
     expect(upserted.absence_days).toBe(2);
     expect(upserted.deduct_absence).toBe(4000); // 2 × 2000
+  });
+});
+
+describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
+  it('無投保員工 → 全部新 _auto 欄位 = 0', async () => {
+    const repo = makeFullRepo();  // findEmployeeInsuranceSettings 預設 null
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.deduct_pension_voluntary).toBe(0);
+    expect(r.deduct_supplementary_health).toBe(0);
+    expect(r.employer_cost_labor).toBe(0);
+    expect(r.employer_cost_health).toBe(0);
+    expect(r.employer_cost_pension).toBe(0);
+    expect(r.insured_salary_labor_snapshot).toBe(0);
+    expect(r.insured_salary_health_snapshot).toBe(0);
+    expect(r.pension_wage_snapshot).toBe(0);
+  });
+
+  it('有投保 + 自願 6% → deduct_pension_voluntary 跟 employer_cost_pension 算對', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        pension_wage: 45800,
+        pension_voluntary_rate: 6,  // 百分比 = 6%
+        labor_ins_bracket: 45800, labor_ins_company: 3490,
+        health_ins_bracket: 45800, health_ins_company: 1410,
+        health_ins_dependents: 0,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.deduct_pension_voluntary).toBe(2748);  // 45800 × 0.06
+    expect(r.employer_cost_pension).toBe(2748);     // 雇主強制 6%
+    expect(r.employer_cost_labor).toBe(3490);       // direct premium
+    expect(r.employer_cost_health).toBe(1410);
+    expect(r.pension_wage_snapshot).toBe(45800);
+    expect(r.insured_salary_labor_snapshot).toBe(45800);
+    expect(r.insured_salary_health_snapshot).toBe(45800);
+  });
+
+  it('跨補充保費門檻 → deduct_supplementary_health 算對', async () => {
+    // 投保 50000、4 倍 = 200000
+    // 既有當月獎金合計 100000、ytd 累計之前 150000、累計後 250000、超過 50000
+    // 50000 × 0.0211 = 1055
+    const repo = makeFullRepo({
+      findSalaryRecord: vi.fn(async () => ({
+        id: 'S_E001_2026_04',
+        bonus_yearend: 50000,
+        bonus_festival: 30000,
+        bonus_performance: 20000,
+        bonus_other: 0,
+      })),
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        pension_wage: 50000,
+        labor_ins_bracket: 50000, labor_ins_company: 0,
+        health_ins_bracket: 50000, health_ins_company: 0,
+      })),
+      findYtdAccumulatedBonusBefore: vi.fn(async () => 150000),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.deduct_supplementary_health).toBe(1055);
+  });
+
+  it('有投保但無獎金 → deduct_supplementary_health = 0(不查 lib)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        pension_wage: 50000,
+        labor_ins_bracket: 50000, health_ins_bracket: 50000,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.deduct_supplementary_health).toBe(0);
+  });
+
+  it('payroll_period_id 從 findActivePayrollPeriod 寫入', async () => {
+    const repo = makeFullRepo({
+      findActivePayrollPeriod: vi.fn(async () => ({ id: 'PP_2026_04', status: 'draft' })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.payroll_period_id).toBe('PP_2026_04');
+  });
+
+  it('沒 active period → payroll_period_id = null', async () => {
+    const repo = makeFullRepo();  // 預設 findActivePayrollPeriod 回 null
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.payroll_period_id).toBeNull();
+  });
+
+  it('callerId 寫入 calculated_by + calculated_at 有值', async () => {
+    const repo = makeFullRepo();
+    const before = new Date().toISOString();
+    await calculateMonthlySalary(repo, {
+      employee_id:'E001', year:2026, month:4, callerId:'EMP_HR_001',
+    });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.calculated_by).toBe('EMP_HR_001');
+    expect(r.calculated_at >= before).toBe(true);
+  });
+
+  it('無 callerId → calculated_by = null', async () => {
+    const repo = makeFullRepo();
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.calculated_by).toBeNull();
+  });
+
+  it('_manual 新欄位保留 existing(獎金 + welfare_fund 等)', async () => {
+    const repo = makeFullRepo({
+      findSalaryRecord: vi.fn(async () => ({
+        id: 'S_E001_2026_04',
+        bonus_yearend: 50000,
+        bonus_festival: 5000,
+        bonus_other_note: 'HR 補登入職獎金',
+        deduct_welfare_fund: 100,
+        deduct_union_fee: 200,
+        deduct_court_garnishment: 1000,
+        deduct_loan_repayment: 2000,
+        deduct_other: 500,
+        deduct_other_note: '住宿費代扣',
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.bonus_yearend).toBe(50000);
+    expect(r.bonus_festival).toBe(5000);
+    expect(r.bonus_other_note).toBe('HR 補登入職獎金');
+    expect(r.deduct_welfare_fund).toBe(100);
+    expect(r.deduct_union_fee).toBe(200);
+    expect(r.deduct_court_garnishment).toBe(1000);
+    expect(r.deduct_loan_repayment).toBe(2000);
+    expect(r.deduct_other).toBe(500);
+    expect(r.deduct_other_note).toBe('住宿費代扣');
+  });
+
+  it('snapshot 4 欄寫入正確', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        pension_wage: 45800,
+        pension_voluntary_rate: 3,
+        labor_ins_bracket: 45800, labor_ins_company: 0,
+        health_ins_bracket: 50000, health_ins_company: 0,
+      })),
+      findEmployeeForSalary: vi.fn(async () => ({
+        id:'E001', base_salary: 45800, attendance_bonus: 0,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    expect(r.pension_wage_snapshot).toBe(45800);
+    expect(r.insured_salary_labor_snapshot).toBe(45800);
+    expect(r.insured_salary_health_snapshot).toBe(50000);
+    // taxable_income_snapshot = gross_pre_tax - voluntary
+    // gross_pre_tax = base + 加項(本 case 全 0 / 非 0 部分: ab + ot + holiday + settlement + bonus = 0)
+    //               = 45800 + 0 + 0 + 0 + 0 + 0 + 0 + 0 = 45800
+    // voluntary = 45800 × 0.03 = 1374
+    // taxable = 45800 - 1374 = 44426
+    expect(r.deduct_pension_voluntary).toBe(1374);
+    expect(r.taxable_income_snapshot).toBe(44426);
   });
 });

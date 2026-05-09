@@ -246,5 +246,42 @@ export function makeSalaryRepo() {
       if (error) throw error;
       return data || null;
     },
+
+    // ─── 階段 2.5.2 新增 ────────────────────────────────────
+    // 撈員工的 insurance_settings 整筆(pension_wage / brackets / company_premium / voluntary_rate / dependents 等)
+    async findEmployeeInsuranceSettings(employee_id) {
+      const { data, error } = await supabaseAdmin
+        .from('insurance_settings').select('*')
+        .eq('employee_id', employee_id).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+
+    // 找 (year, month) 的 payroll_periods.id + status、給 calculator 寫入 row.payroll_period_id 用
+    async findActivePayrollPeriod(year, month) {
+      const { data, error } = await supabaseAdmin
+        .from('payroll_periods').select('id, status')
+        .eq('year', year).eq('month', month).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+
+    // 加總同年同 employee_id 月份 < monthLte 的 4 個 bonus_* 欄位
+    // 給二代健保補充保費計算 ytdAccumulatedBonusBefore 用
+    async findYtdAccumulatedBonusBefore({ employee_id, year, monthLte }) {
+      const { data, error } = await supabaseAdmin
+        .from('salary_records')
+        .select('bonus_yearend, bonus_festival, bonus_performance, bonus_other')
+        .eq('employee_id', employee_id).eq('year', year).lt('month', monthLte);
+      if (error) throw error;
+      let total = 0;
+      for (const r of (data || [])) {
+        total += Number(r.bonus_yearend)     || 0;
+        total += Number(r.bonus_festival)    || 0;
+        total += Number(r.bonus_performance) || 0;
+        total += Number(r.bonus_other)       || 0;
+      }
+      return total;
+    },
   };
 }
