@@ -21,6 +21,7 @@ import { supabaseAdmin } from '../../lib/supabase.js';
 import { skipAttendanceBonus, isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
+import { canExecuteTransition } from '../../lib/salary/period-state.js';
 import { makeSalaryRepo } from './_repo.js';
 import { addDeptName, addDeptNameNested } from '../../lib/dept-name-mapper.js';
 
@@ -33,6 +34,117 @@ function calcAttendanceBonus(emp) {
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // ── Periods resource(階段 1.4)─────────────────────────────────────────
+  if (req.query._resource === 'periods') {
+    const caller = await requireRole(req, res, BACKOFFICE_ROLES);
+    if (!caller) return;
+
+    const id = req.query.id;
+
+    // GET list / detail
+    if (req.method === 'GET') {
+      if (id) {
+        const { data, error } = await supabaseAdmin
+          .from('payroll_periods').select('*').eq('id', id).maybeSingle();
+        if (error) return res.status(500).json({ error: error.message });
+        if (!data) return res.status(404).json({ error: 'Period not found' });
+        return res.status(200).json(data);
+      }
+      let q = supabaseAdmin.from('payroll_periods').select('*')
+        .order('year', { ascending: false }).order('month', { ascending: false });
+      if (req.query.status) q = q.eq('status', req.query.status);
+      if (req.query.year)   q = q.eq('year', Number(req.query.year));
+      const { data, error } = await q;
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json(data || []);
+    }
+
+    // POST 開新期間
+    if (req.method === 'POST') {
+      const { year, month, period_start, period_end,
+              attendance_cutoff_date, pay_date, note } = req.body || {};
+      if (!year || !month)        return res.status(400).json({ error: '缺 year/month' });
+      if (!period_start || !period_end) return res.status(400).json({ error: '缺 period_start/period_end' });
+      if (month < 1 || month > 12)return res.status(400).json({ error: 'month 範圍 1-12' });
+
+      const periodId = `PP_${year}_${String(month).padStart(2, '0')}`;
+      const { error } = await supabaseAdmin.from('payroll_periods').insert([{
+        id: periodId,
+        year: Number(year), month: Number(month),
+        period_start, period_end,
+        attendance_cutoff_date: attendance_cutoff_date || null,
+        pay_date:               pay_date               || null,
+        status: 'draft',
+        created_by: caller.id,
+        note: note || null,
+      }]);
+      if (error) {
+        if (error.code === '23505') return res.status(409).json({ error: '此年月期間已存在' });
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(201).json({ id: periodId, message: '期間已建立' });
+    }
+
+    // PUT 改 status / note(走狀態機驗證)
+    if (req.method === 'PUT') {
+      if (!id) return res.status(400).json({ error: '缺 id' });
+      const body = req.body || {};
+
+      const { data: cur, error: cErr } = await supabaseAdmin
+        .from('payroll_periods').select('status').eq('id', id).maybeSingle();
+      if (cErr)  return res.status(500).json({ error: cErr.message });
+      if (!cur)  return res.status(404).json({ error: 'Period not found' });
+
+      // 狀態機驗證
+      if (body.status && body.status !== cur.status) {
+        const check = canExecuteTransition({
+          callerRole: caller.role,
+          from:       cur.status,
+          to:         body.status,
+        });
+        if (!check.ok) {
+          return res.status(403).json({ error: 'Transition not allowed', reason: check.reason });
+        }
+      }
+
+      // 白名單欄位
+      const allowed = ['status','note','attendance_cutoff_date','pay_date','period_start','period_end'];
+      const update = {};
+      for (const k of allowed) if (body[k] !== undefined) update[k] = body[k];
+
+      // 自動 audit 欄位
+      const now = new Date().toISOString();
+      if (body.status === 'calculating'    && cur.status !== 'calculating')    update.calculated_at = now;
+      if (body.status === 'pending_review' && cur.status !== 'pending_review') {
+        update.reviewed_by = caller.id;
+        update.reviewed_at = now;
+      }
+      if (body.status === 'approved') { update.approved_by = caller.id; update.approved_at = now; }
+      if (body.status === 'paid')     { update.paid_at     = now; }
+      if (body.status === 'locked')   { update.locked_at   = now; }
+
+      const { error } = await supabaseAdmin.from('payroll_periods').update(update).eq('id', id);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ message: '已更新' });
+    }
+
+    // DELETE 只能刪 draft
+    if (req.method === 'DELETE') {
+      if (!id) return res.status(400).json({ error: '缺 id' });
+      const { data: cur } = await supabaseAdmin
+        .from('payroll_periods').select('status').eq('id', id).maybeSingle();
+      if (!cur) return res.status(404).json({ error: 'Period not found' });
+      if (cur.status !== 'draft') {
+        return res.status(409).json({ error: '只能刪除 status=draft 的期間' });
+      }
+      const { error } = await supabaseAdmin.from('payroll_periods').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ message: '已刪除' });
+    }
+
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   // ── 新路徑分流 ──────────────────────────────────────────
   if (req.method === 'GET' && req.query.v === '2') {

@@ -6,6 +6,14 @@
       "destination": "/api/salary/index?_action=batch"
     },
     {
+      "source": "/api/salary/periods",
+      "destination": "/api/salary/index?_resource=periods"
+    },
+    {
+      "source": "/api/salary/periods/:id",
+      "destination": "/api/salary/index?_resource=periods&id=:id"
+    },
+    {
       "source": "/api/departments",
       "destination": "/api/employees?_resource=departments"
     },
