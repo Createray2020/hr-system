@@ -101,6 +101,12 @@
       <div class="form-row"><label class="form-label">扣 健保</label><input type="number" class="form-input num" id="m-hi" step="0.01" min="0"></div>
       <div class="form-row"><label class="form-label">扣 稅</label><input type="number" class="form-input num" id="m-tax" step="0.01" min="0"></div>
     </div>
+    <div class="form-row" style="display:flex;align-items:center;gap:8px;background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.18);border-radius:6px;padding:8px 12px;margin-top:4px">
+      <input type="checkbox" id="f-deduct-tax-lock" style="margin:0">
+      <label for="f-deduct-tax-lock" style="font-size:12px;color:var(--text-dim);cursor:pointer;margin:0">
+        🔒 鎖定扣稅(下次月結 batch 不被 calculator 覆蓋、若不勾下次重算會回到自動值)
+      </label>
+    </div>
     <div class="form-row"><label class="form-label">加班備註</label><input type="text" class="form-input" id="m-otn"></div>
     <div class="form-row"><label class="form-label">結算備註</label><input type="text" class="form-input" id="m-sn"></div>
 
@@ -180,7 +186,7 @@ function render(){
       <td class="num auto-cell">${fmt$(r.deduct_absence)}</td>
       <td class="num manual-cell">${fmt$(r.deduct_labor_ins)}</td>
       <td class="num manual-cell">${fmt$(r.deduct_health_ins)}</td>
-      <td class="num manual-cell">${fmt$(r.deduct_tax)}</td>
+      <td class="num manual-cell">${fmt$(r.deduct_tax)}${r.deduct_tax_manual_override ? '<span title="HR 鎖定、calculator 不會覆蓋" style="margin-left:4px;cursor:help">🔒</span>' : ((r.deduct_tax||0) > 0 ? '<span title="自動算(calculator 月結時計算)" style="margin-left:4px;opacity:.5;cursor:help">🤖</span>' : '')}</td>
       <td class="num auto-cell">${fmt$(r.attendance_penalty_total)}</td>
       <td class="num gen-cell">${fmt$(r.gross_salary)}</td>
       <td class="num gen-cell">${fmt$(r.net_salary)}</td>
@@ -232,6 +238,7 @@ function openEdit(id){
   document.getElementById('m-li').value    = currentRow.deduct_labor_ins ?? 0;
   document.getElementById('m-hi').value    = currentRow.deduct_health_ins ?? 0;
   document.getElementById('m-tax').value   = currentRow.deduct_tax ?? 0;
+  document.getElementById('f-deduct-tax-lock').checked = currentRow.deduct_tax_manual_override === true;
   document.getElementById('m-otn').value   = currentRow.overtime_pay_note ?? '';
   document.getElementById('m-sn').value    = currentRow.settlement_note ?? '';
 
@@ -277,6 +284,7 @@ async function saveManual(){
     deduct_labor_ins:    parseFloat(document.getElementById('m-li').value) || 0,
     deduct_health_ins:   parseFloat(document.getElementById('m-hi').value) || 0,
     deduct_tax:          parseFloat(document.getElementById('m-tax').value) || 0,
+    deduct_tax_manual_override: document.getElementById('f-deduct-tax-lock').checked,
     overtime_pay_note:   document.getElementById('m-otn').value || null,
     settlement_note:     document.getElementById('m-sn').value || null,
   };

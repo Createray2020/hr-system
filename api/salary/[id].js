@@ -18,6 +18,8 @@ const ALLOWED_PUT = new Set([
   // Batch 9 新增 _manual 欄位
   'overtime_pay_manual', 'overtime_pay_note',
   'settlement_note',
+  // 階段 2.6.1 / 3.3:讓 HR 鎖定 deduct_tax 不被 calculator 覆蓋
+  'deduct_tax_manual_override',
   // 不接受:gross_salary / net_salary(GENERATED)、
   //         overtime_pay_auto / attendance_penalty_total / attendance_bonus_actual /
   //         comp_expiry_payout / settlement_amount / holiday_work_pay (_auto)、
