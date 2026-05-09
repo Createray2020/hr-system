@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>薪資單</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* 螢幕樣式:對齊既有 admin page、有 sidebar 影響 */
+    body { font-family: -apple-system, "Noto Sans TC", sans-serif; margin: 0; background:#1F2937; color:#E5E7EB; }
+    .payslip-wrapper { max-width: 800px; margin: 24px auto; background:white; color:#1F2937; padding: 32px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+    .payslip-header { text-align: center; border-bottom: 2px solid #1F2937; padding-bottom: 12px; margin-bottom: 16px; }
+    .payslip-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-bottom: 16px; font-size: 14px; }
+    .payslip-meta dt { font-weight: 600; color:#6B7280; }
+    .payslip-meta dd { margin: 0; }
+    .payslip-section { margin: 16px 0; }
+    .payslip-section h3 { border-bottom: 1px solid #D1D5DB; padding-bottom: 4px; margin: 0 0 8px; font-size: 16px; }
+    .payslip-table { width: 100%; border-collapse: collapse; }
+    .payslip-table th, .payslip-table td { padding: 6px 8px; border-bottom: 1px solid #E5E7EB; }
+    .payslip-table .label { color:#374151; }
+    .payslip-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .payslip-total { background: #F3F4F6; font-weight: 700; }
+    .payslip-net { background: #1F2937; color: white; padding: 12px; text-align: center; border-radius: 4px; margin-top: 16px; }
+    .payslip-net .num { font-size: 24px; font-weight: 700; }
+    .payslip-footer { margin-top: 32px; font-size: 11px; color: #6B7280; border-top: 1px solid #D1D5DB; padding-top: 8px; }
+    .actions { text-align: center; margin: 16px 0; }
+    .actions button { padding: 8px 16px; background: #3B82F6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin: 0 4px; }
+    .actions button:hover { background: #2563EB; }
+    .muted { color: #9CA3AF; }
+
+    /* 列印樣式: 純白底 / 隱藏控制 / 移除圓角 / A4 邊距 */
+    @media print {
+      body { background: white; color: black; }
+      .actions, .no-print { display: none !important; }
+      .payslip-wrapper { box-shadow: none; max-width: none; margin: 0; padding: 16mm; border-radius: 0; }
+      @page { size: A4; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="actions no-print">
+    <button onclick="window.print()">🖨 列印 / 存 PDF</button>
+    <button onclick="history.back()">← 返回</button>
+  </div>
+
+  <div class="payslip-wrapper" id="payslip-content">
+    <p class="muted" style="text-align:center;padding:60px 0;">載入中…</p>
+  </div>
+
+  <script>
+  // self-bootstrap auth(對齊 employee-salary.html pattern、API 走 JWT bearer)
+  const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+  const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'http://localhost:3000' : '';
+
+  async function apiFetch(path) {
+    const { data: { session } } = await _sb.auth.getSession();
+    const res = await fetch(API + path, {
+      headers: { 'Content-Type':'application/json', ...(session?{'Authorization':`Bearer ${session.access_token}`}:{}) },
+    });
+    if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
+    return res.json();
+  }
+
+  function n(v) { return Number(v) || 0; }
+  function fmt(v) { return n(v).toLocaleString('zh-TW', { maximumFractionDigits: 0 }); }
+  function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  function render(emp, sal) {
+    const grossItems = [
+      { label: '本薪', value: sal.base_salary },
+      { label: '全勤獎金', value: sal.attendance_bonus_actual },
+      { label: '加給(系統)', value: sal.allowance },
+      { label: '加給(額外)', value: sal.extra_allowance },
+      { label: '加班費(自動)', value: sal.overtime_pay_auto },
+      { label: '加班費(手動)', value: sal.overtime_pay_manual },
+      { label: '假日工資', value: sal.holiday_work_pay },
+      { label: '補休結算', value: sal.comp_expiry_payout },
+      { label: '特休結算', value: sal.settlement_amount },
+      { label: '年終獎金', value: sal.bonus_yearend },
+      { label: '三節獎金', value: sal.bonus_festival },
+      { label: '績效獎金', value: sal.bonus_performance },
+      { label: '其他獎金' + (sal.bonus_other_note ? `(${sal.bonus_other_note})` : ''), value: sal.bonus_other },
+    ].filter(item => n(item.value) !== 0);
+
+    const deductItems = [
+      { label: '曠職扣薪', value: sal.deduct_absence },
+      { label: '出勤罰款', value: sal.attendance_penalty_total },
+      { label: '勞保', value: sal.deduct_labor_ins },
+      { label: '健保', value: sal.deduct_health_ins },
+      { label: '所得稅' + (sal.deduct_tax_manual_override ? '(HR 鎖定)' : ''), value: sal.deduct_tax },
+      { label: '勞退自願提繳', value: sal.deduct_pension_voluntary },
+      { label: '二代健保補充保費', value: sal.deduct_supplementary_health },
+      { label: '職工福利金', value: sal.deduct_welfare_fund },
+      { label: '工會會費', value: sal.deduct_union_fee },
+      { label: '法院扣押', value: sal.deduct_court_garnishment },
+      { label: '借支扣還', value: sal.deduct_loan_repayment },
+      { label: '其他扣款' + (sal.deduct_other_note ? `(${sal.deduct_other_note})` : ''), value: sal.deduct_other },
+    ].filter(item => n(item.value) !== 0);
+
+    document.getElementById('payslip-content').innerHTML = `
+      <div class="payslip-header">
+        <h1 style="margin:0">薪資單</h1>
+        <p style="margin:4px 0;color:#6B7280">${sal.year} 年 ${sal.month} 月</p>
+      </div>
+
+      <dl class="payslip-meta">
+        <div><dt>員工編號</dt><dd>${escapeHtml(emp.id || '')}</dd></div>
+        <div><dt>姓名</dt><dd>${escapeHtml(emp.name || '')}</dd></div>
+        <div><dt>部門</dt><dd>${escapeHtml(emp.dept_name || emp.dept_id || '—')}</dd></div>
+        <div><dt>職位</dt><dd>${escapeHtml(emp.position || '—')}</dd></div>
+      </dl>
+
+      <div class="payslip-section">
+        <h3>應發項目</h3>
+        <table class="payslip-table">
+          ${grossItems.map(item => `
+            <tr><td class="label">${escapeHtml(item.label)}</td><td class="num">${fmt(item.value)}</td></tr>
+          `).join('')}
+          <tr class="payslip-total"><td>應發合計</td><td class="num">${fmt(sal.gross_salary)}</td></tr>
+        </table>
+      </div>
+
+      <div class="payslip-section">
+        <h3>扣除項目</h3>
+        <table class="payslip-table">
+          ${deductItems.length > 0 ? deductItems.map(item => `
+            <tr><td class="label">${escapeHtml(item.label)}</td><td class="num">−${fmt(item.value)}</td></tr>
+          `).join('') : '<tr><td class="muted" colspan="2">本月無扣項</td></tr>'}
+        </table>
+      </div>
+
+      <div class="payslip-net">
+        <div style="font-size:12px;opacity:.7">實發金額</div>
+        <div class="num">$ ${fmt(sal.net_salary)}</div>
+      </div>
+
+      <div class="payslip-footer">
+        <p>投保資訊: 勞保投保 ${fmt(sal.insured_salary_labor_snapshot)} / 健保投保 ${fmt(sal.insured_salary_health_snapshot)} / 月提繳工資 ${fmt(sal.pension_wage_snapshot)}</p>
+        <p>計算時間: ${sal.calculated_at ? new Date(sal.calculated_at).toLocaleString('zh-TW') : '—'}${sal.payroll_period_id ? ` / 期間 ${sal.payroll_period_id}` : ''}</p>
+        <p>本薪資單由系統自動產生、若有異議請於 7 日內向人事提出。</p>
+      </div>
+    `;
+  }
+
+  (async () => {
+    const params = new URLSearchParams(location.search);
+    const employee_id = params.get('employee_id');
+    const year = Number(params.get('year'));
+    const month = Number(params.get('month'));
+
+    if (!employee_id || !year || !month) {
+      document.getElementById('payslip-content').innerHTML =
+        '<p style="color:#DC2626;text-align:center;padding:60px 0;">缺少 query 參數: employee_id / year / month</p>';
+      return;
+    }
+
+    // Auth guard
+    const { data: { session } } = await _sb.auth.getSession();
+    if (!session) { window.location.href = '/login.html'; return; }
+
+    try {
+      // /api/salary?v=2:員工 / HR 都能用、權限由 endpoint 控
+      //   員工 → 只能看自己(employee_id 必須等於 caller.id)
+      //   HR / admin / ceo / chairman → 看任何 employee
+      const [emp, salaryRes] = await Promise.all([
+        apiFetch(`/api/employees/${encodeURIComponent(employee_id)}`),
+        apiFetch(`/api/salary?v=2&employee_id=${encodeURIComponent(employee_id)}&year=${year}&month=${month}`),
+      ]);
+      const records = salaryRes.records || [];
+      const sal = records.find(r => r.year === year && r.month === month) || records[0];
+
+      if (!sal) {
+        document.getElementById('payslip-content').innerHTML =
+          `<p style="color:#DC2626;text-align:center;padding:60px 0;">${year}-${String(month).padStart(2,'0')} 沒有 ${escapeHtml(employee_id)} 的薪資紀錄</p>`;
+        return;
+      }
+      render(emp, sal);
+    } catch (err) {
+      document.getElementById('payslip-content').innerHTML =
+        `<p style="color:#DC2626;text-align:center;padding:60px 0;">載入失敗: ${escapeHtml(err.message)}</p>`;
+    }
+  })();
+  </script>
+</body>
+</html>
