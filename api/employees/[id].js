@@ -61,6 +61,12 @@ export default async function handler(req, res) {
       const body = req.body;
       await syncDeptFields(supabaseAdmin, body);
 
+      // 0.2.2: PUT status=resigned 時、若沒帶 resigned_at、自動補當下時間
+      // (前端「標離職」只傳 resign_date(預計離職日)、之前 audit gap、resigned_at 永遠 null)
+      if (body.status === 'resigned' && !body.resigned_at) {
+        body.resigned_at = new Date().toISOString();
+      }
+
       // Phase 1.7.2:撈 before、給 audit 比對用(7 個白名單欄位)
       const { data: beforeRow } = await supabaseAdmin
         .from('employees')
@@ -106,15 +112,39 @@ export default async function handler(req, res) {
             .from('insurance_settings').select('*').eq('employee_id', id).single();
 
           if (ins && ins.has_insurance !== false) {
-            const { data: laborBracket } = await supabaseAdmin
-              .from('labor_insurance_brackets').select('*')
-              .lte('monthly_wage_min', newMonthly).gte('monthly_wage_max', newMonthly)
-              .single();
+            // 0.2.2: 級距查詢、超出上限時 fallback 到最高級、不 throw
+            // (對齊 public/insurance.html recommendBracket() 的 fallback 邏輯)
+            let laborBracket = null;
+            {
+              const { data } = await supabaseAdmin
+                .from('labor_insurance_brackets').select('*')
+                .lte('monthly_wage_min', newMonthly).gte('monthly_wage_max', newMonthly)
+                .maybeSingle();
+              if (data) {
+                laborBracket = data;
+              } else {
+                const { data: max } = await supabaseAdmin
+                  .from('labor_insurance_brackets').select('*')
+                  .order('bracket_level', { ascending: false }).limit(1).maybeSingle();
+                laborBracket = max;
+              }
+            }
 
-            const { data: healthBracket } = await supabaseAdmin
-              .from('health_insurance_brackets').select('*')
-              .lte('monthly_wage_min', newMonthly).gte('monthly_wage_max', newMonthly)
-              .single();
+            let healthBracket = null;
+            {
+              const { data } = await supabaseAdmin
+                .from('health_insurance_brackets').select('*')
+                .lte('monthly_wage_min', newMonthly).gte('monthly_wage_max', newMonthly)
+                .maybeSingle();
+              if (data) {
+                healthBracket = data;
+              } else {
+                const { data: max } = await supabaseAdmin
+                  .from('health_insurance_brackets').select('*')
+                  .order('bracket_level', { ascending: false }).limit(1).maybeSingle();
+                healthBracket = max;
+              }
+            }
 
             const laborChanged  = laborBracket?.insured_salary  && laborBracket.insured_salary  !== Number(ins.labor_ins_bracket);
             const healthChanged = healthBracket?.insured_salary && healthBracket.insured_salary !== Number(ins.health_ins_bracket);
@@ -123,9 +153,15 @@ export default async function handler(req, res) {
               const changeId = 'ICR' + Date.now();
               const deps = ins.health_ins_dependents || 0;
 
+              // 0.2.2: 修 stale pension 根因 — 薪資調整時同步重算 pension
+              const oldPensionRate    = Number(ins.pension_rate)    || 6;
+              const oldPensionCompany = Number(ins.pension_company) || 0;
+              const newPensionCompany = Math.round(newMonthly * oldPensionRate / 100);
+
               await supabaseAdmin.from('insurance_change_requests').insert([{
                 id: changeId,
                 employee_id: id,
+                requested_by: caller.id,    // 0.2.2: 補 audit gap (prod 6 row 全 null)
                 old_monthly_salary:  Number(ins.labor_ins_bracket) || 0,
                 new_monthly_salary:  newMonthly,
                 old_labor_bracket:   ins.labor_ins_bracket,
@@ -142,6 +178,10 @@ export default async function handler(req, res) {
                   ? (healthBracket.employee_premium||0) + deps * (healthBracket.per_dependent||0)
                   : ins.health_ins_employee,
                 new_health_company:  healthBracket?.company_premium  || ins.health_ins_company,
+                old_pension_rate:    oldPensionRate,
+                old_pension_company: oldPensionCompany,
+                new_pension_rate:    oldPensionRate,
+                new_pension_company: newPensionCompany,
                 trigger_reason: '薪資調整觸發自動試算',
                 status: 'pending',
               }]);
