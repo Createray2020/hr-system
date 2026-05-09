@@ -4,7 +4,7 @@
 // body 支援的欄位:
 //   - granted_days (number)  → 調整 granted,寫 manual_adjust log
 //   - settle (boolean)       → 結算為 paid_out;settlement_amount 暫填 0
-//                              (TODO Batch 9 由 lib/salary/settlement.js 算)
+//                              (settlement_amount 由月結時 lib/salary/settlement.js calculateSettlementAmount() reconcile)
 //   - note (string)
 //
 // 對應設計文件:docs/attendance-system-design-v1.md §4.3.3
@@ -69,7 +69,7 @@ export default async function handler(req, res) {
         change_type: 'settle',
         hours_delta: -remainingDays * 8,
         changed_by: caller.id || cur.employee_id,
-        reason: `manual settle by HR (TODO Batch 9 amount)`,
+        reason: `manual settle by HR (settlement reconciled at month-end)`,
       });
     }
     return res.status(200).json({ record: updated });

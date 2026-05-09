@@ -64,11 +64,11 @@ describe('runAnnualRollover — 滾動流程', () => {
     });
     const r = await runAnnualRollover(repo, '2026-04-26');
     expect(r.rollover_count).toBe(1);
-    expect(r.payout_total).toBe(0); // TODO Batch 9
+    expect(r.payout_total).toBe(0); // rollover 階段 placeholder=0 by design、月結 reconcile
     expect(repo.updateAnnualRecord).toHaveBeenCalledTimes(1);
     const updPatch = repo.updateAnnualRecord.mock.calls[0][1];
     expect(updPatch.status).toBe('paid_out');
-    expect(updPatch.settlement_amount).toBe(0); // TODO Batch 9 換實際金額
+    expect(updPatch.settlement_amount).toBe(0); // rollover 階段 placeholder=0 by design、月結 reconcile
     expect(updPatch.settled_at).toContain('2026-04-26');
 
     // 結算 log
