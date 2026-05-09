@@ -59,6 +59,17 @@
   .mini-day.today::after{display:none}
   .mini-day.other-month{color:var(--text-dim);opacity:.35}
   .mini-day.holiday{color:#f87171}
+  /* Payroll period progress widget(階段 3.2)*/
+  .period-progress{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:16px}
+  .period-progress .stage{padding:6px 12px;border-radius:14px;background:rgba(255,255,255,.06);color:var(--text-dim);font-size:12px;white-space:nowrap;font-family:'DM Mono',monospace}
+  .period-progress .stage.done{background:rgba(74,222,128,.18);color:#4ADE80}
+  .period-progress .stage.current{background:rgba(91,141,239,.22);color:#7FBBFF;font-weight:600;box-shadow:0 0 0 2px rgba(91,141,239,.3)}
+  .period-progress .connector{width:14px;height:2px;background:rgba(255,255,255,.12);border-radius:1px;flex-shrink:0}
+  .period-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px}
+  .period-stats .pst{display:flex;flex-direction:column;gap:2px}
+  .period-stats .pst-label{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.4px}
+  .period-stats .pst-value{font-size:18px;font-weight:600;font-family:'DM Mono',monospace}
+  .period-meta{margin-top:10px;font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace}
 </style>
 </head>
 <body data-page="dashboard">
@@ -115,6 +126,15 @@
         <div class="section-title">今日出勤狀況</div>
         <ul class="today-list" id="today-attendance"><li style="color:var(--text-dim);font-size:13px">載入中…</li></ul>
       </div>
+    </div>
+
+    <!-- 本月薪資期間(HR-only widget、階段 3.2)-->
+    <div class="card" id="card-payroll-period" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="section-title" style="margin-bottom:0">本月薪資期間</div>
+        <a href="/salary-period.html" style="font-size:12px;color:var(--accent);text-decoration:none">期間管理 →</a>
+      </div>
+      <div id="payroll-period-body"><div style="color:var(--text-dim);font-size:13px">載入中…</div></div>
     </div>
 
     <div class="grid-2">
@@ -178,7 +198,7 @@ window.onload = async () => {
   // 載入假別中文名(idempotent、給 pendingLeaves render 用)
   await window.HR_Utils?.loadLeaveTypeLabels?.();
   try {
-    await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements()]);
+    await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements(), loadCurrentPayrollPeriod()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
 
@@ -224,7 +244,7 @@ async function applyRoleFilter() {
   const u = await waitForCurrentUser();
   const isHR = !!u && window.Roles?.isBackofficeRole(u);
   if (isHR) return;
-  ['qc-leave', 'qc-employees', 'qc-salary', 'stat-salary-card', 'card-salary-overview']
+  ['qc-leave', 'qc-employees', 'qc-salary', 'stat-salary-card', 'card-salary-overview', 'card-payroll-period']
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
@@ -461,6 +481,79 @@ async function loadLatestAnnouncements() {
   } catch(e) {
     el.innerHTML = '<div style="color:var(--text-dim);font-size:13px">無法載入公告</div>';
   }
+}
+
+// ─── 本月薪資期間 widget(階段 3.2)──────────────────────────────
+async function loadCurrentPayrollPeriod() {
+  // 只有 BACKOFFICE 載入(card 已被 applyRoleFilter 隱藏、API 也擋)
+  const u = window.currentUser;
+  if (!u || !window.Roles?.isBackofficeRole(u)) return;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const periodId = `PP_${year}_${String(month).padStart(2, '0')}`;
+
+  const body = document.getElementById('payroll-period-body');
+  if (!body) return;
+
+  try {
+    const p = await api(`/api/salary/periods/${encodeURIComponent(periodId)}`);
+    renderPayrollPeriodWidget(p);
+  } catch (e) {
+    if (String(e.message).includes('404') || String(e.message).toLowerCase().includes('not found')) {
+      body.innerHTML = `
+        <div style="color:var(--text-dim);font-size:13px;padding:20px 0;text-align:center">
+          ${year}-${String(month).padStart(2,'0')} 期間尚未建立<br>
+          <a href="/salary-period.html" style="color:var(--accent);font-size:13px;margin-top:8px;display:inline-block">前往建立期間 →</a>
+        </div>
+      `;
+    } else {
+      const safeMsg = String(e.message || '').replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+      body.innerHTML = `<div style="color:var(--text-dim);font-size:13px">載入失敗:${safeMsg}</div>`;
+    }
+  }
+}
+
+function renderPayrollPeriodWidget(p) {
+  const stages = [
+    { key:'draft',          label:'草稿' },
+    { key:'calculating',    label:'計算中' },
+    { key:'pending_review', label:'待審核' },
+    { key:'approved',       label:'已核准' },
+    { key:'paid',           label:'已發放' },
+    { key:'locked',         label:'已鎖定' },
+  ];
+  const currentIdx = stages.findIndex(s => s.key === p.status);
+  const progressHtml = stages.map((s, i) => {
+    const isDone    = i < currentIdx;
+    const isCurrent = i === currentIdx;
+    const cls = `stage${isDone ? ' done' : ''}${isCurrent ? ' current' : ''}`;
+    return `<div class="${cls}">${s.label}</div>`;
+  }).join('<div class="connector"></div>');
+
+  const fmtMoney = n => n == null ? '—' : '$' + Number(n).toLocaleString('zh-TW', { maximumFractionDigits: 0 });
+  const fmtDtFull = s => {
+    if (!s) return '—';
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return String(s);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const body = document.getElementById('payroll-period-body');
+  body.innerHTML = `
+    <div class="period-progress">${progressHtml}</div>
+    <div class="period-stats">
+      <div class="pst"><span class="pst-label">員工數</span><span class="pst-value">${p.employee_count || 0}</span></div>
+      <div class="pst"><span class="pst-label">應發合計</span><span class="pst-value">${fmtMoney(p.gross_total)}</span></div>
+      <div class="pst"><span class="pst-label">實發合計</span><span class="pst-value" style="color:var(--accent2)">${fmtMoney(p.net_total)}</span></div>
+      <div class="pst"><span class="pst-label">雇主成本</span><span class="pst-value">${fmtMoney(p.employer_cost_total)}</span></div>
+    </div>
+    <div class="period-meta">
+      最後計算: ${fmtDtFull(p.calculated_at)}${p.approved_at ? ' &nbsp;·&nbsp; 核准: ' + fmtDtFull(p.approved_at) : ''}
+    </div>
+  `;
 }
 
 async function quickLeave(id, status) {
