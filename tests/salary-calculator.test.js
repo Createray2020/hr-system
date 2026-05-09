@@ -490,6 +490,26 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
     expect(r.deduct_pension_voluntary).toBe(1374);
     expect(r.taxable_income_snapshot).toBe(44426);
   });
+
+  it('pension_wage = 0 時 fallback 到 labor_ins_bracket(2.7 fallback)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        pension_wage: 0,                      // 既有 row 沒設、模擬 prod 既有狀況
+        pension_voluntary_rate: 6,            // 6%
+        labor_ins_bracket: 36300,             // fallback target
+        labor_ins_company: 0,
+        health_ins_bracket: 36300, health_ins_company: 0,
+        health_ins_dependents: 0,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    // 應該用 labor_ins_bracket=36300 算、不是 0
+    expect(r.pension_wage_snapshot).toBe(36300);
+    expect(r.employer_cost_pension).toBe(2178);  // 36300 × 0.06
+    expect(r.deduct_pension_voluntary).toBe(2178); // 36300 × 0.06(自願 6%)
+  });
 });
 
 describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual override', () => {
