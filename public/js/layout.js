@@ -99,6 +99,7 @@
       items: [
         { page:'employee-salary', icon:'💵', label:'我的薪資', href:'/employee-salary.html' },
         { page:'salary',          icon:'💰', label:'薪資管理', href:'/salary.html', gate: isHRish },
+        { page:'salary-period',   icon:'📅', label:'薪資期間', href:'/salary-period.html', gate: isHRish },
         { page:'insurance',       icon:'🏥', label:'勞健保',   href:'/insurance.html', gate: isHRish },
       ]
     },
