@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>薪資期間管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:right;vertical-align:middle}
+  th{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.15);text-align:center}
+  th:first-child, td:first-child{text-align:left}
+  .num{font-family:'DM Mono',monospace}
+  .pill{padding:3px 8px;border-radius:4px;font-size:11px;font-family:'DM Mono',monospace}
+  .s-draft          {background:rgba(156,163,175,.18);color:#9CA3AF}
+  .s-calculating    {background:rgba(251,191,36,.15);color:#FBBF24}
+  .s-pending_review {background:rgba(91,141,239,.15);color:#7FBBFF}
+  .s-approved       {background:rgba(74,222,128,.15);color:#4ADE80}
+  .s-paid           {background:rgba(16,185,129,.18);color:#34D399}
+  .s-locked         {background:rgba(31,41,55,.4);color:#D1D5DB}
+  .filter-bar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+  .row-clickable{cursor:pointer}
+  .row-clickable:hover{background:rgba(255,255,255,.03)}
+  dl{display:grid;grid-template-columns:120px 1fr;gap:8px 14px;font-size:13px;margin:0}
+  dt{color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;align-self:center}
+  dd{margin:0;font-family:'DM Mono',monospace}
+  .status-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:0.5px solid rgba(255,255,255,.08)}
+</style>
+</head>
+<body data-page="salary-period">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">薪資期間管理</div>
+        <div class="page-sub">每月薪資期間 / 工作流狀態機</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin / ceo / chairman)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="filter-bar">
+        <select class="form-select" id="f-status" onchange="render()" style="width:160px">
+          <option value="">全部狀態</option>
+          <option value="draft">草稿</option>
+          <option value="calculating">計算中</option>
+          <option value="pending_review">待審核</option>
+          <option value="approved">已核准</option>
+          <option value="paid">已發放</option>
+          <option value="locked">已鎖定</option>
+        </select>
+        <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+        <button class="btn btn-primary" onclick="openNewModal()">+ 開新期間</button>
+      </div>
+
+      <div class="table-wrap" style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>期間 ID</th>
+              <th>年月</th>
+              <th>狀態</th>
+              <th>員工數</th>
+              <th>應發合計</th>
+              <th>實發合計</th>
+              <th>雇主成本</th>
+              <th>計算時間</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 開新期間 modal -->
+<div class="modal-bg" id="modal-new">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title">開新薪資期間</div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">id 自動產 PP_YYYY_MM、status 預設 draft</div>
+
+    <form id="form-new" style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px">
+      <div class="form-row">
+        <label class="form-label">年</label>
+        <input type="number" class="form-input num" id="n-year" required min="2020" max="2099">
+      </div>
+      <div class="form-row">
+        <label class="form-label">月</label>
+        <input type="number" class="form-input num" id="n-month" required min="1" max="12">
+      </div>
+      <div class="form-row">
+        <label class="form-label">期間起</label>
+        <input type="date" class="form-input" id="n-start" required>
+      </div>
+      <div class="form-row">
+        <label class="form-label">期間迄</label>
+        <input type="date" class="form-input" id="n-end" required>
+      </div>
+      <div class="form-row">
+        <label class="form-label">出勤截止日</label>
+        <input type="date" class="form-input" id="n-cutoff">
+      </div>
+      <div class="form-row">
+        <label class="form-label">預定發薪日</label>
+        <input type="date" class="form-input" id="n-paydate">
+      </div>
+      <div class="form-row" style="grid-column:1/-1">
+        <label class="form-label">備註</label>
+        <input type="text" class="form-input" id="n-note" placeholder="(選填)">
+      </div>
+    </form>
+
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal('modal-new')">取消</button>
+      <button class="btn btn-primary" onclick="submitNew()">建立</button>
+    </div>
+  </div>
+</div>
+
+<!-- 詳細 / 狀態操作 modal -->
+<div class="modal-bg" id="modal-detail">
+  <div class="modal" style="max-width:560px;width:95vw">
+    <div class="modal-title" id="detail-title">期間詳細</div>
+    <div id="detail-body" style="font-size:13px"></div>
+
+    <div class="status-actions" id="status-actions"></div>
+
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal('modal-detail')">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg,type='success'){
+  let w=document.getElementById('toast-wrap');
+  if(!w){w=document.createElement('div');w.id='toast-wrap';w.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px';document.body.appendChild(w);}
+  const el=document.createElement('div');el.className='toast toast-'+type;el.textContent=msg;w.appendChild(el);
+  setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmt$(n){ if(n==null) return '—'; return new Intl.NumberFormat('zh-TW',{maximumFractionDigits:0}).format(Number(n)); }
+function fmtDt(s){ if(!s) return '—'; const d=new Date(s); if(Number.isNaN(d.getTime())) return String(s);
+  const pad=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const STATUS_LABEL = {
+  draft: '草稿', calculating: '計算中', pending_review: '待審核',
+  approved: '已核准', paid: '已發放', locked: '已鎖定',
+};
+
+let allPeriods = [];
+let isBoss = false, isAdmin = false;
+
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+async function load(retries=0){
+  if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  isBoss  = ['ceo','chairman'].includes(u.role);
+  isAdmin = u.role === 'admin';
+
+  try {
+    const data = await api('/api/salary/periods');
+    allPeriods = Array.isArray(data) ? data : [];
+    render();
+  } catch(e){ toast('載入失敗:'+e.message,'error'); }
+}
+
+function render(){
+  const status = document.getElementById('f-status').value;
+  const rows = allPeriods.filter(p => !status || p.status === status);
+  const tbody = document.getElementById('tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-dim)">無期間。請點「+ 開新期間」</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(p => `
+    <tr class="row-clickable" data-id="${escHtml(p.id)}">
+      <td style="text-align:left">${escHtml(p.id)}</td>
+      <td>${p.year}-${String(p.month).padStart(2,'0')}</td>
+      <td><span class="pill s-${escHtml(p.status)}">${escHtml(STATUS_LABEL[p.status]||p.status)}</span></td>
+      <td class="num">${p.employee_count||0}</td>
+      <td class="num">${fmt$(p.gross_total)}</td>
+      <td class="num">${fmt$(p.net_total)}</td>
+      <td class="num">${fmt$(p.employer_cost_total)}</td>
+      <td class="num" style="font-size:11px;color:var(--text-dim)">${fmtDt(p.calculated_at)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openDetail('${escHtml(p.id)}')">詳細</button></td>
+    </tr>
+  `).join('');
+}
+
+// ─── 開新期間 ────────────────────────────────────────────
+function openNewModal(){
+  const d = new Date();
+  document.getElementById('n-year').value  = d.getFullYear();
+  document.getElementById('n-month').value = d.getMonth()+1;
+  // 預設 period_start = 該月 1 日、period_end = 月底
+  const y = d.getFullYear(), m = d.getMonth();
+  const first = new Date(y, m, 1);
+  const last  = new Date(y, m+1, 0);
+  const fmtD = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  document.getElementById('n-start').value  = fmtD(first);
+  document.getElementById('n-end').value    = fmtD(last);
+  document.getElementById('n-cutoff').value = fmtD(last);
+  document.getElementById('n-paydate').value = '';
+  document.getElementById('n-note').value   = '';
+  document.getElementById('modal-new').classList.add('open');
+}
+
+async function submitNew(){
+  const body = {
+    year:  parseInt(document.getElementById('n-year').value),
+    month: parseInt(document.getElementById('n-month').value),
+    period_start: document.getElementById('n-start').value,
+    period_end:   document.getElementById('n-end').value,
+    attendance_cutoff_date: document.getElementById('n-cutoff').value || null,
+    pay_date:               document.getElementById('n-paydate').value || null,
+    note:                   document.getElementById('n-note').value || null,
+  };
+  if (!body.year || !body.month || !body.period_start || !body.period_end) {
+    return toast('年 / 月 / 期間起迄為必填','error');
+  }
+  if (body.month < 1 || body.month > 12) return toast('month 必須 1-12','error');
+  try {
+    const r = await api('/api/salary/periods', { method:'POST', body: JSON.stringify(body) });
+    toast('期間已建立:' + r.id);
+    closeModal('modal-new');
+    await load();
+  } catch(e) {
+    if (String(e.message).includes('已存在')) toast('此年月期間已存在','error');
+    else toast('建立失敗:'+e.message,'error');
+  }
+}
+
+// ─── 詳細 + 狀態操作 ──────────────────────────────────────
+async function openDetail(id){
+  let p;
+  try { p = await api(`/api/salary/periods/${encodeURIComponent(id)}`); }
+  catch(e) { return toast('載入失敗:'+e.message,'error'); }
+
+  document.getElementById('detail-title').textContent = `${p.id}(${p.year}-${String(p.month).padStart(2,'0')})`;
+  document.getElementById('detail-body').innerHTML = `
+    <dl>
+      <dt>狀態</dt><dd><span class="pill s-${escHtml(p.status)}">${escHtml(STATUS_LABEL[p.status]||p.status)}</span></dd>
+      <dt>期間</dt><dd>${escHtml(p.period_start)} ~ ${escHtml(p.period_end)}</dd>
+      <dt>出勤截止</dt><dd>${escHtml(p.attendance_cutoff_date || '—')}</dd>
+      <dt>發薪日</dt><dd>${escHtml(p.pay_date || '—')}</dd>
+      <dt>員工數</dt><dd>${p.employee_count||0}</dd>
+      <dt>應發合計</dt><dd>${fmt$(p.gross_total)}</dd>
+      <dt>實發合計</dt><dd>${fmt$(p.net_total)}</dd>
+      <dt>雇主成本</dt><dd>${fmt$(p.employer_cost_total)}</dd>
+      <dt>建立者</dt><dd>${escHtml(p.created_by || '—')}</dd>
+      <dt>計算時間</dt><dd>${fmtDt(p.calculated_at)}</dd>
+      <dt>核准者</dt><dd>${escHtml(p.approved_by || '—')} ${p.approved_at ? '@ '+fmtDt(p.approved_at) : ''}</dd>
+      <dt>發放時間</dt><dd>${fmtDt(p.paid_at)}</dd>
+      <dt>鎖定時間</dt><dd>${fmtDt(p.locked_at)}</dd>
+      <dt>備註</dt><dd>${escHtml(p.note || '—')}</dd>
+    </dl>
+  `;
+  renderStatusActions(p);
+  document.getElementById('modal-detail').classList.add('open');
+}
+
+function renderStatusActions(p){
+  const c = document.getElementById('status-actions');
+  c.dataset.id     = p.id;
+  c.dataset.year   = p.year;
+  c.dataset.month  = p.month;
+  c.dataset.status = p.status;
+  const btns = [];
+
+  // 跑試算
+  if (['draft','calculating','pending_review'].includes(p.status)) {
+    const label = p.status === 'draft' ? '🚀 跑試算' : '🔄 重跑試算';
+    btns.push(`<button class="btn btn-primary btn-sm" data-action="run-batch">${label}</button>`);
+  }
+  // 退回 draft
+  if (p.status === 'calculating') {
+    btns.push(`<button class="btn btn-ghost btn-sm" data-action="back-draft">退回 draft</button>`);
+  }
+  // 老闆核准
+  if (p.status === 'pending_review' && isBoss) {
+    btns.push(`<button class="btn btn-primary btn-sm" data-action="approve">✅ 核准</button>`);
+  }
+  // 退回計算(pending_review HR 也能 / approved 限老闆)
+  if (p.status === 'pending_review') {
+    btns.push(`<button class="btn btn-ghost btn-sm" data-action="back-calculating">退回計算</button>`);
+  }
+  if (p.status === 'approved' && isBoss) {
+    btns.push(`<button class="btn btn-ghost btn-sm" data-action="back-calculating">退回計算</button>`);
+  }
+  // 標記已發放
+  if (p.status === 'approved') {
+    btns.push(`<button class="btn btn-primary btn-sm" data-action="mark-paid">💰 標記已發放</button>`);
+  }
+  // 鎖定(限 admin)
+  if (p.status === 'paid' && isAdmin) {
+    btns.push(`<button class="btn btn-primary btn-sm" data-action="lock">🔒 鎖定</button>`);
+  }
+  // 刪除(僅 draft)
+  if (p.status === 'draft') {
+    btns.push(`<button class="btn btn-ghost btn-sm" data-action="delete" style="color:#F87171">🗑 刪除</button>`);
+  }
+
+  c.innerHTML = btns.length
+    ? btns.join('')
+    : `<div style="color:var(--text-dim);font-size:12px">無可用操作(終態 / 您無權限)</div>`;
+}
+
+document.getElementById('status-actions').addEventListener('click', async (e) => {
+  const action = e.target.closest('button')?.dataset.action;
+  if (!action) return;
+  const c = document.getElementById('status-actions');
+  const id = c.dataset.id, year = Number(c.dataset.year), month = Number(c.dataset.month);
+
+  const handlers = {
+    'run-batch':         () => runBatch(id, year, month),
+    'back-draft':        () => updateStatus(id, 'draft'),
+    'approve':           () => updateStatus(id, 'approved'),
+    'back-calculating':  () => updateStatus(id, 'calculating', '請填退回原因(會寫入備註)'),
+    'mark-paid':         () => updateStatus(id, 'paid'),
+    'lock':              () => updateStatus(id, 'locked'),
+    'delete':            () => deletePeriod(id),
+  };
+  if (handlers[action]) await handlers[action]();
+});
+
+async function updateStatus(id, status, promptMsg = null){
+  let note;
+  if (promptMsg) {
+    note = prompt(promptMsg);
+    if (note === null) return;  // user cancel
+    if (!note.trim())  return toast('備註不可空','error');
+  }
+  const body = { status };
+  if (note) body.note = note.trim();
+  try {
+    await api(`/api/salary/periods/${encodeURIComponent(id)}`, {
+      method:'PUT', body: JSON.stringify(body),
+    });
+    toast('狀態已更新:' + (STATUS_LABEL[status]||status));
+    closeModal('modal-detail');
+    await load();
+  } catch(e) {
+    toast('更新失敗:'+e.message,'error');
+  }
+}
+
+async function runBatch(id, year, month){
+  if (!confirm(`確認對 ${year}-${String(month).padStart(2,'0')} 全部員工跑試算?\n_manual 欄位保留;_auto 欄位重新算。`)) return;
+  toast('試算中...(可能需要 10-30 秒)');
+  try {
+    const r = await api('/api/salary', { method:'POST', body: JSON.stringify({
+      action: 'batch_v2', year, month,
+    })});
+    const msg = `批次完成:成功 ${r.success} / 失敗 ${r.failed}`;
+    toast(msg, r.failed > 0 ? 'error' : 'success');
+    if (r.failed > 0) console.warn('failures', r.results.filter(x => !x.ok));
+    if (r.period_warning) toast(r.period_warning, 'error');
+    closeModal('modal-detail');
+    await load();
+  } catch(e) {
+    toast('試算失敗:'+e.message,'error');
+  }
+}
+
+async function deletePeriod(id){
+  if (!confirm(`確認刪除期間 ${id}?(僅 draft 狀態可刪)`)) return;
+  try {
+    await api(`/api/salary/periods/${encodeURIComponent(id)}`, { method:'DELETE' });
+    toast('已刪除');
+    closeModal('modal-detail');
+    await load();
+  } catch(e) {
+    toast('刪除失敗:'+e.message,'error');
+  }
+}
+
+load();
+</script>
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>
