@@ -65,7 +65,9 @@ export default async function handler(req, res) {
           .from('insurance_change_requests').select('*').eq('id', body.change_id).single();
         if (cErr || !change) return res.status(404).json({ error: '找不到變動申請' });
 
-        const { error: upsertErr } = await supabaseAdmin.from('insurance_settings').upsert([{
+        // 0.2.3: pension 同步(修 stale 根因)
+        // 舊 change request(0.1 之前 insert 的)new_pension_* 全 null、條件式 attach 避免洗成 null
+        const upsertPayload = {
           id: 'INS_' + change.employee_id,
           employee_id:         change.employee_id,
           has_insurance:       true,
@@ -76,12 +78,17 @@ export default async function handler(req, res) {
           health_ins_employee: change.new_health_employee,
           health_ins_company:  change.new_health_company,
           updated_at: new Date().toISOString(),
-        }], { onConflict: 'employee_id' });
+        };
+        if (change.new_pension_rate    != null) upsertPayload.pension_rate    = change.new_pension_rate;
+        if (change.new_pension_company != null) upsertPayload.pension_company = change.new_pension_company;
+
+        const { error: upsertErr } = await supabaseAdmin.from('insurance_settings')
+          .upsert([upsertPayload], { onConflict: 'employee_id' });
         if (upsertErr) return res.status(500).json({ error: upsertErr.message });
 
         const { error: updErr } = await supabaseAdmin.from('insurance_change_requests').update({
           status: 'approved',
-          approved_by:    body.approved_by    || null,
+          approved_by:    caller.id,    // 0.2.3: 用 caller.id、不從 body(audit 完整化、prod 6 row 全 null 的 gap)
           effective_date: body.effective_date || null,
           note:           body.note           || '',
           handled_at: new Date().toISOString(),
