@@ -283,5 +283,25 @@ export function makeSalaryRepo() {
       }
       return total;
     },
+
+    // ─── 階段 2.5.3a 新增 ────────────────────────────────────
+    // 撈某 period 下的所有 salary_records(給 reconcilePeriodStats 用)
+    async findSalaryRecordsByPeriodId(periodId) {
+      if (!periodId) return [];
+      const { data, error } = await supabaseAdmin
+        .from('salary_records')
+        .select('id, employee_id, gross_salary, net_salary, employer_cost_labor, employer_cost_health, employer_cost_pension, employer_cost_occupational, employer_cost_employment, employer_cost_welfare')
+        .eq('payroll_period_id', periodId);
+      if (error) throw error;
+      return data || [];
+    },
+
+    // 更新 payroll_periods 任意欄位(給 batch 跑完寫回 cache + status 用)
+    async updatePayrollPeriod(periodId, patch) {
+      const { data, error } = await supabaseAdmin
+        .from('payroll_periods').update(patch).eq('id', periodId).select().maybeSingle();
+      if (error) throw error;
+      return data;
+    },
   };
 }
