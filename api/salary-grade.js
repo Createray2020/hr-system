@@ -6,9 +6,17 @@
 // POST /api/salary-grade?_resource=insurance     → upsert 員工設定
 import { supabaseAdmin } from '../lib/supabase.js';
 import { addDeptNameNested, addDeptNameSingle } from '../lib/dept-name-mapper.js';
+import { requireRole } from '../lib/auth.js';
+import { BACKOFFICE_ROLES } from '../lib/roles.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // 整個 endpoint 限 HR / admin / ceo / chairman
+  // 既有勞健保 5 張表 prod 雖有 RLS、但 supabaseAdmin (service role) bypass RLS、
+  // 必須在 application layer 守、否則任何登入帳號可透過 /api/insurance 拿全公司資料
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
+  if (!caller) return;
 
   const { _resource, employee_id, brackets } = req.query;
 
