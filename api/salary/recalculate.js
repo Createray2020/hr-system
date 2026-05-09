@@ -23,7 +23,10 @@ export default async function handler(req, res) {
 
   try {
     const repo = makeSalaryRepo();
-    const r = await calculateMonthlySalary(repo, { employee_id, year: y, month: m });
+    const r = await calculateMonthlySalary(repo, {
+      employee_id, year: y, month: m,
+      callerId: caller.id,
+    });
     return res.status(200).json({ ok: true, record: r.record, breakdown: r.breakdown });
   } catch (e) {
     return res.status(500).json({ error: e.message });

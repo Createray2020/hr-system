@@ -22,6 +22,7 @@ import { skipAttendanceBonus, isBackofficeRole, BACKOFFICE_ROLES } from '../../l
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { canExecuteTransition } from '../../lib/salary/period-state.js';
+import { reconcilePeriodStats } from '../../lib/salary/period-stats.js';
 import { makeSalaryRepo } from './_repo.js';
 import { addDeptName, addDeptNameNested } from '../../lib/dept-name-mapper.js';
 
@@ -295,7 +296,10 @@ async function handleNewBatch(req, res) {
     let success = 0, failed = 0;
     for (const emp of targets) {
       try {
-        const r = await calculateMonthlySalary(repo, { employee_id: emp.id, year: y, month: m });
+        const r = await calculateMonthlySalary(repo, {
+          employee_id: emp.id, year: y, month: m,
+          callerId: caller.id,
+        });
         results.push({ employee_id: emp.id, ok: true, record_id: r.record.id });
         success += 1;
       } catch (e) {
@@ -303,7 +307,38 @@ async function handleNewBatch(req, res) {
         failed += 1;
       }
     }
-    return res.status(200).json({ ok: true, year: y, month: m, success, failed, results });
+
+    // 階段 2.5.3b: 跑完 batch 後 reconcile payroll_periods cache + status 自動推進
+    // 若該 (year, month) 沒對應 period、跳過 cache 更新(只 warning、不 error)
+    let periodWarning = null;
+    try {
+      const period = await repo.findActivePayrollPeriod(y, m);
+      if (period) {
+        const stats = await reconcilePeriodStats(repo, period.id);
+        const periodPatch = {
+          employee_count:      stats.employee_count,
+          gross_total:         stats.gross_total,
+          net_total:           stats.net_total,
+          employer_cost_total: stats.employer_cost_total,
+          calculated_at:       new Date().toISOString(),
+        };
+        // status 自動推進:只在 [draft, calculating, pending_review] 時切到 pending_review
+        // approved / paid / locked 不動 status、只更新 cache + calculated_at
+        if (failed === 0 && ['draft','calculating','pending_review'].includes(period.status)) {
+          periodPatch.status = 'pending_review';
+        }
+        await repo.updatePayrollPeriod(period.id, periodPatch);
+      } else {
+        periodWarning = `payroll_periods 沒有 ${y}-${m} 的 period、cache 未更新。建議先透過 /api/salary/periods POST 建立期間`;
+      }
+    } catch (e) {
+      periodWarning = `period cache reconcile 失敗: ${e.message}`;
+    }
+
+    return res.status(200).json({
+      ok: true, year: y, month: m, success, failed, results,
+      period_warning: periodWarning,
+    });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
