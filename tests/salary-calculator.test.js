@@ -29,6 +29,10 @@ function refGrossSalary(row) {
     + n(row.comp_expiry_payout)
     + n(row.holiday_work_pay)
     + n(row.settlement_amount)
+    + n(row.bonus_yearend)
+    + n(row.bonus_festival)
+    + n(row.bonus_performance)
+    + n(row.bonus_other)
   );
 }
 
@@ -43,11 +47,22 @@ function refNetSalary(row) {
     + n(row.comp_expiry_payout)
     + n(row.holiday_work_pay)
     + n(row.settlement_amount)
+    + n(row.bonus_yearend)
+    + n(row.bonus_festival)
+    + n(row.bonus_performance)
+    + n(row.bonus_other)
     - n(row.deduct_absence)
     - n(row.deduct_labor_ins)
     - n(row.deduct_health_ins)
     - n(row.deduct_tax)
     - n(row.attendance_penalty_total)
+    - n(row.deduct_pension_voluntary)
+    - n(row.deduct_supplementary_health)
+    - n(row.deduct_welfare_fund)
+    - n(row.deduct_union_fee)
+    - n(row.deduct_court_garnishment)
+    - n(row.deduct_loan_repayment)
+    - n(row.deduct_other)
   );
 }
 
