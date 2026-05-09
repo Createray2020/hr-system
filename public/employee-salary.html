@@ -168,6 +168,14 @@ function render(r){
         <span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span>
       </div>
 
+      <div style="margin:6px 0 12px;text-align:center">
+        <a href="/payslip.html?employee_id=${encodeURIComponent(currentUser.id)}&year=${r.year}&month=${r.month}"
+           target="_blank"
+           style="display:inline-block;font-size:12px;color:#7FBBFF;text-decoration:none;padding:6px 14px;border:0.5px solid rgba(127,187,255,.4);border-radius:8px">
+          🖨 列印薪資單
+        </a>
+      </div>
+
       <div class="slip-row head"><div>收入項目</div><div class="v">金額</div></div>
       <div class="slip-row"><div>底薪</div><div class="v pos">+ ${fmt$(r.base_salary)}</div></div>
       <div class="slip-row"><div>全勤獎金 (扣 ${(n0(r.attendance_bonus_deduction_rate)*100).toFixed(1)}% 後)</div><div class="v pos">+ ${fmt$(r.attendance_bonus_actual)}</div></div>

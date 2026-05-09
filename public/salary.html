@@ -191,7 +191,14 @@ function render(){
       <td class="num gen-cell">${fmt$(r.gross_salary)}</td>
       <td class="num gen-cell">${fmt$(r.net_salary)}</td>
       <td><span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
-      <td><button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(r.id)}')">編輯</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(r.id)}')">編輯</button>
+        <a href="/payslip.html?employee_id=${encodeURIComponent(r.employee_id)}&year=${r.year}&month=${r.month}"
+           target="_blank"
+           class="btn btn-ghost btn-sm"
+           style="text-decoration:none;display:inline-block;margin-left:4px"
+           title="列印薪資單">🖨</a>
+      </td>
     </tr>
   `).join('');
 }
