@@ -198,11 +198,14 @@ async function loadRequests(){
   try {
     const r = await api(`/api/overtime-requests?year=${y}&month=${parseInt(m)}`);
     allRequests = r.requests || [];
-    if (window._supabase && allRequests.length) {
+    if (allRequests.length) {
+      // 階段 C1:改用 backend endpoint (套 EMP_99999999 排除 + auth-scope)
       const ids = [...new Set(allRequests.map(x=>x.employee_id))];
-      const { data } = await window._supabase.from('employees').select('id, name, dept').in('id', ids);
-      empMap = {};
-      for (const e of (data||[])) empMap[e.id] = e;
+      try {
+        const data = await api(`/api/employees?_resource=by_ids&ids=${encodeURIComponent(ids.join(','))}`);
+        empMap = {};
+        for (const e of (data||[])) empMap[e.id] = e;
+      } catch(_) { /* fallback: empMap 維持空 */ }
     }
     renderRequests();
   } catch(e){ toast('申請載入失敗:'+e.message,'error'); }

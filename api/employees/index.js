@@ -111,6 +111,41 @@ export default async function handler(req, res) {
     return res.status(200).json({ employees, departments: depts || [] });
   }
 
+  // ── by_ids 子查詢(階段 C1 取代 frontend 直接 query supabase)─────────
+  // GET ?_resource=by_ids&ids=A,B,C → [{ id, name, dept_id, dept_name, avatar }]
+  // 套 EMP_99999999 排除 + auth-scope filter (HR 全員 / 主管 同部門 / 員工 只自己)
+  if (req.query._resource === 'by_ids') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+    const caller = await requireAuth(req, res);
+    if (!caller) return;
+
+    const idsRaw = String(req.query.ids || '').trim();
+    if (!idsRaw) return res.status(200).json([]);
+    const ids = idsRaw.split(',').map(s => s.trim()).filter(Boolean);
+    if (!ids.length) return res.status(200).json([]);
+
+    // auth-scope filter:HR 全員 / 主管 dept-scope / 員工 only self
+    const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+    let allowedIds = ids;
+    if (scope.mode === 'self') {
+      allowedIds = ids.filter(id => id === scope.selfId);
+    } else if (scope.mode === 'dept') {
+      const deptSet = new Set([scope.selfId, ...(scope.deptEmpIds || [])]);
+      allowedIds = ids.filter(id => deptSet.has(id));
+    }
+    if (!allowedIds.length) return res.status(200).json([]);
+
+    const { data, error } = await applyExcludeSystemAccountsQuery(
+      supabaseAdmin
+        .from('employees')
+        .select('id, name, dept_id, avatar, departments(name)')
+        .in('id', allowedIds)
+    );
+    if (error) return res.status(500).json({ error: error.message });
+    addDeptName(data);
+    return res.status(200).json(data || []);
+  }
+
   // ── 部門管理（合併自 api/departments.js） ─────────────────────────────────
   if (req.query._resource === 'departments') {
     if (req.method === 'GET') {

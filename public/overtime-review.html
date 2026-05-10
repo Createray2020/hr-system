@@ -130,12 +130,15 @@ async function load(retries=0){
 }
 
 async function loadEmpMap(){
-  if (!window._supabase) return;
+  // 階段 C1:改用 backend endpoint、不再直接 query supabase
+  // (原:window._supabase.from('employees').select(...).in('id', ids) — 漏 EMP_99999999 排除 + auth-scope)
   const ids = [...new Set([...mgrPending, ...ceoPending].map(r=>r.employee_id))];
   if (!ids.length) return;
-  const { data } = await window._supabase.from('employees').select('id, name, dept').in('id', ids);
-  empMap = {};
-  for (const e of (data||[])) empMap[e.id] = e;
+  try {
+    const data = await api(`/api/employees?_resource=by_ids&ids=${encodeURIComponent(ids.join(','))}`);
+    empMap = {};
+    for (const e of (data||[])) empMap[e.id] = e;
+  } catch(_) { /* fallback: empMap 維持空 */ }
 }
 
 function render(){
