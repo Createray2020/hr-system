@@ -1,4 +1,12 @@
 // public/js/layout.js — 動態注入 Sidebar 和初始化 Auth
+//
+// 階段 4.5:31 項扁平 sidebar → 6 群組 hover-expand。
+// 純 builder 邏輯在 public/js/sidebar/builder.js (vitest 抓行為)、本檔負責:
+//   - Tabler icon CSS 注入(若未載入)
+//   - Auth + api helper init
+//   - sidebar HTML 注入 + hover-expand event 綁定
+//   - 使用者卡片 + 手機版切換按鈕 + unread badge
+
 (async function() {
   const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
@@ -35,6 +43,14 @@
     location.href = '/employee-app.html';
   };
 
+  // 注入 Tabler icon CSS(只注入一次、避免重複 link)
+  if (!document.querySelector('link[href*="tabler-icons"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.35.0/tabler-icons.min.css';
+    document.head.appendChild(link);
+  }
+
   // 取得目前登入員工資料
   let currentUser = null;
   try {
@@ -43,77 +59,23 @@
     window.currentUser = data;
   } catch(e) { console.warn('無法取得使用者資料', e); }
 
-  // 注入 Sidebar
-  const page = document.body.dataset.page || '';
+  // 角色 gate(對齊 lib/roles.js + public/js/roles.js)
   const isHRish     = u => !!u && ['hr','admin','ceo','chairman'].includes(u.role);
   const isMgrOrHR   = u => !!u && (u.is_manager === true || ['hr','admin','ceo','chairman'].includes(u.role));
   const isMgrOrCEO  = u => !!u && (u.is_manager === true || ['ceo','chairman'].includes(u.role));
-  const navGroups = [
-    {
-      title: '總覽',
-      items: [
-        { page:'dashboard',     icon:'🏠', label:'總覽',   href:'/dashboard.html', gate: isMgrOrHR },
-        { page:'calendar',      icon:'📅', label:'行事曆', href:'/calendar.html' },
-        { page:'announcements', icon:'📢', label:'公告欄', href:'/announcements.html', gate: isMgrOrHR },
-      ]
-    },
-    {
-      title: '人員管理',
-      items: [
-        { page:'employees',          icon:'👥', label:'員工資料',     href:'/employees.html', gate: u => window.Roles?.isBackofficeRole(u) },
-        { page:'orgchart',           icon:'🗂️', label:'組織圖',       href:'/orgchart.html', gate: isMgrOrHR },
-        { page:'departments',        icon:'🏢', label:'部門管理',     href:'/departments.html', gate: isHRish },
-        { page:'resigned-archive',   icon:'📁', label:'離職員工檔案', href:'/resigned-archive.html', gate: isHRish },
-        { page:'announcement-admin', icon:'📝', label:'公告管理',     href:'/announcement-admin.html', gate: u => window.Roles?.canManageAnnouncements(u) },
-      ]
-    },
-    {
-      title: '我的勤務',
-      items: [
-        { page:'attendance',        icon:'⏱️', label:'打卡',     href:'/attendance.html' },
-        { page:'employee-schedule', icon:'🗓️', label:'我的排班', href:'/employee-schedule.html' },
-        { page:'leave',             icon:'📋', label:'請假',     href:'/leave.html' },
-        { page:'comp-time',         icon:'🌴', label:'補休',     href:'/comp-time.html' },
-        { page:'overtime',          icon:'⏰', label:'加班申請', href:'/overtime.html' },
-      ]
-    },
-    {
-      title: '勤務管理',
-      items: [
-        { page:'leave-admin',              icon:'✅', label:'請假審批',     href:'/leave-admin.html',              gate: isMgrOrHR },
-        { page:'schedule',                 icon:'📆', label:'排班管理',     href:'/schedule.html',                  gate: isMgrOrHR },
-        { page:'schedule-templates',       icon:'🗓️', label:'班表範本',     href:'/schedule-templates.html',        gate: isMgrOrHR },
-        { page:'shift-types-admin',        icon:'🎨', label:'班別管理',     href:'/shift-types-admin.html',         gate: isHRish },
-        { page:'overtime-review',          icon:'👔', label:'加班審核',     href:'/overtime-review.html',          gate: isMgrOrCEO },
-        { page:'attendance-admin',         icon:'🛠️', label:'打卡管理',     href:'/attendance-admin.html',         gate: isHRish },
-        { page:'attendance-locations-admin', icon:'📍', label:'據點管理',   href:'/attendance-locations-admin.html', gate: isHRish },
-        { page:'annual-leave-admin',       icon:'🏖️', label:'特休管理',     href:'/annual-leave-admin.html',       gate: isHRish },
-        { page:'comp-time-admin',          icon:'🌅', label:'補休管理',     href:'/comp-time-admin.html',          gate: isHRish },
-        { page:'overtime-admin',           icon:'⚙️', label:'加班管理',     href:'/overtime-admin.html',           gate: isHRish },
-        { page:'attendance-penalty-admin', icon:'⚖️', label:'出勤獎懲後台', href:'/attendance-penalty-admin.html', gate: isHRish },
-        { page:'holidays-admin',           icon:'🎌', label:'假日管理',     href:'/holidays-admin.html',           gate: isHRish },
-      ]
-    },
-    {
-      title: '薪資管理',
-      items: [
-        { page:'employee-salary', icon:'💵', label:'我的薪資', href:'/employee-salary.html' },
-        { page:'salary',          icon:'💰', label:'薪資管理', href:'/salary.html', gate: isHRish },
-        { page:'salary-period',   icon:'📅', label:'薪資期間', href:'/salary-period.html', gate: isHRish },
-        { page:'insurance',       icon:'🏥', label:'勞健保',   href:'/insurance.html', gate: isHRish },
-      ]
-    },
-    {
-      title: '行政管理',
-      items: [
-        { page:'approvals',      icon:'✅', label:'審批管理',  href:'/approvals.html', gate: isHRish },
-        { page:'notifications',  icon:'🔔', label:'通知中心',  href:'/notifications.html' },
-      ]
-    },
-  ];
+  const gates = {
+    isHRish, isMgrOrHR, isMgrOrCEO,
+    isBackofficeRole:        u => window.Roles?.isBackofficeRole(u),
+    canManageAnnouncements:  u => window.Roles?.canManageAnnouncements(u),
+  };
 
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
+
+  // 動態 import sidebar builder(對齊 insurance.html 的 dynamic import pattern)
+  const { getNavGroups, buildSidebarNav } = await import('/js/sidebar/builder.js');
+  const navGroups = getNavGroups(gates);
+  const navHTML = buildSidebarNav(navGroups, currentUser, location.pathname);
 
   const userName = currentUser?.name || session.user.email.split('@')[0];
   const userRole = currentUser?.role === 'chairman' ? '董事長'
@@ -123,26 +85,6 @@
                  : currentUser?.is_manager          ? '部門主管'
                  : '員工';
   const avatarChar = currentUser?.avatar || userName[0];
-
-  const isAdmin = window.Roles?.canAccessBackoffice(currentUser);
-  const visibleItem = n => {
-    if (typeof n.gate === 'function') return n.gate(currentUser);
-    if (n.adminOnly) return isAdmin;
-    return true;
-  };
-  const navHTML = navGroups.map(g => {
-    const visible = g.items.filter(visibleItem);
-    if (visible.length === 0) return '';
-    return `
-    <div class="nav-section">
-      <div class="nav-section-title">${g.title}</div>
-      ${visible.map(n => `
-        <a class="nav-item ${page === n.page ? 'active' : ''}" href="${n.href}">
-          <span class="nav-icon">${n.icon}</span> ${n.label}
-          ${n.page === 'notifications' ? `<span id="notif-badge" style="display:none;margin-left:auto;background:#F87171;color:#fff;border-radius:10px;min-width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px"></span>` : ''}
-        </a>`).join('')}
-    </div>`;
-  }).join('');
 
   sidebar.innerHTML = `
     <div class="logo">
@@ -163,6 +105,24 @@
         style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-dim);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0">📱</button>` : ''}
     </div>`;
 
+  // ── hover-expand 事件綁定 ──────────────────────────────────
+  // mouseenter group → clearTimeout + 加 .exp;
+  // mouseleave group → setTimeout 300ms 拿掉 .exp(防誤觸);
+  // mouseenter sub-item 不需另綁(mouseenter 不 bubble、整個 .nav-section 已 cover)。
+  sidebar.querySelectorAll('.nav-section').forEach(sec => {
+    let timer = null;
+    sec.addEventListener('mouseenter', () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      sec.classList.add('exp');
+    });
+    sec.addEventListener('mouseleave', () => {
+      timer = setTimeout(() => {
+        sec.classList.remove('exp');
+        timer = null;
+      }, 300);
+    });
+  });
+
   // 載入未讀通知數量
   if (currentUser?.id) {
     try {
@@ -171,7 +131,15 @@
         .select('id')
         .eq('employee_id', currentUser.id)
         .eq('is_read', false);
-      if (!error) window.PWA?.updateBadge(unread?.length || 0);
+      if (!error) {
+        window.PWA?.updateBadge(unread?.length || 0);
+        const badge = document.getElementById('notif-badge');
+        const cnt = unread?.length || 0;
+        if (badge && cnt > 0) {
+          badge.textContent = cnt > 99 ? '99+' : String(cnt);
+          badge.style.display = '';
+        }
+      }
     } catch(_) {}
   }
 })();
