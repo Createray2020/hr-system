@@ -789,6 +789,39 @@ describe('calculateMonthlySalary — 階段 2.7.5 FK 順序保護(skeleton 預�
   });
 });
 
+describe('calculateMonthlySalary — 階段 C3 penalty orphan reset', () => {
+  // 抓 HR DELETE salary_records 後 PG FK ON DELETE SET NULL 自動清 FK、
+  // 但 attendance_penalty_records.status='applied' 沒連動的 edge case。
+  // 修法:existing=null 分支額外 call resetOrphanedPenaltyForMonth。
+
+  it('existing=null + repo 有 resetOrphanedPenaltyForMonth → 應被呼叫 + 帶對 args', async () => {
+    const repo = makeFullRepo({
+      resetOrphanedPenaltyForMonth: vi.fn(async () => undefined),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    expect(repo.resetOrphanedPenaltyForMonth).toHaveBeenCalledWith({
+      employee_id: 'E001', year: 2026, month: 5,
+    });
+  });
+
+  it('existing 不為 null → 不呼叫 resetOrphanedPenaltyForMonth (走 existing 分支、resetPenaltyRecordsMarkers 已處理)', async () => {
+    const repo = makeFullRepo({
+      findSalaryRecord: vi.fn(async () => ({ id: 'S_E001_2026_05', status: 'draft' })),
+      resetOrphanedPenaltyForMonth: vi.fn(async () => undefined),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    expect(repo.resetOrphanedPenaltyForMonth).not.toHaveBeenCalled();
+    expect(repo.resetPenaltyRecordsMarkers).toHaveBeenCalledWith('S_E001_2026_05');
+  });
+
+  it('repo 沒 resetOrphanedPenaltyForMonth method (向下相容、舊 repo) → 不爆', async () => {
+    const repo = makeFullRepo();  // 沒提供 resetOrphanedPenaltyForMonth
+    await expect(
+      calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 })
+    ).resolves.toBeTruthy();
+  });
+});
+
 describe('calculateMonthlySalary — 階段 2.7.9 UPSERT idempotency', () => {
   // 抓「同員工同月連跑兩次都成功 + _manual 欄位保留」的行為。
   // 用 stateful mock:findSalaryRecord 第一次 null、之後回上次 upsert 的 row。

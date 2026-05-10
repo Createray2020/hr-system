@@ -97,6 +97,21 @@ export function makeSalaryRepo() {
       if (error) throw error;
     },
 
+    // 階段 C3 補:HR DELETE salary_records 後、PG FK ON DELETE SET NULL 自動清 FK
+    // 但 status 沒連動、仍是 'applied'。calculator 重跑時 findPendingPenaltyRecords
+    // (filter status='pending') 撈不到 → 罰款被吞掉。
+    // 此 method 補:該員工該月 status='applied' 且 salary_record_id IS NULL → 改 pending。
+    async resetOrphanedPenaltyForMonth({ employee_id, year, month }) {
+      const { error } = await supabaseAdmin
+        .from('attendance_penalty_records')
+        .update({ status: 'pending', updated_at: new Date().toISOString() })
+        .eq('employee_id', employee_id)
+        .eq('applies_to_year', year).eq('applies_to_month', month)
+        .eq('status', 'applied')
+        .is('salary_record_id', null);
+      if (error) throw error;
+    },
+
     // ─── attendance / holidays / leaves ──────────────────────
     async findAbsentDaysByEmployeeMonth({ employee_id, year, month }) {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;

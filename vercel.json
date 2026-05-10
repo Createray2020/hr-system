@@ -157,6 +157,7 @@
     { "path": "/api/cron-comp-expiry-warning",   "schedule": "0 18 * * *" },
     { "path": "/api/cron-annual-leave-rollover", "schedule": "0 19 * * *" },
     { "path": "/api/cron-leave-proof-expiry",    "schedule": "0 20 * * *" },
-    { "path": "/api/cron-schedule-reminder",     "schedule": "0 1 26 * *" }
+    { "path": "/api/cron-schedule-reminder",     "schedule": "0 1 26 * *" },
+    { "path": "/api/cron-lock-payroll-period",   "schedule": "0 0 1 * *" }
   ]
 }
