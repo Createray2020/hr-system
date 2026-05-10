@@ -212,7 +212,8 @@ describe('calculateMonthlySalary — 主流程順序', () => {
     expect(repo.findPendingPenaltyRecords).toHaveBeenCalled();
     expect(repo.findAnnualRecordsForSettlement).toHaveBeenCalled();
     expect(repo.findCompBalancesForSettlement).toHaveBeenCalled();
-    expect(repo.upsertSalaryRecord).toHaveBeenCalledTimes(1);
+    // 2 次 = step 4 預建 skeleton + step 15 final upsert(無 existing 走預建分支、防 FK 23503)
+    expect(repo.upsertSalaryRecord).toHaveBeenCalledTimes(2);
   });
 
   it('既有 record → 觸發 reset child markers', async () => {
@@ -254,7 +255,7 @@ describe('calculateMonthlySalary — 主流程順序', () => {
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const upserted = repo.upsertSalaryRecord.mock.calls[0][0];
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // _manual 保留
     expect(upserted.overtime_pay_manual).toBe(1500);
     expect(upserted.overtime_pay_note).toBe('HR 補加班費');
@@ -274,7 +275,7 @@ describe('calculateMonthlySalary — 主流程順序', () => {
   it('沒既有 record → _manual 預設 0', async () => {
     const repo = makeFullRepo();
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const upserted = repo.upsertSalaryRecord.mock.calls[0][0];
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(upserted.overtime_pay_manual).toBe(0);
     expect(upserted.allowance).toBe(0);
     expect(upserted.extra_allowance).toBe(0);
@@ -285,7 +286,7 @@ describe('calculateMonthlySalary — 主流程順序', () => {
       findSalaryRecord: vi.fn(async () => ({ id:'S_E001_2026_04', status:'confirmed' })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    expect(repo.upsertSalaryRecord.mock.calls[0][0].status).toBe('confirmed');
+    expect(repo.upsertSalaryRecord.mock.calls.at(-1)[0].status).toBe('confirmed');
   });
 
   it('員工不存在 → throw', async () => {
@@ -311,7 +312,7 @@ describe('calculateMonthlySalary — daily_wage_snapshot 計算', () => {
       findEmployeeForSalary: vi.fn(async () => ({ id:'E001', base_salary: 44000, attendance_bonus: 0 })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const upserted = repo.upsertSalaryRecord.mock.calls[0][0];
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(upserted.daily_wage_snapshot).toBe(2000);
   });
 
@@ -321,7 +322,7 @@ describe('calculateMonthlySalary — daily_wage_snapshot 計算', () => {
       findAbsentDaysByEmployeeMonth: vi.fn(async () => 2),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const upserted = repo.upsertSalaryRecord.mock.calls[0][0];
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(upserted.absence_days).toBe(2);
     expect(upserted.deduct_absence).toBe(4000); // 2 × 2000
   });
@@ -331,7 +332,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
   it('無投保員工 → 全部新 _auto 欄位 = 0', async () => {
     const repo = makeFullRepo();  // findEmployeeInsuranceSettings 預設 null
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_pension_voluntary).toBe(0);
     expect(r.deduct_supplementary_health).toBe(0);
     expect(r.employer_cost_labor).toBe(0);
@@ -354,7 +355,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_pension_voluntary).toBe(2748);  // 45800 × 0.06
     expect(r.employer_cost_pension).toBe(2748);     // 雇主強制 6%
     expect(r.employer_cost_labor).toBe(3490);       // direct premium
@@ -385,7 +386,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
       findYtdAccumulatedBonusBefore: vi.fn(async () => 150000),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_supplementary_health).toBe(1055);
   });
 
@@ -398,7 +399,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_supplementary_health).toBe(0);
   });
 
@@ -407,14 +408,14 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
       findActivePayrollPeriod: vi.fn(async () => ({ id: 'PP_2026_04', status: 'draft' })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.payroll_period_id).toBe('PP_2026_04');
   });
 
   it('沒 active period → payroll_period_id = null', async () => {
     const repo = makeFullRepo();  // 預設 findActivePayrollPeriod 回 null
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.payroll_period_id).toBeNull();
   });
 
@@ -424,7 +425,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
     await calculateMonthlySalary(repo, {
       employee_id:'E001', year:2026, month:4, callerId:'EMP_HR_001',
     });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.calculated_by).toBe('EMP_HR_001');
     expect(r.calculated_at >= before).toBe(true);
   });
@@ -432,7 +433,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
   it('無 callerId → calculated_by = null', async () => {
     const repo = makeFullRepo();
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.calculated_by).toBeNull();
   });
 
@@ -452,7 +453,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.bonus_yearend).toBe(50000);
     expect(r.bonus_festival).toBe(5000);
     expect(r.bonus_other_note).toBe('HR 補登入職獎金');
@@ -478,7 +479,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.pension_wage_snapshot).toBe(45800);
     expect(r.insured_salary_labor_snapshot).toBe(45800);
     expect(r.insured_salary_health_snapshot).toBe(50000);
@@ -504,7 +505,7 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // 應該用 labor_ins_bracket=36300 算、不是 0
     expect(r.pension_wage_snapshot).toBe(36300);
     expect(r.employer_cost_pension).toBe(2178);  // 36300 × 0.06
@@ -516,7 +517,7 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
   it('無投保員工 → deduct_tax = 0(taxable=0、不超免稅額)', async () => {
     const repo = makeFullRepo();
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_tax).toBe(0);
     expect(r.deduct_tax_manual_override).toBe(false);
   });
@@ -535,7 +536,7 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // taxable = 50000 + 0 + 0 + ... - 0(voluntary) = 50000、< 88500、tax=0
     expect(r.deduct_tax).toBe(0);
   });
@@ -554,7 +555,7 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // taxable = 100000、(100000 - 88500) × 0.06 = 690
     expect(r.deduct_tax).toBe(690);
     expect(r.deduct_tax_manual_override).toBe(false);
@@ -574,7 +575,7 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // taxable = 200000、(200000 - 88500 - 88500) × 0.06 = 23000 × 0.06 = 1380
     expect(r.deduct_tax).toBe(1380);
   });
@@ -599,7 +600,7 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // calculator 算出 (200000-88500)×0.06=6690、但 override=true、保留 existing 5000
     expect(r.deduct_tax).toBe(5000);
     expect(r.deduct_tax_manual_override).toBe(true);
@@ -608,7 +609,105 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
   it('manual override 預設 false 寫入新 row', async () => {
     const repo = makeFullRepo();
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
-    const r = repo.upsertSalaryRecord.mock.calls[0][0];
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_tax_manual_override).toBe(false);
+  });
+});
+
+describe('calculateMonthlySalary — 階段 2.7.5 FK 順序保護(skeleton 預建)', () => {
+  // 模擬 supabase / PG FK 23503 行為:
+  //   overtime_requests.applied_to_salary_record_id / attendance_penalty_records.salary_record_id
+  //   都 REFERENCES salary_records(id)、若 mark 時 target salary_record 不存在 → throw
+  //
+  // 抓的是 step 4 之後沒先預建 skeleton 就走 step 6/7 的 bug。
+  // 對應 prod 實例:劉嘉昕(EMP_01250501)2026-05 試算第一次失敗、
+  // overtime_requests 1 row(id=3, applied_to_salary_record_id=null)→ markOvertimeRequestApplied
+  // 撞 fk_overtime_requests_salary(batch_c §3)。
+  function makeFkAwareRepo(over = {}) {
+    const insertedSalaryIds = new Set();
+    const repo = makeFullRepo({
+      upsertSalaryRecord: vi.fn(async (row) => {
+        insertedSalaryIds.add(row.id);
+        return { ...row };
+      }),
+      markOvertimeRequestApplied: vi.fn(async (id, salary_record_id) => {
+        if (!insertedSalaryIds.has(salary_record_id)) {
+          throw new Error(
+            `insert or update on table "overtime_requests" violates foreign key constraint ` +
+            `"fk_overtime_requests_salary" (salary_record_id=${salary_record_id} not found)`
+          );
+        }
+      }),
+      markPenaltyRecordApplied: vi.fn(async (id, salary_record_id) => {
+        if (!insertedSalaryIds.has(salary_record_id)) {
+          throw new Error(
+            `insert or update on table "attendance_penalty_records" violates foreign key constraint ` +
+            `"fk_penalty_records_salary" (salary_record_id=${salary_record_id} not found)`
+          );
+        }
+      }),
+      ...over,
+    });
+    return { repo, insertedSalaryIds };
+  }
+
+  it('fresh batch + 有 approved overtime → 不應因 FK 23503 throw(劉嘉昕 case)', async () => {
+    const { repo } = makeFkAwareRepo({
+      findApprovedOvertimePayRequests: vi.fn(async () => [
+        { id: 3, estimated_pay: 1500, hours: 4, pay_multiplier: 1.34, overtime_date: '2026-05-08' },
+      ]),
+    });
+    await expect(
+      calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 })
+    ).resolves.toBeTruthy();
+    // step 4 預建 skeleton + step 15 final upsert = 2 次
+    expect(repo.upsertSalaryRecord).toHaveBeenCalledTimes(2);
+    expect(repo.markOvertimeRequestApplied).toHaveBeenCalledWith(3, 'S_E001_2026_05');
+  });
+
+  it('fresh batch + 有 pending penalty → 不應因 FK 23503 throw', async () => {
+    const { repo } = makeFkAwareRepo({
+      findPendingPenaltyRecords: vi.fn(async () => [
+        { id: 7, penalty_type: 'deduct_money', penalty_amount: 200, trigger_type: 'late', trigger_minutes: 30 },
+      ]),
+    });
+    await expect(
+      calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 })
+    ).resolves.toBeTruthy();
+    expect(repo.markPenaltyRecordApplied).toHaveBeenCalledWith(7, 'S_E001_2026_05');
+  });
+
+  it('既有 record → 不重複預建 skeleton(只走 step 15 final upsert)', async () => {
+    const { repo, insertedSalaryIds } = makeFkAwareRepo({
+      findSalaryRecord: vi.fn(async () => ({
+        id: 'S_E001_2026_05', status: 'draft',
+      })),
+      findApprovedOvertimePayRequests: vi.fn(async () => [
+        { id: 3, estimated_pay: 1500 },
+      ]),
+    });
+    // 既有 record 代表 DB 已有 salary_records row、預先標記避免 mock FK throw
+    insertedSalaryIds.add('S_E001_2026_05');
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    // 既有 → 只 final upsert 1 次、reset markers 走 if 分支
+    expect(repo.upsertSalaryRecord).toHaveBeenCalledTimes(1);
+    expect(repo.resetOvertimeMarkers).toHaveBeenCalledWith('S_E001_2026_05');
+  });
+
+  it('skeleton 寫入有 callerId / status=draft / base_salary', async () => {
+    const { repo } = makeFkAwareRepo();
+    await calculateMonthlySalary(repo, {
+      employee_id:'E001', year:2026, month:5, callerId:'EMP_HR_001',
+    });
+    // 第一次 call = skeleton
+    const skel = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(skel.id).toBe('S_E001_2026_05');
+    expect(skel.employee_id).toBe('E001');
+    expect(skel.year).toBe(2026);
+    expect(skel.month).toBe(5);
+    expect(skel.base_salary).toBe(50000);
+    expect(skel.status).toBe('draft');
+    expect(skel.calculated_by).toBe('EMP_HR_001');
+    expect(skel.calculated_at).toBeTruthy();
   });
 });
