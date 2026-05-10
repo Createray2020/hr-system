@@ -323,9 +323,10 @@ function renderStatusActions(p){
     btns.push(`<button class="btn btn-ghost btn-sm" data-action="delete" style="color:#F87171">🗑 刪除</button>`);
   }
 
-  c.innerHTML = btns.length
-    ? btns.join('')
-    : `<div style="color:var(--text-dim);font-size:12px">無可用操作(終態 / 您無權限)</div>`;
+  // 完整明細表(任何狀態都能開、ghost 次要按鈕、避開主要 action 視覺權重)
+  btns.push(`<button class="btn btn-ghost btn-sm" data-action="open-list">📊 完整明細表</button>`);
+
+  c.innerHTML = btns.join('');
 }
 
 document.getElementById('status-actions').addEventListener('click', async (e) => {
@@ -342,6 +343,7 @@ document.getElementById('status-actions').addEventListener('click', async (e) =>
     'mark-paid':         () => updateStatus(id, 'paid'),
     'lock':              () => updateStatus(id, 'locked'),
     'delete':            () => deletePeriod(id),
+    'open-list':         () => { window.open(`/salary.html?year=${year}&month=${month}`, '_blank'); },
   };
   if (handlers[action]) await handlers[action]();
 });

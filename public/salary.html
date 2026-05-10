@@ -27,6 +27,8 @@
   .manual-cell{color:#FBBF24}
   .gen-cell{font-weight:600;color:#7FBBFF}
   .breakdown{font-size:11px;color:var(--text-dim);margin-top:2px}
+  tfoot td{background:rgba(0,0,0,.15);font-weight:600;border-top:1px solid rgba(255,255,255,.18)}
+  tfoot td:first-child{color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px}
 </style>
 </head>
 <body data-page="salary">
@@ -77,6 +79,7 @@
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
+          <tfoot id="tfoot"></tfoot>
         </table>
       </div>
     </div>
@@ -135,6 +138,16 @@ function n0(v){ return v==null?0:Number(v); }
 
 let allRows = [], currentRow = null;
 
+// canonical: lib/salary/query-filter.js(vitest 抓行為、本檔保持一致)
+function parseFilterFromQuery(search) {
+  const params = new URLSearchParams(search || '');
+  const year = parseInt(params.get('year'), 10);
+  const month = parseInt(params.get('month'), 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month)) return null;
+  if (month < 1 || month > 12) return null;
+  return { year, month, value: `${year}-${String(month).padStart(2, '0')}` };
+}
+
 function buildMonthOptions(){
   const sel = document.getElementById('f-month');
   const d = new Date(); const out = [];
@@ -144,6 +157,19 @@ function buildMonthOptions(){
     d.setMonth(d.getMonth()-1);
   }
   sel.innerHTML = out.join('');
+
+  // query string ?year=&month= override(salary-period.html「📊 完整明細表」入口)
+  const fromQuery = parseFilterFromQuery(window.location.search);
+  if (fromQuery) {
+    if (![...sel.options].some(o => o.value === fromQuery.value)) {
+      // 不在預設 12 個月內 → prepend 為新 option
+      const opt = document.createElement('option');
+      opt.value = fromQuery.value;
+      opt.textContent = fromQuery.value;
+      sel.insertBefore(opt, sel.firstChild);
+    }
+    sel.value = fromQuery.value;
+  }
 }
 
 async function load(retries=0){
@@ -171,7 +197,11 @@ function render(){
     return `${r.emp_name||''} ${r.employee_id||''}`.toLowerCase().includes(q);
   });
   const tbody = document.getElementById('tbody');
-  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="18" style="text-align:center;padding:30px;color:var(--text-dim)">無記錄。請點「批次產生」</td></tr>`; return; }
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="18" style="text-align:center;padding:30px;color:var(--text-dim)">無記錄。請點「批次產生」</td></tr>`;
+    renderSummary([]);
+    return;
+  }
   tbody.innerHTML = rows.map(r => `
     <tr>
       <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></td>
@@ -201,6 +231,39 @@ function render(){
       </td>
     </tr>
   `).join('');
+  renderSummary(rows);
+}
+
+// 表格底部 SUM 合計列、欄位順序對齊 thead 18 欄。
+// 數字加總用 n0 容忍 null;不適合加總的欄位(狀態 / 操作)填 "—"。
+function renderSummary(rows){
+  const tfoot = document.getElementById('tfoot');
+  if (!tfoot) return;
+  if (!rows.length) { tfoot.innerHTML = ''; return; }
+  const sum = (key) => rows.reduce((s, r) => s + n0(r[key]), 0);
+  const sumExpr = (fn) => rows.reduce((s, r) => s + fn(r), 0);
+  tfoot.innerHTML = `
+    <tr class="sum-row">
+      <td>合計 (${rows.length} 人)</td>
+      <td class="num">${fmt$(sum('base_salary'))}</td>
+      <td class="num">${fmt$(sum('attendance_bonus_actual'))}</td>
+      <td class="num">${fmt$(sum('overtime_pay_auto'))}</td>
+      <td class="num">${fmt$(sum('overtime_pay_manual'))}</td>
+      <td class="num">${fmt$(sum('comp_expiry_payout'))}</td>
+      <td class="num">${fmt$(sum('settlement_amount'))}</td>
+      <td class="num">${fmt$(sum('holiday_work_pay'))}</td>
+      <td class="num">${fmt$(sumExpr(r => n0(r.allowance) + n0(r.extra_allowance)))}</td>
+      <td class="num">${fmt$(sum('deduct_absence'))}</td>
+      <td class="num">${fmt$(sum('deduct_labor_ins'))}</td>
+      <td class="num">${fmt$(sum('deduct_health_ins'))}</td>
+      <td class="num">${fmt$(sum('deduct_tax'))}</td>
+      <td class="num">${fmt$(sum('attendance_penalty_total'))}</td>
+      <td class="num gen-cell">${fmt$(sum('gross_salary'))}</td>
+      <td class="num gen-cell">${fmt$(sum('net_salary'))}</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+  `;
 }
 
 async function batchGenerate(){
