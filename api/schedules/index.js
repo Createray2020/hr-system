@@ -20,6 +20,7 @@ import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
 import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
 import {
   listShiftTypes, createShiftType, updateShiftType, deleteShiftType,
@@ -105,8 +106,9 @@ export default async function handler(req, res) {
 
       // Two-step: fetch employees
       const empIds = [...new Set(schedules.map(s => s.employee_id))];
-      const { data: emps, error: empErr } = await supabaseAdmin
-        .from('employees').select('id, name, dept_id, avatar, departments(name)').in('id', empIds);
+      const { data: emps, error: empErr } = await applyExcludeSystemAccountsQuery(
+        supabaseAdmin.from('employees').select('id, name, dept_id, avatar, departments(name)').in('id', empIds)
+      );
       if (empErr) return res.status(500).json({ error: empErr.message });
       addDeptName(emps);
 

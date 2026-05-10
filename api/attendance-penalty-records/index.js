@@ -9,6 +9,7 @@ import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { makeAttendancePenaltyRepo } from '../attendance-penalties/_repo.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -39,8 +40,9 @@ export default async function handler(req, res) {
     const empIds = [...new Set(records.map(r => r.employee_id))];
     let empMap = {};
     if (empIds.length) {
-      const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept_id, departments(name)').in('id', empIds);
+      const { data: emps } = await applyExcludeSystemAccountsQuery(
+        supabaseAdmin.from('employees').select('id, name, dept_id, departments(name)').in('id', empIds)
+      );
       addDeptName(emps);
       for (const e of (emps || [])) empMap[e.id] = e;
     }

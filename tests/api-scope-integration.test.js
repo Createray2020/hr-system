@@ -18,6 +18,7 @@ vi.mock('../lib/supabase.js', () => {
     const c = {};
     c.select = vi.fn(() => c);
     c.eq = vi.fn((col, val) => { calls.eqs.push({ table, col, val }); return c; });
+    c.neq = vi.fn(() => c);
     c.in = vi.fn((col, vals) => { calls.ins.push({ table, col, vals }); return c; });
     c.gte = vi.fn(() => c); c.lte = vi.fn(() => c);
     c.lt = vi.fn(() => c); c.gt = vi.fn(() => c);

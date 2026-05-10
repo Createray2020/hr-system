@@ -8,6 +8,7 @@ import { BACKOFFICE_ROLES, isBackofficeRole } from '../../lib/roles.js';
 import { syncDeptFields } from '../../lib/dept-sync.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo } from '../../lib/auth-scope.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
@@ -86,8 +87,9 @@ export default async function handler(req, res) {
     if (!isHR && !isMgr) return res.status(403).json({ error: 'Forbidden' });
 
     const ORG_FIELDS = 'id, name, position, avatar, role, dept_id, is_manager';
-    const { data: all, error: eErr } = await supabaseAdmin
-      .from('employees').select(ORG_FIELDS).eq('status', 'active');
+    const { data: all, error: eErr } = await applyExcludeSystemAccountsQuery(
+      supabaseAdmin.from('employees').select(ORG_FIELDS).eq('status', 'active')
+    );
     if (eErr) return res.status(500).json({ error: eErr.message });
 
     let employees = all || [];
@@ -119,8 +121,9 @@ export default async function handler(req, res) {
           .from('departments').select('*').order('name');
         if (error) return res.status(500).json({ error: error.message });
 
-        const { data: emps } = await supabaseAdmin
-          .from('employees').select('dept_id').eq('status', 'active');
+        const { data: emps } = await applyExcludeSystemAccountsQuery(
+          supabaseAdmin.from('employees').select('dept_id').eq('status', 'active')
+        );
         const countMap = {};
         (emps || []).forEach(e => { if (e.dept_id) countMap[e.dept_id] = (countMap[e.dept_id] || 0) + 1; });
 
@@ -231,6 +234,7 @@ export default async function handler(req, res) {
     // C0-5a JOIN departments 補 dept_name
     const colsWithDept = (cols === '*') ? '*, departments(name)' : `${cols}, departments(name)`;
     let q = supabaseAdmin.from('employees').select(colsWithDept).order('name');
+    q = applyExcludeSystemAccountsQuery(q);
     if (status) q = q.eq('status', status);
     if (dept_id) q = q.eq('dept_id', dept_id);
     if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%`);

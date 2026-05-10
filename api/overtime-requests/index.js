@@ -20,6 +20,7 @@ import {
 } from '../../lib/overtime/pay-calc.js';
 import { attachManagerNames } from '../../lib/dept-name-mapper.js';
 import { makeOvertimeRepo } from './_repo.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 
 // Phase 2.x.2:overtime list response 補 employee_dept_id + employee_manager_name +
 // employee_name + dept_id flatten(對齊 leave Phase 2.x、給 frontend gate / hint 用)。
@@ -27,10 +28,12 @@ async function attachEmployeeAndManager(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
   const empIds = [...new Set(rows.map(r => r.employee_id).filter(Boolean))];
   if (empIds.length === 0) return rows;
-  const { data: emps } = await supabaseAdmin
-    .from('employees')
-    .select('id, name, dept_id, departments(name)')
-    .in('id', empIds);
+  const { data: emps } = await applyExcludeSystemAccountsQuery(
+    supabaseAdmin
+      .from('employees')
+      .select('id, name, dept_id, departments(name)')
+      .in('id', empIds)
+  );
   const empMap = {};
   for (const e of (emps || [])) {
     empMap[e.id] = {

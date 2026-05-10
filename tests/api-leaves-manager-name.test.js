@@ -36,6 +36,7 @@ vi.mock('../lib/supabase.js', () => {
       if (table === 'employees' && col === 'is_manager' && val === true) isManagerLookup = true;
       return c;
     });
+    c.neq = vi.fn(() => c);
     c.in = vi.fn((col, vals) => { calls.ins.push({ table, col, vals }); return c; });
     c.gte = vi.fn(() => c); c.lte = vi.fn(() => c); c.lt = vi.fn(() => c);
     c.order = vi.fn(() => c); c.limit = vi.fn(() => c);

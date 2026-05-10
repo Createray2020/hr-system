@@ -1,6 +1,7 @@
 // api/announcements.js — 公告系統 CRUD + 發布推播
 import { supabaseAdmin } from '../lib/supabase.js';
 import { sendPushToEmployees, createNotifications } from '../lib/push.js';
+import { applyExcludeSystemAccountsQuery } from '../lib/salary/system-accounts.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -65,8 +66,9 @@ export default async function handler(req, res) {
     // 補充作者名稱（two-query merge）
     const authorIds = [...new Set(rows.map(r => r.author_id).filter(Boolean))];
     if (authorIds.length) {
-      const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, avatar').in('id', authorIds);
+      const { data: emps } = await applyExcludeSystemAccountsQuery(
+        supabaseAdmin.from('employees').select('id, name, avatar').in('id', authorIds)
+      );
       const empMap = {};
       (emps || []).forEach(e => { empMap[e.id] = e; });
       rows = rows.map(r => ({ ...r, author: empMap[r.author_id] || null }));
@@ -127,6 +129,7 @@ export default async function handler(req, res) {
 
       const targets = ann?.target_roles || ['all'];
       let empQuery = supabaseAdmin.from('employees').select('id').eq('status', 'active');
+      empQuery = applyExcludeSystemAccountsQuery(empQuery);
       if (!targets.includes('all')) empQuery = empQuery.in('role', targets);
       const { data: emps } = await empQuery;
       const empIds = (emps || []).map(e => e.id);

@@ -10,6 +10,7 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { runScheduleReminder } from '../lib/schedule/reminder.js';
 import { sendPushToEmployees, createNotification } from '../lib/push.js';
 import { requireCron } from '../lib/cron-auth.js';
+import { applyExcludeSystemAccountsQuery } from '../lib/salary/system-accounts.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -41,8 +42,9 @@ function supabaseRepo() {
       const draftIds = new Set((drafts || []).map(p => p.employee_id));
 
       // 也找該月「還沒建 period」的活躍員工 — 也要提醒
-      const { data: allEmps, error: eErr } = await supabaseAdmin
-        .from('employees').select('id, name').eq('status', 'active');
+      const { data: allEmps, error: eErr } = await applyExcludeSystemAccountsQuery(
+        supabaseAdmin.from('employees').select('id, name').eq('status', 'active')
+      );
       if (eErr) throw eErr;
 
       const { data: existingPeriods } = await supabaseAdmin

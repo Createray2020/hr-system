@@ -23,7 +23,7 @@ import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { canExecuteTransition } from '../../lib/salary/period-state.js';
 import { reconcilePeriodStats } from '../../lib/salary/period-stats.js';
-import { isSystemAccount, excludeSystemAccounts } from '../../lib/salary/system-accounts.js';
+import { isSystemAccount, excludeSystemAccounts, applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 import { makeSalaryRepo } from './_repo.js';
 import { addDeptName, addDeptNameNested } from '../../lib/dept-name-mapper.js';
 
@@ -209,8 +209,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'year / month required' });
     }
     // legacy:只建 row + 預填 base_salary / attendance_bonus,不算 overtime/penalty/settlement
-    const { data: emps } = await supabaseAdmin
-      .from('employees').select('id, base_salary, attendance_bonus, employment_type').eq('status', 'active');
+    const { data: emps } = await applyExcludeSystemAccountsQuery(
+      supabaseAdmin.from('employees').select('id, base_salary, attendance_bonus, employment_type').eq('status', 'active')
+    );
     let created = 0;
     for (const emp of (emps || [])) {
       const id = `S_${emp.id}_${year}_${String(month).padStart(2,'0')}`;
@@ -257,8 +258,9 @@ async function handleNewGet(req, res) {
     const ids = [...new Set(records.map(r => r.employee_id))];
     let empMap = {};
     if (ids.length) {
-      const { data: emps } = await supabaseAdmin
-        .from('employees').select('id, name, dept_id, departments(name)').in('id', ids);
+      const { data: emps } = await applyExcludeSystemAccountsQuery(
+        supabaseAdmin.from('employees').select('id, name, dept_id, departments(name)').in('id', ids)
+      );
       addDeptName(emps);
       for (const e of (emps || [])) empMap[e.id] = e;
     }

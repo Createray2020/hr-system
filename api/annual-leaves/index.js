@@ -13,6 +13,7 @@ import { calculateLegalDays, calculatePeriodBoundary } from '../../lib/leave/ann
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from '../leaves/_repo.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -52,8 +53,9 @@ async function handleGet(req, res) {
   const empIds = [...new Set((data || []).map(r => r.employee_id))];
   const empMap = {};
   if (empIds.length) {
-    const { data: emps } = await supabaseAdmin
-      .from('employees').select('id, name, dept_id, annual_leave_seniority_start, departments(name)').in('id', empIds);
+    const { data: emps } = await applyExcludeSystemAccountsQuery(
+      supabaseAdmin.from('employees').select('id, name, dept_id, annual_leave_seniority_start, departments(name)').in('id', empIds)
+    );
     addDeptName(emps);
     for (const e of (emps || [])) empMap[e.id] = e;
   }

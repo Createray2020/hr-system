@@ -31,6 +31,7 @@ import { submitLeaveRequest } from '../../lib/leave/request-flow.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from './_repo.js';
 import { addDeptName, addDeptNameSingle } from '../../lib/dept-name-mapper.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
 import { attachManagerNames as attachManagerNamesLib } from '../../lib/dept-name-mapper.js';
 
@@ -137,8 +138,9 @@ export default async function handler(req, res) {
     if (!leaves.length) return res.status(200).json([]);
 
     const empIds = [...new Set(leaves.map(l => l.employee_id))];
-    const { data: emps, error: empErr } = await supabaseAdmin
-      .from('employees').select('id, name, dept_id, position, avatar, departments(name)').in('id', empIds);
+    const { data: emps, error: empErr } = await applyExcludeSystemAccountsQuery(
+      supabaseAdmin.from('employees').select('id, name, dept_id, position, avatar, departments(name)').in('id', empIds)
+    );
     if (empErr) return res.status(500).json({ error: empErr.message });
     addDeptName(emps);
 

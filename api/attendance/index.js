@@ -29,6 +29,7 @@ import {
   NoScheduleError, AlreadyClockedInError, NoOpenAttendanceError,
 } from '../../lib/attendance/clock.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -74,7 +75,9 @@ export default async function handler(req, res) {
       if (attErr) return res.status(500).json({ error: attErr.message });
 
       // 取員工資料（一次全撈，在 JS 合併）
-      const { data: empData } = await supabaseAdmin.from('employees').select('id, name, dept_id, avatar, departments(name)');
+      const { data: empData } = await applyExcludeSystemAccountsQuery(
+        supabaseAdmin.from('employees').select('id, name, dept_id, avatar, departments(name)')
+      );
       addDeptName(empData);
       const empMap = {};
       (empData || []).forEach(e => { empMap[e.id] = e; });
