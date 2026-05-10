@@ -181,6 +181,81 @@ describe('buildNavHTML', () => {
   });
 });
 
+// ─── 階段 4.5.1: touch device click toggle ───────────────────
+// 用 happy-dom 模擬瀏覽器 DOM、驗證 attachSidebarInteractions 在 supportsHover=false 時
+// 接 click + 走手風琴。supportsHover=true 路徑信任既有 hover 行為 (desktop 已 prod 跑過)。
+
+// @vitest-environment happy-dom
+describe('attachSidebarInteractions — touch device click toggle (4.5.1)', async () => {
+  const { attachSidebarInteractions, buildSidebarNav, getNavGroups } =
+    await import('../public/js/sidebar/builder.js');
+  const groups = getNavGroups(gatesAllowAll);
+
+  function renderSidebar() {
+    document.body.innerHTML = `<aside id="sidebar"><nav>${buildSidebarNav(groups, {}, '/')}</nav></aside>`;
+    return document.getElementById('sidebar');
+  }
+  function clickHeader(idx) {
+    const sections = document.querySelectorAll('.nav-section');
+    const header = sections[idx].querySelector('.nav-section-header');
+    header.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+  function expandedIndices() {
+    return [...document.querySelectorAll('.nav-section.exp')].map(s => Number(s.dataset.groupIdx));
+  }
+
+  it('supportsHover=false → click header 展開 group + 加 .exp', () => {
+    const sidebar = renderSidebar();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    expect(expandedIndices()).toEqual([]);
+    clickHeader(2);
+    expect(expandedIndices()).toEqual([2]);
+  });
+
+  it('再點同一個 header → 收合 (.exp 拿掉)', () => {
+    const sidebar = renderSidebar();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    clickHeader(2);
+    clickHeader(2);
+    expect(expandedIndices()).toEqual([]);
+  });
+
+  it('手風琴:點別的 header 自動收合舊的 (同時只 1 個 expanded)', () => {
+    const sidebar = renderSidebar();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    clickHeader(0);
+    expect(expandedIndices()).toEqual([0]);
+    clickHeader(3);
+    expect(expandedIndices()).toEqual([3]);  // 0 被收掉、只剩 3
+    clickHeader(5);
+    expect(expandedIndices()).toEqual([5]);
+  });
+
+  it('click sub-item (.nav-item) 不觸發 toggle (讓 <a href> 自然導頁)', () => {
+    const sidebar = renderSidebar();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    clickHeader(0);
+    expect(expandedIndices()).toEqual([0]);
+    // 模擬點 group 0 的第 1 個 sub-item
+    const item = document.querySelectorAll('.nav-section')[0].querySelector('.nav-item');
+    item.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    // 點 sub-item 不應改 .exp 狀態 (group 仍展開、由 browser 導頁清狀態)
+    expect(expandedIndices()).toEqual([0]);
+  });
+
+  it('supportsHover=true → 不綁 click handler (按 click header 不變化)', () => {
+    const sidebar = renderSidebar();
+    attachSidebarInteractions(sidebar, { supportsHover: true });
+    expect(expandedIndices()).toEqual([]);
+    clickHeader(2);
+    expect(expandedIndices()).toEqual([]);  // 沒反應、因為 click 沒被綁
+  });
+
+  it('null sidebar → 不爆', () => {
+    expect(() => attachSidebarInteractions(null, { supportsHover: false })).not.toThrow();
+  });
+});
+
 describe('buildSidebarNav (整合)', () => {
   const groups = getNavGroups(gatesAllowAll);
 

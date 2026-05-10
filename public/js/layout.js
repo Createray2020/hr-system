@@ -73,7 +73,8 @@
   if (!sidebar) return;
 
   // 動態 import sidebar builder(對齊 insurance.html 的 dynamic import pattern)
-  const { getNavGroups, buildSidebarNav } = await import('/js/sidebar/builder.js');
+  const { getNavGroups, buildSidebarNav, attachSidebarInteractions } =
+    await import('/js/sidebar/builder.js');
   const navGroups = getNavGroups(gates);
   const navHTML = buildSidebarNav(navGroups, currentUser, location.pathname);
 
@@ -105,23 +106,12 @@
         style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-dim);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0">📱</button>` : ''}
     </div>`;
 
-  // ── hover-expand 事件綁定 ──────────────────────────────────
-  // mouseenter group → clearTimeout + 加 .exp;
-  // mouseleave group → setTimeout 300ms 拿掉 .exp(防誤觸);
-  // mouseenter sub-item 不需另綁(mouseenter 不 bubble、整個 .nav-section 已 cover)。
-  sidebar.querySelectorAll('.nav-section').forEach(sec => {
-    let timer = null;
-    sec.addEventListener('mouseenter', () => {
-      if (timer) { clearTimeout(timer); timer = null; }
-      sec.classList.add('exp');
-    });
-    sec.addEventListener('mouseleave', () => {
-      timer = setTimeout(() => {
-        sec.classList.remove('exp');
-        timer = null;
-      }, 300);
-    });
-  });
+  // ── group expand/collapse 事件綁定 (階段 4.5.1) ──────────────
+  // 偵測 hover 能力:desktop 用 hover、touch (mobile / tablet / no hover)
+  // 用 click toggle 走手風琴、避免 sidebar 在手機完全點不開。
+  // 詳:public/js/sidebar/builder.js attachSidebarInteractions
+  const supportsHover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  attachSidebarInteractions(sidebar, { supportsHover });
 
   // 載入未讀通知數量
   if (currentUser?.id) {

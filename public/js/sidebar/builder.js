@@ -158,3 +158,52 @@ function escHtml(s) {
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;',
   }[c]));
 }
+
+/**
+ * 階段 4.5.1:綁 sidebar group expand/collapse 互動。
+ * Desktop (hover: hover):mouseenter / mouseleave + 300ms timer 防誤觸。
+ * Touch (no hover):click on group header → toggle .exp、走手風琴 (開新的收掉舊的)、
+ *                  click on sub-item 不擋 (讓 <a href> 自然導頁、瀏覽器導頁會清狀態)。
+ *
+ * @param {HTMLElement} sidebarRoot - <aside id="sidebar">
+ * @param {Object} opts
+ * @param {boolean} opts.supportsHover - 由 caller 偵測 matchMedia 後傳入
+ * @returns {void}
+ */
+export function attachSidebarInteractions(sidebarRoot, { supportsHover } = {}) {
+  if (!sidebarRoot) return;
+  const sections = Array.from(sidebarRoot.querySelectorAll('.nav-section'));
+
+  if (supportsHover) {
+    // Desktop: hover-expand + 300ms collapse timer
+    for (const sec of sections) {
+      let timer = null;
+      sec.addEventListener('mouseenter', () => {
+        if (timer) { clearTimeout(timer); timer = null; }
+        sec.classList.add('exp');
+      });
+      sec.addEventListener('mouseleave', () => {
+        timer = setTimeout(() => {
+          sec.classList.remove('exp');
+          timer = null;
+        }, 300);
+      });
+    }
+    return;
+  }
+
+  // Touch / no-hover device: click toggle + 手風琴
+  for (const sec of sections) {
+    const header = sec.querySelector('.nav-section-header');
+    if (!header) continue;
+    header.addEventListener('click', (e) => {
+      // 防 sub-item 點擊冒泡到 header (理論上 header 跟 items 是 sibling、不會冒泡、
+      // 但 defensive 加 check:若 click target 是 .nav-item 或其後代、跳過)
+      if (e.target.closest('.nav-item')) return;
+      const wasExp = sec.classList.contains('exp');
+      // 手風琴:先收所有、再展開自己 (避免多個同時開)
+      for (const other of sections) other.classList.remove('exp');
+      if (!wasExp) sec.classList.add('exp');
+    });
+  }
+}
