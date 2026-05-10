@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>員工投保資料表</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* 螢幕樣式 — 對齊 payslip.html admin page pattern */
+    body { font-family: -apple-system, "Noto Sans TC", sans-serif; margin: 0; background:#1F2937; color:#E5E7EB; }
+    .ins-export-wrapper { max-width: 1100px; margin: 24px auto; background:white; color:#1F2937; padding: 32px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+    .ins-export-header { text-align: center; border-bottom: 2px solid #1F2937; padding-bottom: 12px; margin-bottom: 16px; }
+    .ins-export-header h1 { margin: 0 0 6px; font-size: 22px; }
+    .ins-export-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; font-size: 12px; color:#6B7280; margin-bottom: 16px; }
+    .ins-export-meta span { white-space: nowrap; }
+    .ins-export-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .ins-export-table th, .ins-export-table td { padding: 5px 6px; border: 1px solid #D1D5DB; text-align: right; vertical-align: middle; }
+    .ins-export-table th { background:#F3F4F6; color:#374151; font-weight:600; text-align:center; }
+    .ins-export-table td.text { text-align: left; font-variant-numeric: normal; }
+    .ins-export-table td.num { font-variant-numeric: tabular-nums; }
+    .ins-export-table tr.total td { background: #F3F4F6; font-weight: 700; border-top: 2px solid #1F2937; }
+    .ins-export-footer { margin-top: 16px; font-size: 10px; color: #6B7280; border-top: 1px solid #D1D5DB; padding-top: 8px; display: flex; justify-content: space-between; }
+    .actions { text-align: center; margin: 16px 0; }
+    .actions button { padding: 8px 16px; background: #3B82F6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin: 0 4px; }
+    .actions button:hover { background: #2563EB; }
+    .muted { color: #9CA3AF; }
+    .err { color: #DC2626; text-align: center; padding: 60px 0; }
+
+    /* 列印樣式 — A4 直式、16mm margin */
+    @media print {
+      body { background: white; color: black; }
+      .actions, .no-print { display: none !important; }
+      .ins-export-wrapper { box-shadow: none; max-width: none; margin: 0; padding: 0; border-radius: 0; }
+      @page { size: A4 portrait; margin: 16mm; }
+      .ins-export-table { font-size: 9.5px; }
+      .ins-export-table th, .ins-export-table td { padding: 4px 5px; }
+      thead { display: table-header-group; }  /* 跨頁時 header 重複 */
+      tr { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="actions no-print">
+    <button onclick="window.print()">🖨 列印 / 存 PDF</button>
+    <button onclick="window.close()">✕ 關閉</button>
+  </div>
+
+  <div class="ins-export-wrapper" id="export-content">
+    <p class="muted" style="text-align:center;padding:60px 0;">載入中…</p>
+  </div>
+
+  <script type="module">
+  // self-bootstrap auth 對齊 payslip.html pattern
+  const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+  const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'http://localhost:3000' : '';
+
+  async function apiFetch(path) {
+    const { data: { session } } = await _sb.auth.getSession();
+    const res = await fetch(API + path, {
+      headers: { 'Content-Type':'application/json', ...(session?{'Authorization':`Bearer ${session.access_token}`}:{}) },
+    });
+    if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
+    return res.json();
+  }
+
+  function fmt(v) { return Number(v||0).toLocaleString('zh-TW', { maximumFractionDigits: 0 }); }
+  function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function nowStr() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  // 共用 13 欄 builder (canonical: public/js/insurance/excel-builder.js、有 vitest)
+  import('/js/insurance/excel-builder.js').then(({ buildInsuranceExportAOA, COLUMNS, buildEmployeeRow }) => {
+    main(buildInsuranceExportAOA, COLUMNS, buildEmployeeRow);
+  }).catch(err => {
+    document.getElementById('export-content').innerHTML =
+      `<p class="err">載入 builder 失敗：${escHtml(err.message)}</p>`;
+  });
+
+  async function main(buildInsuranceExportAOA, COLUMNS, buildEmployeeRow) {
+    // Auth guard
+    const { data: { session } } = await _sb.auth.getSession();
+    if (!session) { window.location.href = '/login.html'; return; }
+
+    try {
+      const [employees, insArr, me] = await Promise.all([
+        apiFetch('/api/employees'),
+        apiFetch('/api/insurance'),
+        apiFetch('/api/employees/me').catch(() => null),
+      ]);
+
+      // 整理:active only、insMap by employee_id
+      const activeEmps = (employees || []).filter(e => e.status === 'active');
+      const insMap = {};
+      (insArr || []).forEach(s => { insMap[s.employee_id] = s; });
+
+      // 用同一個 builder 拿 AOA(過濾 active、合計列 4 個欄位)
+      const { aoa } = buildInsuranceExportAOA(activeEmps, insMap);
+
+      // 渲染 HTML 表格、欄位順序對齊 AOA
+      // aoa[0] = headers、aoa[1..-2] = 員工列、aoa[-1] = 合計
+      const headers = aoa[0];
+      const dataRows = aoa.slice(1, -1);
+      const totalRow = aoa[aoa.length - 1];
+
+      // 哪些欄位是純文字(text-align: left)
+      // 0=ID, 1=姓名, 2=部門, 3=是否投保, 7=自願率
+      const textCols = new Set([0, 1, 2, 3, 7]);
+
+      const printedAt = nowStr();
+      const printedBy = me?.name ? `${me.name} (${me.id || me.email || ''})` : '—';
+
+      document.getElementById('export-content').innerHTML = `
+        <div class="ins-export-header">
+          <h1>員工投保資料表</h1>
+        </div>
+
+        <div class="ins-export-meta">
+          <span>公司:CHUWA HR System</span>
+          <span>列印日期:${escHtml(printedAt)}</span>
+          <span>列印人:${escHtml(printedBy)}</span>
+          <span>員工數:${dataRows.length} 人</span>
+        </div>
+
+        <table class="ins-export-table">
+          <thead>
+            <tr>${headers.map(h => `<th>${escHtml(h)}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${dataRows.map(r => `
+              <tr>${r.map((cell, i) => {
+                const isText = textCols.has(i);
+                const display = (typeof cell === 'number') ? fmt(cell) : escHtml(cell);
+                return `<td class="${isText ? 'text' : 'num'}">${display}</td>`;
+              }).join('')}</tr>
+            `).join('')}
+            <tr class="total">${totalRow.map((cell, i) => {
+              const isText = textCols.has(i) || cell === '' || cell === '合計';
+              const display = (typeof cell === 'number') ? fmt(cell) : escHtml(cell);
+              return `<td class="${isText ? 'text' : 'num'}">${display}</td>`;
+            }).join('')}</tr>
+          </tbody>
+        </table>
+
+        <div class="ins-export-footer">
+          <span>本表由系統自動產生、僅供內部對帳用</span>
+          <span>列印時間:${escHtml(printedAt)}</span>
+        </div>
+      `;
+    } catch (err) {
+      document.getElementById('export-content').innerHTML =
+        `<p class="err">載入失敗:${escHtml(err.message)}</p>`;
+    }
+  }
+  </script>
+</body>
+</html>
