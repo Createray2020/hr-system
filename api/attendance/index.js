@@ -30,6 +30,7 @@ import {
 } from '../../lib/attendance/clock.js';
 import { addDeptName } from '../../lib/dept-name-mapper.js';
 import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
+import { applyLeaveOverlay, buildVirtualLeaveAttendance } from '../../lib/leave/overlay.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -88,6 +89,11 @@ export default async function handler(req, res) {
       }));
 
       if (dept_id)   rows = rows.filter(r => r.employees?.dept_id === dept_id);
+
+      // 階段 B1:已有 attendance row 加 leave_overlay(post-hoc detection、UI 自己決定怎麼顯示)
+      // 注意:?all=true 全員 enrichment、virtual row 補不補? 這裡量大、補 virtual 會多一輪 schedules 撈、
+      //       且 admin 端如果想看「該日有 leave 但沒 attendance」可以另外開 schedule 頁、本 path 暫不補 virtual
+      rows = await attachLeaveOverlayAttendance(rows, { virtualFromSchedules: false });
       return res.status(200).json(rows);
     }
 
@@ -104,7 +110,13 @@ export default async function handler(req, res) {
     }
     const { data, error } = await q;
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json(data);
+
+    // 階段 B1:已有 attendance row 加 leave_overlay + 補 virtual leave row
+    // (cron 還沒跑時 attendance 沒 row、有 approved leave、補一個 virtual 給前端顯示「請假中」)
+    const enriched = await attachLeaveOverlayAttendance(data || [], {
+      virtualFromSchedules: true, employee_id, date, month,
+    });
+    return res.status(200).json(enriched);
   }
 
   if (req.method === 'POST') {
@@ -322,4 +334,68 @@ export function makeRepo() {
       return data;
     },
   };
+}
+
+// ─── leave_overlay helper(階段 B1)──────────────────────────────────────
+// 對 attendance rows 加 leave_overlay 欄位 + 視情況補 virtual rows(該日 approved leave
+// 但 attendance 還沒寫入、cron 隔天才跑)。詳:lib/leave/overlay.js
+async function attachLeaveOverlayAttendance(rows, opts = {}) {
+  const { virtualFromSchedules = false, employee_id, date, month } = opts;
+
+  // 收集 employee_ids + date range(從 rows 推、若 rows 空則從 query params 推)
+  let empIds = [...new Set((rows || []).map(r => r.employee_id).filter(Boolean))];
+  let dates  = (rows || []).map(r => r.work_date).filter(Boolean);
+  if (employee_id && !empIds.includes(employee_id)) empIds.push(employee_id);
+
+  // 計算日期區間
+  let minDate, maxDate;
+  if (date) {
+    minDate = maxDate = date;
+  } else if (month) {
+    const [y, m] = month.split('-');
+    minDate = `${y}-${m.padStart(2,'0')}-01`;
+    const lastDay = new Date(parseInt(y), parseInt(m), 0);
+    maxDate = `${lastDay.getFullYear()}-${String(lastDay.getMonth()+1).padStart(2,'0')}-${String(lastDay.getDate()).padStart(2,'0')}`;
+  } else if (dates.length) {
+    dates.sort();
+    minDate = dates[0];
+    maxDate = dates[dates.length - 1];
+  } else {
+    return rows.map(r => ({ ...r, leave_overlay: null }));
+  }
+  if (!empIds.length) return rows.map(r => ({ ...r, leave_overlay: null }));
+
+  const dayStart = `${minDate}T00:00:00+08:00`;
+  const dayEnd   = `${maxDate}T23:59:59+08:00`;
+
+  // approved leaves
+  const { data: leaves } = await supabaseAdmin
+    .from('leave_requests')
+    .select('id, employee_id, leave_type, start_at, end_at, hours, finalized_hours, status')
+    .in('employee_id', empIds)
+    .eq('status', 'approved')
+    .lte('start_at', dayEnd)
+    .gte('end_at', dayStart);
+
+  const types = [...new Set((leaves || []).map(l => l.leave_type).filter(Boolean))];
+  let nameMap = {};
+  if (types.length) {
+    const { data: lts } = await supabaseAdmin
+      .from('leave_types').select('code, name_zh').in('code', types);
+    nameMap = Object.fromEntries((lts || []).map(t => [t.code, t.name_zh]));
+  }
+
+  // 既有 row 加 leave_overlay
+  let enriched = applyLeaveOverlay(rows, leaves || [], nameMap);
+
+  // virtual row(只在單員工 / 月查的場景補、避免 ?all=true 全員大批 schedule fetch)
+  if (virtualFromSchedules && (leaves || []).length > 0) {
+    const { data: schedules } = await supabaseAdmin
+      .from('schedules').select('id, employee_id, work_date, segment_no')
+      .in('employee_id', empIds)
+      .gte('work_date', minDate).lte('work_date', maxDate);
+    const virtuals = buildVirtualLeaveAttendance(rows || [], schedules || [], leaves || [], nameMap);
+    if (virtuals.length) enriched = [...enriched, ...virtuals];
+  }
+  return enriched;
 }

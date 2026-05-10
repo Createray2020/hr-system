@@ -168,6 +168,11 @@ function canClockInAnotherSeg() {
 }
 
 function renderStatus(att) {
+  // 階段 B1:approved leave 覆蓋(post-hoc 或 cron 還沒跑)→ 顯示「請假 (假別)」
+  if (att.leave_overlay) {
+    const name = att.leave_overlay.leave_name || '請假';
+    return `<span class="seg-status schedule-leave-overlay">${escHtml(name)}</span>`;
+  }
   if (att.is_anomaly) return `<span class="seg-status ss-anomaly">⚠ 異常</span>`;
   if (att.status === 'absent') return `<span class="seg-status ss-absent">曠職</span>`;
   if (att.status === 'leave')  return `<span class="seg-status ss-leave">請假</span>`;

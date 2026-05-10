@@ -8,6 +8,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
+import { applyLeaveOverlay } from '../../lib/leave/overlay.js';
 
 const ALLOWED_STATUSES = ['draft', 'submitted', 'approved', 'published', 'locked'];
 
@@ -60,7 +61,38 @@ async function handleGet(req, res, caller) {
     .in('period_id', periodIds).order('work_date');
   if (sErr) return res.status(500).json({ error: sErr.message });
 
-  return res.status(200).json({ periods, schedules: schedules || [] });
+  // 階段 B1:加 leave_overlay 欄位、approved leave 覆蓋顯示
+  const enrichedSchedules = await attachLeaveOverlay(schedules || []);
+  return res.status(200).json({ periods, schedules: enrichedSchedules });
+}
+
+// ─── leave_overlay helper(階段 B1)────────────────────────────────────
+// 同 api/schedules/index.js 的 attachLeaveOverlay、複製一份(避免 cross-endpoint import)。
+// canonical: lib/leave/overlay.js + tests/leave-overlay.test.js
+async function attachLeaveOverlay(rows) {
+  if (!rows.length) return rows;
+  const empIds = [...new Set(rows.map(r => r.employee_id).filter(Boolean))];
+  const dates  = rows.map(r => r.work_date).filter(Boolean).sort();
+  if (!empIds.length || !dates.length) return rows.map(r => ({ ...r, leave_overlay: null }));
+  const dayStart = `${dates[0]}T00:00:00+08:00`;
+  const dayEnd   = `${dates[dates.length - 1]}T23:59:59+08:00`;
+
+  const { data: leaves } = await supabaseAdmin
+    .from('leave_requests')
+    .select('id, employee_id, leave_type, start_at, end_at, hours, finalized_hours, status')
+    .in('employee_id', empIds)
+    .eq('status', 'approved')
+    .lte('start_at', dayEnd)
+    .gte('end_at', dayStart);
+
+  const types = [...new Set((leaves || []).map(l => l.leave_type).filter(Boolean))];
+  let nameMap = {};
+  if (types.length) {
+    const { data: lts } = await supabaseAdmin
+      .from('leave_types').select('code, name_zh').in('code', types);
+    nameMap = Object.fromEntries((lts || []).map(t => [t.code, t.name_zh]));
+  }
+  return applyLeaveOverlay(rows, leaves || [], nameMap);
 }
 
 async function handlePost(req, res, caller) {

@@ -305,10 +305,12 @@ function renderWeekSchedule(schedules) {
     const dt = new Date(d + 'T00:00:00');
     const isToday = d === today;
     let chipHtml = '';
-    if (!s || s.is_off) {
+    // 階段 B1:approved leave 覆蓋 → 顯示「假」橘色
+    if (s?.leave_overlay) {
+      chipHtml = `<span class="day-shift schedule-leave-overlay">假</span>`;
+    } else if (!s || s.is_off) {
       chipHtml = `<span class="day-shift shift-off" style="background:rgba(74,222,128,.12);color:#4ADE80">休</span>`;
     } else {
-      const label = s.shift_start ? s.shift_start.slice(0,5) : '班';
       const h = s.shift_start ? parseInt(s.shift_start) : 9;
       const cls = h < 12 ? 'shift-morning' : 'shift-evening';
       chipHtml = `<span class="day-shift ${cls}">${h < 12 ? '早' : '晚'}</span>`;
@@ -324,7 +326,12 @@ function renderWeekSchedule(schedules) {
   const todaySched = schedMap[today];
   const chipEl = document.getElementById('shift-chip');
   const timeEl = document.getElementById('shift-time');
-  if (!todaySched || todaySched.is_off) {
+  // 階段 B1:今天 approved leave → 顯示「請假 (假別)」
+  if (todaySched?.leave_overlay) {
+    chipEl.className = 'shift-chip schedule-leave-overlay';
+    chipEl.textContent = todaySched.leave_overlay.leave_name || '請假';
+    timeEl.textContent = '';
+  } else if (!todaySched || todaySched.is_off) {
     chipEl.className = 'shift-chip shift-off';
     chipEl.textContent = '休假';
     timeEl.textContent = '';

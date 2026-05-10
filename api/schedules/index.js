@@ -22,6 +22,7 @@ import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, crea
 import { addDeptName } from '../../lib/dept-name-mapper.js';
 import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
+import { applyLeaveOverlay } from '../../lib/leave/overlay.js';
 import {
   listShiftTypes, createShiftType, updateShiftType, deleteShiftType,
 } from '../../lib/shift-types/handler.js';
@@ -114,7 +115,7 @@ export default async function handler(req, res) {
 
       const empMap = Object.fromEntries((emps || []).map(e => [e.id, e]));
 
-      return res.status(200).json(schedules.map(s => {
+      const enriched = schedules.map(s => {
         const emp = empMap[s.employee_id] || {};
         return {
           ...s,
@@ -132,7 +133,10 @@ export default async function handler(req, res) {
           break_end:     s.shift_types?.break_end     ?? null,
           break_minutes: s.shift_types?.break_minutes ?? null,
         };
-      }));
+      });
+      // 階段 B1:加 leave_overlay 欄位
+      const withOverlay = await attachLeaveOverlay(enriched);
+      return res.status(200).json(withOverlay);
     } catch(e) {
       return res.status(500).json({ error: e.message });
     }
@@ -186,7 +190,44 @@ async function handleNewGet(req, res) {
 
   const { data, error } = await q;
   if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ schedules: data || [] });
+
+  // 階段 B1:加 leave_overlay 欄位、approved leave 覆蓋顯示(不動 source data)
+  const enriched = await attachLeaveOverlay(data || []);
+  return res.status(200).json({ schedules: enriched });
+}
+
+// ─── leave_overlay helper(階段 B1)──────────────────────────────────────
+// 從 schedules / attendance rows 抓 employee_ids + date range、撈 approved leave_requests、
+// 用 lib/leave/overlay.js applyLeaveOverlay 加 leave_overlay 欄位。
+// 詳:lib/leave/overlay.js + tests/leave-overlay.test.js
+async function attachLeaveOverlay(rows) {
+  if (!rows.length) return rows;
+  const empIds = [...new Set(rows.map(r => r.employee_id).filter(Boolean))];
+  const dates  = rows.map(r => r.work_date).filter(Boolean).sort();
+  if (!empIds.length || !dates.length) return rows.map(r => ({ ...r, leave_overlay: null }));
+  const minDate = dates[0];
+  const maxDate = dates[dates.length - 1];
+  const dayStart = `${minDate}T00:00:00+08:00`;
+  const dayEnd   = `${maxDate}T23:59:59+08:00`;
+
+  // 撈該員工集合 + 該日期區間內、status='approved' 的 leave_requests
+  const { data: leaves } = await supabaseAdmin
+    .from('leave_requests')
+    .select('id, employee_id, leave_type, start_at, end_at, hours, finalized_hours, status')
+    .in('employee_id', empIds)
+    .eq('status', 'approved')
+    .lte('start_at', dayEnd)
+    .gte('end_at', dayStart);
+
+  // 撈 leave_types name_zh map(只撈出現在 leaves 裡的 type、避免 over-fetch)
+  const types = [...new Set((leaves || []).map(l => l.leave_type).filter(Boolean))];
+  let nameMap = {};
+  if (types.length) {
+    const { data: lts } = await supabaseAdmin
+      .from('leave_types').select('code, name_zh').in('code', types);
+    nameMap = Object.fromEntries((lts || []).map(t => [t.code, t.name_zh]));
+  }
+  return applyLeaveOverlay(rows, leaves || [], nameMap);
 }
 
 async function handleNewPost(req, res) {

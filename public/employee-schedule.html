@@ -291,7 +291,14 @@ function renderCalendar() {
       const isWish    = hasSeg && segs.some(s => isWishSeg(s, periodStatus));
       let inner = `<div class="cal-day-num">${day}</div>`;
 
-      if (isManager) {
+      // 階段 B1:該日有 approved leave 覆蓋 → 顯示「假」+ 原班於小字
+      const overlay = segs.find(s => s.leave_overlay)?.leave_overlay;
+      if (overlay) {
+        cell.classList.add('schedule-leave-overlay');
+        const origNames = segs.map(s => s.shift_types?.name).filter(Boolean).join('/');
+        inner += `<div class="cal-shift-line">${escHtml(overlay.leave_name || '假')}</div>`;
+        if (origNames) inner += `<div class="leave-orig">原:${escHtml(origNames)}</div>`;
+      } else if (isManager) {
         // 主管已排（period.status 非 draft）→ 顯示時段或班別名
         cell.classList.add('has-shift');
         const mgrSegs = segs.filter(s => isManagerSeg(s, periodStatus));

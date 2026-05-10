@@ -383,19 +383,27 @@ async function fetchSchedules(year, month) {
       rows = rows.filter(s => myDeptEmpIds.has(s.employee_id));
     }
     // 每位員工每天一筆，保留班別與姓名供格子和詳情面板使用
-    return rows.map(s => ({
-      date:        s.work_date,
-      title:       `${s.shift_name || '班'} ${s.emp_name || ''}`.trim(),
-      emp_name:    s.emp_name    || '',
-      shift_name:  s.shift_name  || '',
-      shift_start: s.shift_start || '',
-      shift_end:   s.shift_end   || '',
-      startTime:   s.shift_start ? s.shift_start.slice(0, 5) : null,
-      endTime:     s.shift_end   ? s.shift_end.slice(0, 5)   : null,
-      is_off:      s.is_off      || false,
-      color:       'schedule',
-      source:      'schedule',
-    }));
+    // 階段 B1:approved leave 覆蓋 → title / shift_name 顯示「假 (假別)」、is_off=true
+    return rows.map(s => {
+      const overlay = s.leave_overlay;
+      const shiftName = overlay
+        ? (overlay.leave_name || '假')
+        : (s.shift_name || '');
+      return {
+        date:        s.work_date,
+        title:       `${shiftName || '班'} ${s.emp_name || ''}`.trim(),
+        emp_name:    s.emp_name    || '',
+        shift_name:  shiftName,
+        shift_start: overlay ? '' : (s.shift_start || ''),
+        shift_end:   overlay ? '' : (s.shift_end   || ''),
+        startTime:   overlay ? null : (s.shift_start ? s.shift_start.slice(0, 5) : null),
+        endTime:     overlay ? null : (s.shift_end   ? s.shift_end.slice(0, 5)   : null),
+        is_off:      overlay ? true : (s.is_off || false),
+        color:       overlay ? 'leave' : 'schedule',
+        source:      'schedule',
+        leave_overlay: overlay || null,
+      };
+    });
   } catch { return []; }
 }
 

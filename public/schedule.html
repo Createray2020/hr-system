@@ -579,23 +579,30 @@ function render() {
 
       const stid = seg1.shift_type_id;
       const isOff = seg1.shift_types?.is_off === true || seg1.note === '__OFF__';
-      const cellClass = isOff
-        ? 'week-cell-off'
-        : (stid === 'ST002' ? 'week-cell-shift2' : 'week-cell-shift1');
-      const wishClass = !isManagerPhase ? ' week-cell-wish' : '';
+      // 階段 B1:approved leave 覆蓋顯示「假」+ 保留原班於小字
+      const overlay = seg1.leave_overlay;
+      const cellClass = overlay
+        ? 'week-cell schedule-leave-overlay'
+        : (isOff
+            ? 'week-cell week-cell-off'
+            : `week-cell ${stid === 'ST002' ? 'week-cell-shift2' : 'week-cell-shift1'}`);
+      const wishClass = !isManagerPhase && !overlay ? ' week-cell-wish' : '';
 
-      let label;
-      if (isOff) {
-        label = isManagerPhase ? '休' : '想休';
+      let labelHtml;
+      if (overlay) {
+        const origName = seg1.shift_types?.name || stid || '';
+        labelHtml = `${escHtml(overlay.leave_name || '假')}<span class="leave-orig">原:${escHtml(origName)}</span>`;
+      } else if (isOff) {
+        labelHtml = escHtml(isManagerPhase ? '休' : '想休');
       } else if (isManagerPhase && seg1.start_time && seg1.end_time) {
-        label = `${fmtTime(seg1.start_time)}-${fmtTime(seg1.end_time)}`;
+        labelHtml = escHtml(`${fmtTime(seg1.start_time)}-${fmtTime(seg1.end_time)}`);
       } else {
-        label = (isManagerPhase ? '' : '想') + (seg1.shift_types?.name || stid || '');
+        labelHtml = escHtml((isManagerPhase ? '' : '想') + (seg1.shift_types?.name || stid || ''));
       }
 
       const isLate = isLateChangeFor(dateStr, periodStatus);
       const lateDot = isLate ? '<span class="late-dot"></span>' : '';
-      return `<td class="week-cell ${cellClass}${wishClass}" onclick="onCellClick('${escHtml(emp.id)}','${dateStr}')">${escHtml(label)}${lateDot}</td>`;
+      return `<td class="${cellClass}${wishClass}" onclick="onCellClick('${escHtml(emp.id)}','${dateStr}')">${labelHtml}${lateDot}</td>`;
     }).join('');
 
     // 工時統計（本週）
@@ -656,6 +663,7 @@ function render() {
   }).join('');
 
   // 每日上班 / 休假人數（visibleEmps + allSchedules reduce per date）
+  // 階段 B1:approved leave 覆蓋的也算「休」(扣掉上班人數)
   const dailyCounts = dates.map(d => {
     const dateStr = fmtDate(d);
     let on = 0, off = 0;
@@ -663,7 +671,7 @@ function render() {
       const segs = (allSchedules[emp.id] || []).filter(s => s.work_date === dateStr);
       const seg1 = segs.find(s => s.segment_no === 1) || segs[0];
       if (!seg1) return;
-      const isOff = seg1.shift_types?.is_off === true || seg1.note === '__OFF__';
+      const isOff = seg1.shift_types?.is_off === true || seg1.note === '__OFF__' || !!seg1.leave_overlay;
       if (isOff) off++; else on++;
     });
     return { on, off };

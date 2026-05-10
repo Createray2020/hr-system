@@ -169,6 +169,23 @@ tbody tr{transition:background .15s}tbody tr:hover{background:rgba(91,141,239,.0
 /* ── Button group ── */
 .btn-group{display:flex;gap:4px}
 
+/* ── Leave overlay (階段 B1) ──
+ * 用於 schedule / attendance 顯示「該日有 approved leave 覆蓋」
+ * 共用 7 個頁面:schedule.html / employee-schedule.html / attendance.html /
+ * attendance-admin.html / employee-app.html / employee-leave.html / calendar.html
+ */
+.schedule-leave-overlay{
+  background:rgba(254,215,170,.18);
+  color:#FB923C;
+  border:1px solid rgba(251,146,60,.3);
+  font-weight:600;
+  border-radius:4px;
+  padding:2px 6px;
+}
+.schedule-leave-overlay .leave-orig{
+  font-size:10px;font-weight:400;color:rgba(251,146,60,.7);display:block;margin-top:2px;
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}

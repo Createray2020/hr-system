@@ -209,7 +209,13 @@ function renderRows(rows) {
   if (!rows.length) return `<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:20px">無資料</td></tr>`;
   return rows.map(r => {
     const emp = empMap[r.employee_id] || {};
-    const cls = r.is_anomaly ? 'anomaly' : (r.status === 'absent' ? 'absent' : '');
+    // 階段 B1:approved leave 覆蓋(post-hoc / 補請假)→ tr 加 highlight class
+    const cls = r.leave_overlay ? 'schedule-leave-overlay'
+              : r.is_anomaly ? 'anomaly'
+              : (r.status === 'absent' ? 'absent' : '');
+    const statusCell = r.leave_overlay
+      ? `<span class="pill schedule-leave-overlay">${escHtml(r.leave_overlay.leave_name || '請假')}</span>`
+      : `<span class="pill p-${escHtml(r.status||'normal')}">${escHtml(r.status||'normal')}</span>${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}`;
     return `
       <tr class="${cls}">
         <td style="font-family:'DM Mono',monospace">${escHtml(r.work_date)}</td>
@@ -217,10 +223,7 @@ function renderRows(rows) {
         <td style="font-family:'DM Mono',monospace">${r.segment_no || 1}</td>
         <td>${fmtIsoLocal(r.clock_in)}</td>
         <td>${fmtIsoLocal(r.clock_out)}</td>
-        <td>
-          <span class="pill p-${escHtml(r.status||'normal')}">${escHtml(r.status||'normal')}</span>
-          ${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}
-        </td>
+        <td>${statusCell}</td>
         <td style="font-size:12px;color:var(--text-dim)">${escHtml(r.anomaly_note||r.note||'')}</td>
         <td>
           <button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(r.id)}')">編輯</button>
