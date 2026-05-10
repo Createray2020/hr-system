@@ -148,6 +148,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // ── Annual summary resource (階段 C2、年底給會計填扣繳憑單) ────────
+  if (req.query._resource === 'annual_summary') {
+    return handleAnnualSummary(req, res);
+  }
+
   // ── 新路徑分流 ──────────────────────────────────────────
   if (req.method === 'GET' && req.query.v === '2') {
     return handleNewGet(req, res);
@@ -347,6 +352,62 @@ async function handleNewBatch(req, res) {
     return res.status(200).json({
       ok: true, year: y, month: m, success, failed, results,
       period_warning: periodWarning,
+    });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 階段 C2:年度薪資合計 (HR-only、給會計填扣繳憑單)
+// GET /api/salary?_resource=annual_summary&year=2025
+// ─────────────────────────────────────────────────────────────
+async function handleAnnualSummary(req, res) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  const caller = await requireRole(req, res, BACKOFFICE_ROLES);
+  if (!caller) return;
+
+  const year = parseInt(req.query.year);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    return res.status(400).json({ error: 'invalid year (2000-2100)' });
+  }
+
+  try {
+    // 撈該年度 status='paid' 或 'locked' 的 salary_records (避免 draft / pending_review、
+    // 確保金額已確認、可給會計用)
+    const { data: records, error: rErr } = await supabaseAdmin
+      .from('salary_records')
+      .select('employee_id, year, month, gross_salary, net_salary, ' +
+              'bonus_yearend, bonus_festival, bonus_performance, bonus_other, ' +
+              'deduct_labor_ins, deduct_health_ins, deduct_pension_voluntary, ' +
+              'deduct_supplementary_health, deduct_tax')
+      .eq('year', year)
+      .in('status', ['paid', 'locked']);
+    if (rErr) return res.status(500).json({ error: rErr.message });
+
+    // 撈員工 name + dept_name (套 EMP_99999999 排除 + 系統帳號 filter)
+    const empIds = [...new Set((records || []).map(r => r.employee_id).filter(Boolean))];
+    let empMap = {};
+    if (empIds.length) {
+      const { data: emps } = await applyExcludeSystemAccountsQuery(
+        supabaseAdmin
+          .from('employees')
+          .select('id, name, dept_id, departments(name)')
+          .in('id', empIds)
+      );
+      addDeptName(emps);
+      for (const e of (emps || [])) {
+        empMap[e.id] = { name: e.name, dept_name: e.dept_name };
+      }
+      // EMP_99999999 / 系統帳號 → empMap 沒有對應、records 該 empId 不會出現在 summary
+      // (filter 掉 records 裡 empId 不在 empMap 的 row)
+    }
+    const filteredRecords = (records || []).filter(r => empMap[r.employee_id]);
+
+    return res.status(200).json({
+      year,
+      records: filteredRecords,    // 給 frontend builder 用
+      employees: empMap,            // employee_id → { name, dept_name }
     });
   } catch (e) {
     return res.status(500).json({ error: e.message });

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>年度薪資合計表</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    /* 螢幕樣式 — 對齊 payslip.html / insurance-export.html print pattern */
+    body { font-family: -apple-system, "Noto Sans TC", sans-serif; margin: 0; background:#1F2937; color:#E5E7EB; }
+    .ye-wrapper { max-width: 1400px; margin: 24px auto; background:white; color:#1F2937; padding: 32px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+    .ye-header { text-align: center; border-bottom: 2px solid #1F2937; padding-bottom: 12px; margin-bottom: 16px; }
+    .ye-header h1 { margin: 0 0 6px; font-size: 22px; }
+    .ye-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; font-size: 12px; color:#6B7280; margin-bottom: 16px; }
+    .ye-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .ye-table th, .ye-table td { padding: 4px 5px; border: 1px solid #D1D5DB; text-align: right; vertical-align: middle; }
+    .ye-table th { background:#F3F4F6; color:#374151; font-weight:600; text-align:center; font-size: 10px; }
+    .ye-table td.text { text-align: left; font-variant-numeric: normal; }
+    .ye-table td.num { font-variant-numeric: tabular-nums; }
+    .ye-table tr.total td { background: #F3F4F6; font-weight: 700; border-top: 2px solid #1F2937; }
+    .ye-footer { margin-top: 16px; font-size: 10px; color: #6B7280; border-top: 1px solid #D1D5DB; padding-top: 8px; display: flex; justify-content: space-between; }
+    .actions { text-align: center; margin: 16px 0; }
+    .actions button { padding: 8px 16px; background: #3B82F6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin: 0 4px; }
+    .actions button:hover { background: #2563EB; }
+    .muted { color: #9CA3AF; }
+    .err { color: #DC2626; text-align: center; padding: 60px 0; }
+
+    /* 列印樣式 — A4 橫式、12mm margin (15 欄太寬、橫式才放得下) */
+    @media print {
+      body { background: white; color: black; }
+      .actions, .no-print { display: none !important; }
+      .ye-wrapper { box-shadow: none; max-width: none; margin: 0; padding: 0; border-radius: 0; }
+      @page { size: A4 landscape; margin: 12mm; }
+      .ye-table { font-size: 8.5px; }
+      .ye-table th, .ye-table td { padding: 3px 4px; }
+      thead { display: table-header-group; }   /* 跨頁時 header 重複 */
+      tr { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="actions no-print">
+    <button onclick="window.print()">🖨 列印 / 存 PDF</button>
+    <button onclick="window.close()">✕ 關閉</button>
+  </div>
+
+  <div class="ye-wrapper" id="export-content">
+    <p class="muted" style="text-align:center;padding:60px 0;">載入中…</p>
+  </div>
+
+  <script type="module">
+  // self-bootstrap auth (對齊 payslip.html / insurance-export.html pattern)
+  const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjc2dxeGl4bWJvbXBub3lwdXV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MzkxODMsImV4cCI6MjA5MjAxNTE4M30.DRuX4OoQDQSQfvqb71VgSmDysli7e_w8lvsdp3p_VA8';
+  const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const API = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'http://localhost:3000' : '';
+
+  async function apiFetch(path) {
+    const { data: { session } } = await _sb.auth.getSession();
+    const res = await fetch(API + path, {
+      headers: { 'Content-Type':'application/json', ...(session?{'Authorization':`Bearer ${session.access_token}`}:{}) },
+    });
+    if (!res.ok) { const e=await res.json().catch(()=>({})); throw new Error(e.error||`${res.status}`); }
+    return res.json();
+  }
+
+  function fmt(v) { return Number(v||0).toLocaleString('zh-TW', { maximumFractionDigits: 0 }); }
+  function escHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function nowStr() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  import('/js/salary-summary/builder.js').then(({ buildAnnualSummaryAOA, COLUMNS }) => {
+    main(buildAnnualSummaryAOA, COLUMNS);
+  }).catch(err => {
+    document.getElementById('export-content').innerHTML =
+      `<p class="err">載入 builder 失敗:${escHtml(err.message)}</p>`;
+  });
+
+  async function main(buildAnnualSummaryAOA, COLUMNS) {
+    const { data: { session } } = await _sb.auth.getSession();
+    if (!session) { window.location.href = '/login.html'; return; }
+
+    const params = new URLSearchParams(location.search);
+    const year = parseInt(params.get('year'));
+    if (!Number.isInteger(year)) {
+      document.getElementById('export-content').innerHTML = `<p class="err">缺 year query 參數</p>`;
+      return;
+    }
+
+    try {
+      const [data, me] = await Promise.all([
+        apiFetch(`/api/salary?_resource=annual_summary&year=${year}`),
+        apiFetch('/api/employees/me').catch(() => null),
+      ]);
+
+      const { aoa, rows } = buildAnnualSummaryAOA(data.records || [], data.employees || {}, year);
+      if (rows.length === 0) {
+        document.getElementById('export-content').innerHTML =
+          `<p class="err">${year} 年無 paid/locked 薪資紀錄</p>`;
+        return;
+      }
+
+      const headers = aoa[0];
+      const dataRows = aoa.slice(1, -1);
+      const totalRow = aoa[aoa.length - 1];
+      // 文字欄(text-align:left):0=ID, 1=姓名, 2=部門
+      const textCols = new Set([0, 1, 2]);
+
+      const printedAt = nowStr();
+      const printedBy = me?.name ? `${me.name} (${me.id || me.email || ''})` : '—';
+
+      document.getElementById('export-content').innerHTML = `
+        <div class="ye-header">
+          <h1>${year} 年度薪資合計表</h1>
+        </div>
+
+        <div class="ye-meta">
+          <span>公司:CHUWA HR System</span>
+          <span>年度:${year}</span>
+          <span>列印日期:${escHtml(printedAt)}</span>
+          <span>列印人:${escHtml(printedBy)}</span>
+          <span>員工數:${rows.length} 人</span>
+        </div>
+
+        <table class="ye-table">
+          <thead>
+            <tr>${headers.map(h => `<th>${escHtml(h)}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${dataRows.map(r => `
+              <tr>${r.map((cell, i) => {
+                const isText = textCols.has(i);
+                const display = (typeof cell === 'number') ? fmt(cell) : escHtml(cell);
+                return `<td class="${isText ? 'text' : 'num'}">${display}</td>`;
+              }).join('')}</tr>
+            `).join('')}
+            <tr class="total">${totalRow.map((cell, i) => {
+              const isText = textCols.has(i) || cell === '' || (typeof cell === 'string' && cell.startsWith('合計'));
+              const display = (typeof cell === 'number') ? fmt(cell) : escHtml(cell);
+              return `<td class="${isText ? 'text' : 'num'}">${display}</td>`;
+            }).join('')}</tr>
+          </tbody>
+        </table>
+
+        <div class="ye-footer">
+          <span>本表給會計用、填扣繳憑單參考。系統自動產生、僅統計 status=paid/locked 的月份。</span>
+          <span>列印時間:${escHtml(printedAt)}</span>
+        </div>
+      `;
+    } catch (err) {
+      document.getElementById('export-content').innerHTML =
+        `<p class="err">載入失敗:${escHtml(err.message)}</p>`;
+    }
+  }
+  </script>
+</body>
+</html>

@@ -66,6 +66,7 @@
           <option value="locked">已鎖定</option>
         </select>
         <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+        <button class="btn btn-ghost" onclick="openAnnualModal()">📄 年度合計匯出</button>
         <button class="btn btn-primary" onclick="openNewModal()">+ 開新期間</button>
       </div>
 
@@ -131,6 +132,26 @@
     <div class="modal-actions" style="margin-top:14px">
       <button class="btn btn-ghost" onclick="closeModal('modal-new')">取消</button>
       <button class="btn btn-primary" onclick="submitNew()">建立</button>
+    </div>
+  </div>
+</div>
+
+<!-- 年度合計匯出 modal (階段 C2) -->
+<div class="modal-bg" id="modal-annual">
+  <div class="modal" style="max-width:480px;width:95vw">
+    <div class="modal-title">📄 年度薪資合計匯出</div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;line-height:1.6">
+      給會計用、填扣繳憑單參考。<br>
+      只統計 status=「已發放」/「已鎖定」的月份(避免 draft / 待審核)。
+    </div>
+    <div class="form-row">
+      <label class="form-label">年度</label>
+      <select class="form-select" id="annual-year" style="width:200px"></select>
+    </div>
+    <div class="modal-actions" style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-annual')">取消</button>
+      <button class="btn btn-ghost" onclick="exportAnnualExcel()">📊 匯出 Excel</button>
+      <button class="btn btn-primary" onclick="exportAnnualPDF()">📄 匯出 PDF</button>
     </div>
   </div>
 </div>
@@ -429,8 +450,71 @@ async function deletePeriod(id){
   }
 }
 
+// ─── 階段 C2: 年度薪資合計匯出 ─────────────────────────
+function openAnnualModal(){
+  const sel = document.getElementById('annual-year');
+  const thisYear = new Date().getFullYear();
+  const opts = [];
+  for (let y = thisYear; y >= thisYear - 5; y--) opts.push(`<option value="${y}">${y} 年</option>`);
+  sel.innerHTML = opts.join('');
+  sel.value = thisYear;
+  document.getElementById('modal-annual').classList.add('open');
+}
+
+async function exportAnnualExcel(){
+  if (!window.XLSX) { toast('SheetJS 尚未載入,請稍候', 'error'); return; }
+  const year = parseInt(document.getElementById('annual-year').value);
+  if (!Number.isInteger(year)) { toast('年度無效','error'); return; }
+  try {
+    toast(`載入 ${year} 年度資料中...`);
+    const data = await api(`/api/salary?_resource=annual_summary&year=${year}`);
+    const mod = await import('/js/salary-summary/builder.js');
+    const { aoa, filename, rows } = mod.buildAnnualSummaryAOA(data.records || [], data.employees || {}, year);
+    if (rows.length === 0) { toast(`${year} 年無 paid/locked 薪資紀錄`,'warn'); return; }
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = mod.COLUMNS.map(c => ({ wch: Math.max(c.label.length * 2 + 4, 12) }));
+
+    // 數字欄套千分位 + 0 小數位
+    const numCols = [];
+    mod.COLUMNS.forEach((c, i) => { if (c.sumInTotal) numCols.push(i); });
+    for (let r = 1; r < aoa.length; r++) {
+      for (const c of numCols) {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (ws[ref] && typeof ws[ref].v === 'number') ws[ref].z = '#,##0';
+      }
+    }
+    // header bold + 淺灰底 (SheetJS-CE 不一定 honor、寫了不會壞)
+    for (let c = 0; c < aoa[0].length; c++) {
+      const ref = XLSX.utils.encode_cell({ r: 0, c });
+      if (ws[ref]) ws[ref].s = { font: { bold: true }, fill: { fgColor: { rgb: 'F0F0F0' } } };
+    }
+    // 合計列 bold
+    const totalRowIdx = aoa.length - 1;
+    for (let c = 0; c < aoa[0].length; c++) {
+      const ref = XLSX.utils.encode_cell({ r: totalRowIdx, c });
+      if (ws[ref]) ws[ref].s = { ...(ws[ref].s || {}), font: { bold: true } };
+    }
+    XLSX.utils.book_append_sheet(wb, ws, `${year} 年度合計`);
+    XLSX.writeFile(wb, filename);
+    toast(`✅ 已匯出 ${rows.length} 位員工`,'success');
+    closeModal('modal-annual');
+  } catch(e) {
+    toast('匯出失敗:'+e.message,'error');
+  }
+}
+
+function exportAnnualPDF(){
+  const year = parseInt(document.getElementById('annual-year').value);
+  if (!Number.isInteger(year)) { toast('年度無效','error'); return; }
+  window.open(`/year-end-export.html?year=${year}`, '_blank');
+  closeModal('modal-annual');
+}
+
 load();
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 <script src="/js/pwa.js"></script>
