@@ -3,6 +3,7 @@
 // 同時被 api/salary/{index,[id],recalculate}.js 共用。
 
 import { supabaseAdmin } from '../../lib/supabase.js';
+import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 
 export function makeSalaryRepo() {
   return {
@@ -29,9 +30,13 @@ export function makeSalaryRepo() {
     },
 
     async listActiveEmployees() {
-      const { data, error } = await supabaseAdmin
+      // 排除系統管理員 EMP_99999999(虛擬帳號、status=active 但不是真員工);
+      // 真實 base_salary=0 的兼職員工(EMP_02xxx)保留不擋。
+      let q = supabaseAdmin
         .from('employees').select('id, name, dept_id, departments(name), base_salary, attendance_bonus, employment_type')
-        .eq('status', 'active').order('id');
+        .eq('status', 'active');
+      q = applyExcludeSystemAccountsQuery(q);
+      const { data, error } = await q.order('id');
       if (error) throw error;
       return data || [];
     },

@@ -23,6 +23,7 @@ import { requireAuth, requireRole } from '../../lib/auth.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { canExecuteTransition } from '../../lib/salary/period-state.js';
 import { reconcilePeriodStats } from '../../lib/salary/period-stats.js';
+import { isSystemAccount, excludeSystemAccounts } from '../../lib/salary/system-accounts.js';
 import { makeSalaryRepo } from './_repo.js';
 import { addDeptName, addDeptNameNested } from '../../lib/dept-name-mapper.js';
 
@@ -283,13 +284,19 @@ async function handleNewBatch(req, res) {
     return res.status(400).json({ error: 'year / month required' });
   }
 
+  // 系統帳號 guard:explicit employee_id = EMP_99999999 直接擋(repo .neq() 只擋 enum 路徑)
+  if (employee_id && isSystemAccount(employee_id)) {
+    return res.status(400).json({ error: '系統帳號不可進薪資計算', employee_id });
+  }
+
   const repo = makeSalaryRepo();
   try {
     let targets;
     if (employee_id) {
       targets = [{ id: employee_id }];
     } else {
-      targets = await repo.listActiveEmployees();
+      // belt-and-suspenders:repo 已 .neq() 過濾、再 client-side 過濾防 query 漏接
+      targets = excludeSystemAccounts(await repo.listActiveEmployees());
     }
 
     const results = [];

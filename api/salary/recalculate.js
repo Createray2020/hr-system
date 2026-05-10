@@ -5,6 +5,7 @@
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
+import { isSystemAccount } from '../../lib/salary/system-accounts.js';
 import { makeSalaryRepo } from './_repo.js';
 
 export default async function handler(req, res) {
@@ -19,6 +20,10 @@ export default async function handler(req, res) {
   if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
   if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) {
     return res.status(400).json({ error: 'year / month required' });
+  }
+  // 系統帳號 guard:防 HR 從 UI 直接觸發單筆重算
+  if (isSystemAccount(employee_id)) {
+    return res.status(400).json({ error: '系統帳號不可進薪資計算', employee_id });
   }
 
   try {
