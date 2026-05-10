@@ -32,6 +32,11 @@
   dt{color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;align-self:center}
   dd{margin:0;font-family:'DM Mono',monospace}
   .status-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:0.5px solid rgba(255,255,255,.08)}
+  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  .spinner{width:32px;height:32px;border:3px solid rgba(255,255,255,.1);border-top-color:#5B8DEF;border-radius:50%;animation:spin .8s linear infinite}
+  .batch-progress{display:flex;flex-direction:column;align-items:center;gap:10px;padding:22px 12px;background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.18);border-radius:8px;width:100%}
+  .batch-progress-text{font-size:13px;color:var(--text);font-weight:500}
+  .batch-progress-timer{font-family:'DM Mono',monospace;font-size:20px;color:#7FBBFF;font-weight:600}
 </style>
 </head>
 <body data-page="salary-period">
@@ -371,19 +376,44 @@ async function updateStatus(id, status, promptMsg = null){
 
 async function runBatch(id, year, month){
   if (!confirm(`確認對 ${year}-${String(month).padStart(2,'0')} 全部員工跑試算?\n_manual 欄位保留;_auto 欄位重新算。`)) return;
-  toast('試算中...(可能需要 10-30 秒)');
+
+  // 替換 status-actions 為 spinner + 倒數(往上數、時間不確定);
+  // 完成 / 失敗都會 clearInterval、replace innerHTML 回原樣 (renderStatusActions / 重開 modal)。
+  const c = document.getElementById('status-actions');
+  const startedAt = Date.now();
+  c.innerHTML = `
+    <div class="batch-progress">
+      <div class="spinner"></div>
+      <div class="batch-progress-text">正在計算薪資、預估 30~60 秒</div>
+      <div class="batch-progress-timer" id="batch-timer">0:00</div>
+    </div>
+  `;
+  const timerEl = document.getElementById('batch-timer');
+  const tick = setInterval(() => {
+    const sec = Math.floor((Date.now() - startedAt) / 1000);
+    const mm = Math.floor(sec / 60);
+    const ss = String(sec % 60).padStart(2, '0');
+    if (timerEl) timerEl.textContent = `${mm}:${ss}`;
+  }, 1000);
+
   try {
     const r = await api('/api/salary', { method:'POST', body: JSON.stringify({
       action: 'batch_v2', year, month,
     })});
+    clearInterval(tick);
     const msg = `批次完成:成功 ${r.success} / 失敗 ${r.failed}`;
     toast(msg, r.failed > 0 ? 'error' : 'success');
     if (r.failed > 0) console.warn('failures', r.results.filter(x => !x.ok));
     if (r.period_warning) toast(r.period_warning, 'error');
-    closeModal('modal-detail');
-    await load();
+    // 重新撈 period detail + render(modal 不關、HR 看到新數字 員工數/應發/實發)
+    await openDetail(id);
+    // 同步刷新背景列表
+    load();
   } catch(e) {
+    clearInterval(tick);
     toast('試算失敗:'+e.message,'error');
+    // 重 render action 按鈕、讓 HR 可重試
+    try { await openDetail(id); } catch(_) {}
   }
 }
 
