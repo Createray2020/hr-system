@@ -243,9 +243,9 @@ describe('calculateMonthlySalary — 主流程順序', () => {
         overtime_pay_auto: 9999,          // _auto 應被覆蓋
         allowance: 800,                   // _manual 保留
         extra_allowance: 200,             // _manual 保留
-        deduct_labor_ins: 1100,           // _manual 保留
-        deduct_health_ins: 550,           // _manual 保留
-        deduct_tax: 1700,                 // _manual 保留
+        deduct_labor_ins: 1100,           // 階段 2.7.8 起為 _auto、existing 不再 preserve
+        deduct_health_ins: 550,           // 階段 2.7.8 起為 _auto、existing 不再 preserve
+        deduct_tax: 1700,                 // _manual 保留(透過 deduct_tax_manual_override)
         deduct_tax_manual_override: true, // 階段 2.6.2: 顯式標 _manual override
         attendance_penalty_total: 9999,   // _auto 應被覆蓋
         comp_expiry_payout: 9999,         // _auto 應被覆蓋
@@ -261,15 +261,16 @@ describe('calculateMonthlySalary — 主流程順序', () => {
     expect(upserted.overtime_pay_note).toBe('HR 補加班費');
     expect(upserted.allowance).toBe(800);
     expect(upserted.extra_allowance).toBe(200);
-    expect(upserted.deduct_labor_ins).toBe(1100);
-    expect(upserted.deduct_health_ins).toBe(550);
     expect(upserted.deduct_tax).toBe(1700);
     expect(upserted.note).toBe('原備註');
-    // _auto 重算為 0(因為 mock repo 沒回 records)
+    // _auto 重算為 0(因為 mock repo 沒回 records / 沒投保 settings)
     expect(upserted.overtime_pay_auto).toBe(0);
     expect(upserted.attendance_penalty_total).toBe(0);
     expect(upserted.comp_expiry_payout).toBe(0);
     expect(upserted.settlement_amount).toBe(0);
+    // 階段 2.7.8: deduct_labor_ins / deduct_health_ins 改為 _auto、無投保 settings → 0
+    expect(upserted.deduct_labor_ins).toBe(0);
+    expect(upserted.deduct_health_ins).toBe(0);
   });
 
   it('沒既有 record → _manual 預設 0', async () => {
@@ -611,6 +612,82 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
     const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_tax_manual_override).toBe(false);
+  });
+});
+
+describe('calculateMonthlySalary — 階段 2.7.8 員工自付勞健保 _auto', () => {
+  // 對應 prod bug: 全 24 員工 deduct_labor_ins / deduct_health_ins 全 0、
+  // 實發每月多發 ~27,000(全公司加總)。calculator 員工端漏讀、雇主端 employer_cost_* 是對的。
+
+  it('ins.labor_ins_employee = 653 → row.deduct_labor_ins = 653(EMP_01191201 鄭昭君 case)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_employee:  653,    // direct premium、應直接寫入
+        labor_ins_company:   2285,
+        labor_ins_bracket:   31800,
+        health_ins_employee: 545,
+        health_ins_company:  1089,
+        health_ins_bracket:  31800,
+        pension_wage:        31800,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(r.deduct_labor_ins).toBe(653);
+    expect(r.deduct_health_ins).toBe(545);
+    // 雇主端對齊比較(原本就對、本 case 為 regression guard)
+    expect(r.employer_cost_labor).toBe(2285);
+    expect(r.employer_cost_health).toBe(1089);
+  });
+
+  it('labor_ins_employee = NULL + bracket = 45800 → fallback = 45800 × 2.3% = 1053', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        // labor_ins_employee / health_ins_employee 故意 NULL、測 fallback
+        labor_ins_bracket:  45800,
+        labor_ins_company:  3490,
+        health_ins_bracket: 45800,
+        health_ins_company: 1410,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // 45800 × 0.023 = 1053.4 → round 1053
+    expect(r.deduct_labor_ins).toBe(1053);
+    // 45800 × 0.01551 = 710.358 → round 710
+    expect(r.deduct_health_ins).toBe(710);
+  });
+
+  it('labor_ins_employee = 0(明確設零、離職 / waived)→ 不 fallback、寫 0', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_employee:  0,        // 明確 0、不 fallback
+        labor_ins_bracket:   45800,    // bracket 有值、若誤 fallback 會變 1053
+        health_ins_employee: 0,
+        health_ins_bracket:  45800,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(r.deduct_labor_ins).toBe(0);
+    expect(r.deduct_health_ins).toBe(0);
+  });
+
+  it('has_insurance = false → 不論 ins 怎麼設都 0', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: false,
+        labor_ins_employee: 999, health_ins_employee: 999,  // 應全 ignored
+        labor_ins_bracket: 45800, health_ins_bracket: 45800,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(r.deduct_labor_ins).toBe(0);
+    expect(r.deduct_health_ins).toBe(0);
   });
 });
 
