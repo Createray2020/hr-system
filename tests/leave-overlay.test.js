@@ -143,6 +143,38 @@ describe('applyLeaveOverlay', () => {
     expect(r).toHaveLength(3);
     r.forEach(x => expect(x.leave_overlay).toBeNull());
   });
+
+  // ── 階段 B1 Task 3:post-hoc leave detection ──────────────
+  it('attendance row 有 clock_in + 該日有 leave → post_hoc_leave=true', async () => {
+    const att = [
+      { id:'A1', employee_id:'E001', work_date:'2026-05-15', clock_in:'2026-05-15T01:00:00Z', segment_no:1 },
+    ];
+    const r = applyLeaveOverlay(att, [SICK], NAME_MAP);
+    expect(r[0].post_hoc_leave).toBe(true);
+    expect(r[0].leave_overlay?.leave_type).toBe('sick');
+  });
+  it('attendance row 沒 clock_in (還沒打) + 該日有 leave → post_hoc_leave=false', async () => {
+    const att = [
+      { id:'A1', employee_id:'E001', work_date:'2026-05-15', clock_in:null, segment_no:1 },
+    ];
+    const r = applyLeaveOverlay(att, [SICK], NAME_MAP);
+    expect(r[0].post_hoc_leave).toBe(false);
+    expect(r[0].leave_overlay?.leave_type).toBe('sick');  // overlay 仍標
+  });
+  it('attendance row 有 clock_in 但該日無 leave → post_hoc_leave=false', async () => {
+    const att = [
+      { id:'A1', employee_id:'E001', work_date:'2026-06-01', clock_in:'2026-06-01T01:00:00Z', segment_no:1 },
+    ];
+    const r = applyLeaveOverlay(att, [SICK], NAME_MAP);
+    expect(r[0].post_hoc_leave).toBe(false);
+    expect(r[0].leave_overlay).toBeNull();
+  });
+  it('schedule row (沒 clock_in 欄位) → post_hoc_leave 永遠 false (即使有 leave)', async () => {
+    const sched = [{ id:'S1', employee_id:'E001', work_date:'2026-05-15', shift_types:{ name:'早班' } }];
+    const r = applyLeaveOverlay(sched, [SICK], NAME_MAP);
+    expect(r[0].post_hoc_leave).toBe(false);
+    expect(r[0].leave_overlay?.leave_type).toBe('sick');
+  });
 });
 
 describe('buildVirtualLeaveAttendance', () => {

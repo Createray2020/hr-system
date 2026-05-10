@@ -595,8 +595,12 @@ function render() {
       if (overlay) {
         const origName = seg1.shift_types?.name || stid || '';
         const shortLabel = overlay.is_full_day ? '假' : `假 (${overlay.hours}h)`;
-        labelHtml = `${escHtml(shortLabel)}<span class="leave-orig">原:${escHtml(origName)}</span>`;
-        tooltip = `${overlay.leave_name || ''} (${overlay.leave_type}) — ${overlay.overlay_label_short || ''}`;
+        // Task 3:post-hoc leave (員工已打卡 + 補請假) 加 ⚠️ icon、tooltip 提醒 HR 處理
+        const postHocIcon = seg1.post_hoc_leave ? '⚠️' : '';
+        labelHtml = `${postHocIcon}${escHtml(shortLabel)}<span class="leave-orig">原:${escHtml(origName)}</span>`;
+        tooltip = seg1.post_hoc_leave
+          ? `⚠ 員工已打卡 + 補請假、請 HR 處理 conflict:${overlay.leave_name||''} ${overlay.hours||0}h`
+          : `${overlay.leave_name || ''} (${overlay.leave_type}) — ${overlay.overlay_label_short || ''}`;
       } else if (isOff) {
         labelHtml = escHtml(isManagerPhase ? '休' : '想休');
       } else if (isManagerPhase && seg1.start_time && seg1.end_time) {

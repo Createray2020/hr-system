@@ -8,7 +8,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { canAccessBackoffice, isBackofficeRole } from '../../lib/roles.js';
-import { applyLeaveOverlay } from '../../lib/leave/overlay.js';
+import { applyLeaveOverlay, markPostHocFromAttendance } from '../../lib/leave/overlay.js';
 
 const ALLOWED_STATUSES = ['draft', 'submitted', 'approved', 'published', 'locked'];
 
@@ -74,8 +74,9 @@ async function attachLeaveOverlay(rows) {
   const empIds = [...new Set(rows.map(r => r.employee_id).filter(Boolean))];
   const dates  = rows.map(r => r.work_date).filter(Boolean).sort();
   if (!empIds.length || !dates.length) return rows.map(r => ({ ...r, leave_overlay: null }));
-  const dayStart = `${dates[0]}T00:00:00+08:00`;
-  const dayEnd   = `${dates[dates.length - 1]}T23:59:59+08:00`;
+  const minDate = dates[0], maxDate = dates[dates.length - 1];
+  const dayStart = `${minDate}T00:00:00+08:00`;
+  const dayEnd   = `${maxDate}T23:59:59+08:00`;
 
   const { data: leaves } = await supabaseAdmin
     .from('leave_requests')
@@ -92,7 +93,19 @@ async function attachLeaveOverlay(rows) {
       .from('leave_types').select('code, name_zh').in('code', types);
     nameMap = Object.fromEntries((lts || []).map(t => [t.code, t.name_zh]));
   }
-  return applyLeaveOverlay(rows, leaves || [], nameMap);
+  let enriched = applyLeaveOverlay(rows, leaves || [], nameMap);
+
+  // 階段 B1 Task 3:對 schedule rows 加 post_hoc_leave (反推 attendance)
+  // 只在有 leave 時才 fetch attendance、避免 over-fetch
+  if ((leaves || []).length > 0) {
+    const { data: atts } = await supabaseAdmin
+      .from('attendance').select('employee_id, work_date, clock_in')
+      .in('employee_id', empIds)
+      .gte('work_date', minDate).lte('work_date', maxDate)
+      .not('clock_in', 'is', null);
+    enriched = markPostHocFromAttendance(enriched, atts || []);
+  }
+  return enriched;
 }
 
 async function handlePost(req, res, caller) {

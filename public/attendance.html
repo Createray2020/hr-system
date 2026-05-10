@@ -168,13 +168,16 @@ function canClockInAnotherSeg() {
 }
 
 function renderStatus(att) {
-  // 階段 B1 + Phase 1.3:approved leave 覆蓋、半日斜紋 / 全日純色
+  // 階段 B1 + Phase 1.3 + Task 3:approved leave 覆蓋 / 半日斜紋 / post-hoc 警告
   if (att.leave_overlay) {
     const o = att.leave_overlay;
     const cls = o.is_full_day ? 'schedule-leave-overlay' : 'schedule-leave-overlay-half';
     const label = o.is_full_day ? (o.leave_name || '請假') : `${o.leave_name || '請假'} (${o.hours}h)`;
-    const tip = `${o.leave_name || ''} (${o.leave_type}) — ${o.overlay_label_short || ''}`;
-    return `<span class="seg-status ${cls}" title="${escHtml(tip)}">${escHtml(label)}</span>`;
+    const tip = att.post_hoc_leave
+      ? `⚠ 已打卡 + 補請假 conflict (HR 處理):${o.leave_name||''} ${o.hours||0}h`
+      : `${o.leave_name || ''} (${o.leave_type}) — ${o.overlay_label_short || ''}`;
+    const warn = att.post_hoc_leave ? '⚠ ' : '';
+    return `<span class="seg-status ${cls}" title="${escHtml(tip)}">${warn}${escHtml(label)}</span>`;
   }
   if (att.is_anomaly) return `<span class="seg-status ss-anomaly">⚠ 異常</span>`;
   if (att.status === 'absent') return `<span class="seg-status ss-absent">曠職</span>`;

@@ -218,8 +218,12 @@ function renderRows(rows) {
     if (r.leave_overlay) {
       const o = r.leave_overlay;
       const label = o.is_full_day ? (o.leave_name || '請假') : `${o.leave_name || '請假'} (${o.hours}h)`;
-      const tip = `${o.leave_name || ''} (${o.leave_type}) — ${o.overlay_label_short || ''}`;
-      statusCell = `<span class="pill ${overlayCls}" title="${escHtml(tip)}">${escHtml(label)}</span>`;
+      // Task 3:post-hoc 警告 (員工已打卡 + 事後核准請假、需 HR 處理 conflict)
+      const tip = r.post_hoc_leave
+        ? `⚠ 員工已打卡 + 補請假 conflict、請 HR 處理:${o.leave_name||''} ${o.hours||0}h`
+        : `${o.leave_name || ''} (${o.leave_type}) — ${o.overlay_label_short || ''}`;
+      const warn = r.post_hoc_leave ? '<span class="anomaly-flag" style="margin-right:4px">⚠ 補請假</span>' : '';
+      statusCell = `${warn}<span class="pill ${overlayCls}" title="${escHtml(tip)}">${escHtml(label)}</span>`;
     } else {
       statusCell = `<span class="pill p-${escHtml(r.status||'normal')}">${escHtml(r.status||'normal')}</span>${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}`;
     }

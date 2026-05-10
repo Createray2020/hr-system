@@ -22,7 +22,7 @@ import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, crea
 import { addDeptName } from '../../lib/dept-name-mapper.js';
 import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
-import { applyLeaveOverlay } from '../../lib/leave/overlay.js';
+import { applyLeaveOverlay, markPostHocFromAttendance } from '../../lib/leave/overlay.js';
 import {
   listShiftTypes, createShiftType, updateShiftType, deleteShiftType,
 } from '../../lib/shift-types/handler.js';
@@ -227,7 +227,18 @@ async function attachLeaveOverlay(rows) {
       .from('leave_types').select('code, name_zh').in('code', types);
     nameMap = Object.fromEntries((lts || []).map(t => [t.code, t.name_zh]));
   }
-  return applyLeaveOverlay(rows, leaves || [], nameMap);
+  let enriched = applyLeaveOverlay(rows, leaves || [], nameMap);
+
+  // 階段 B1 Task 3:對 schedule rows 加 post_hoc_leave (反推 attendance.clock_in)
+  if ((leaves || []).length > 0) {
+    const { data: atts } = await supabaseAdmin
+      .from('attendance').select('employee_id, work_date, clock_in')
+      .in('employee_id', empIds)
+      .gte('work_date', minDate).lte('work_date', maxDate)
+      .not('clock_in', 'is', null);
+    enriched = markPostHocFromAttendance(enriched, atts || []);
+  }
+  return enriched;
 }
 
 async function handleNewPost(req, res) {
