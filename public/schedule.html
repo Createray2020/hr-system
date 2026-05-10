@@ -579,19 +579,24 @@ function render() {
 
       const stid = seg1.shift_type_id;
       const isOff = seg1.shift_types?.is_off === true || seg1.note === '__OFF__';
-      // 階段 B1:approved leave 覆蓋顯示「假」+ 保留原班於小字
+      // 階段 B1 + Phase 1.3:approved leave 覆蓋、半日斜紋 / 全日純色
       const overlay = seg1.leave_overlay;
-      const cellClass = overlay
-        ? 'week-cell schedule-leave-overlay'
+      const overlayClass = overlay
+        ? (overlay.is_full_day ? 'schedule-leave-overlay' : 'schedule-leave-overlay-half')
+        : null;
+      const cellClass = overlayClass
+        ? `week-cell ${overlayClass}`
         : (isOff
             ? 'week-cell week-cell-off'
             : `week-cell ${stid === 'ST002' ? 'week-cell-shift2' : 'week-cell-shift1'}`);
       const wishClass = !isManagerPhase && !overlay ? ' week-cell-wish' : '';
 
-      let labelHtml;
+      let labelHtml, tooltip = '';
       if (overlay) {
         const origName = seg1.shift_types?.name || stid || '';
-        labelHtml = `${escHtml(overlay.leave_name || '假')}<span class="leave-orig">原:${escHtml(origName)}</span>`;
+        const shortLabel = overlay.is_full_day ? '假' : `假 (${overlay.hours}h)`;
+        labelHtml = `${escHtml(shortLabel)}<span class="leave-orig">原:${escHtml(origName)}</span>`;
+        tooltip = `${overlay.leave_name || ''} (${overlay.leave_type}) — ${overlay.overlay_label_short || ''}`;
       } else if (isOff) {
         labelHtml = escHtml(isManagerPhase ? '休' : '想休');
       } else if (isManagerPhase && seg1.start_time && seg1.end_time) {
@@ -602,7 +607,8 @@ function render() {
 
       const isLate = isLateChangeFor(dateStr, periodStatus);
       const lateDot = isLate ? '<span class="late-dot"></span>' : '';
-      return `<td class="${cellClass}${wishClass}" onclick="onCellClick('${escHtml(emp.id)}','${dateStr}')">${labelHtml}${lateDot}</td>`;
+      const titleAttr = tooltip ? ` title="${escHtml(tooltip)}"` : '';
+      return `<td class="${cellClass}${wishClass}"${titleAttr} onclick="onCellClick('${escHtml(emp.id)}','${dateStr}')">${labelHtml}${lateDot}</td>`;
     }).join('');
 
     // 工時統計（本週）

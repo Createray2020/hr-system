@@ -383,11 +383,11 @@ async function fetchSchedules(year, month) {
       rows = rows.filter(s => myDeptEmpIds.has(s.employee_id));
     }
     // 每位員工每天一筆，保留班別與姓名供格子和詳情面板使用
-    // 階段 B1:approved leave 覆蓋 → title / shift_name 顯示「假 (假別)」、is_off=true
+    // 階段 B1 + Phase 1.3:approved leave 覆蓋 → 半日 / 全日區分、title 含 hours
     return rows.map(s => {
       const overlay = s.leave_overlay;
       const shiftName = overlay
-        ? (overlay.leave_name || '假')
+        ? (overlay.is_full_day ? (overlay.leave_name || '假') : `${overlay.leave_name || '假'} (${overlay.hours}h)`)
         : (s.shift_name || '');
       return {
         date:        s.work_date,

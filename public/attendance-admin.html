@@ -209,13 +209,20 @@ function renderRows(rows) {
   if (!rows.length) return `<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:20px">無資料</td></tr>`;
   return rows.map(r => {
     const emp = empMap[r.employee_id] || {};
-    // 階段 B1:approved leave 覆蓋(post-hoc / 補請假)→ tr 加 highlight class
-    const cls = r.leave_overlay ? 'schedule-leave-overlay'
-              : r.is_anomaly ? 'anomaly'
-              : (r.status === 'absent' ? 'absent' : '');
-    const statusCell = r.leave_overlay
-      ? `<span class="pill schedule-leave-overlay">${escHtml(r.leave_overlay.leave_name || '請假')}</span>`
-      : `<span class="pill p-${escHtml(r.status||'normal')}">${escHtml(r.status||'normal')}</span>${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}`;
+    // 階段 B1 + Phase 1.3:approved leave 覆蓋、半日斜紋 / 全日純色
+    const overlayCls = r.leave_overlay
+      ? (r.leave_overlay.is_full_day ? 'schedule-leave-overlay' : 'schedule-leave-overlay-half')
+      : null;
+    const cls = overlayCls || (r.is_anomaly ? 'anomaly' : (r.status === 'absent' ? 'absent' : ''));
+    let statusCell;
+    if (r.leave_overlay) {
+      const o = r.leave_overlay;
+      const label = o.is_full_day ? (o.leave_name || '請假') : `${o.leave_name || '請假'} (${o.hours}h)`;
+      const tip = `${o.leave_name || ''} (${o.leave_type}) — ${o.overlay_label_short || ''}`;
+      statusCell = `<span class="pill ${overlayCls}" title="${escHtml(tip)}">${escHtml(label)}</span>`;
+    } else {
+      statusCell = `<span class="pill p-${escHtml(r.status||'normal')}">${escHtml(r.status||'normal')}</span>${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}`;
+    }
     return `
       <tr class="${cls}">
         <td style="font-family:'DM Mono',monospace">${escHtml(r.work_date)}</td>

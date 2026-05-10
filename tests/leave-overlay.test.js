@@ -61,7 +61,7 @@ describe('leaveCoversDate', () => {
 describe('findOverlayForRow', () => {
   const row = { employee_id: 'E001', work_date: '2026-05-15' };
 
-  it('全日請假 → is_full_day=true、含 leave_name', () => {
+  it('全日請假 → is_full_day=true、overlay_label_short="全日請假"', () => {
     const o = findOverlayForRow(row, [SICK], NAME_MAP);
     expect(o).toEqual({
       leave_request_id: 1,
@@ -69,14 +69,22 @@ describe('findOverlayForRow', () => {
       leave_name:       '病假',
       hours:            8,
       is_full_day:      true,
+      overlay_label_short: '全日請假',
     });
   });
-  it('半天請假 → is_full_day=false', () => {
+  it('半天請假 → is_full_day=false、overlay_label_short 含 hours (Phase 1.3)', () => {
     const halfRow = { employee_id: 'E001', work_date: '2026-05-20' };
     const o = findOverlayForRow(halfRow, [HALF_PERSONAL], NAME_MAP);
     expect(o.hours).toBe(4);
     expect(o.is_full_day).toBe(false);
     expect(o.leave_name).toBe('事假');
+    expect(o.overlay_label_short).toBe('半日請假 (4h)');
+  });
+  it('半天 hours=2 → overlay_label_short = "半日請假 (2h)"', () => {
+    const leave = { ...HALF_PERSONAL, hours: 2, finalized_hours: 2 };
+    const o = findOverlayForRow({ employee_id: 'E001', work_date: '2026-05-20' }, [leave], NAME_MAP);
+    expect(o.overlay_label_short).toBe('半日請假 (2h)');
+    expect(o.is_full_day).toBe(false);
   });
   it('沒 leave_type name map → fallback 用 code', () => {
     const o = findOverlayForRow(row, [SICK], {});

@@ -291,12 +291,14 @@ function renderCalendar() {
       const isWish    = hasSeg && segs.some(s => isWishSeg(s, periodStatus));
       let inner = `<div class="cal-day-num">${day}</div>`;
 
-      // 階段 B1:該日有 approved leave 覆蓋 → 顯示「假」+ 原班於小字
+      // 階段 B1 + Phase 1.3:approved leave 覆蓋、半日斜紋 / 全日純色
       const overlay = segs.find(s => s.leave_overlay)?.leave_overlay;
       if (overlay) {
-        cell.classList.add('schedule-leave-overlay');
+        cell.classList.add(overlay.is_full_day ? 'schedule-leave-overlay' : 'schedule-leave-overlay-half');
         const origNames = segs.map(s => s.shift_types?.name).filter(Boolean).join('/');
-        inner += `<div class="cal-shift-line">${escHtml(overlay.leave_name || '假')}</div>`;
+        const shortLabel = overlay.is_full_day ? (overlay.leave_name || '假') : `${overlay.leave_name || '假'} (${overlay.hours}h)`;
+        cell.title = `${overlay.leave_name || ''} (${overlay.leave_type}) — ${overlay.overlay_label_short || ''}`;
+        inner += `<div class="cal-shift-line">${escHtml(shortLabel)}</div>`;
         if (origNames) inner += `<div class="leave-orig">原:${escHtml(origNames)}</div>`;
       } else if (isManager) {
         // 主管已排（period.status 非 draft）→ 顯示時段或班別名
