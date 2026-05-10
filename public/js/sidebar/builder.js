@@ -160,18 +160,24 @@ function escHtml(s) {
 }
 
 /**
- * 階段 4.5.1:綁 sidebar group expand/collapse 互動。
+ * 階段 4.5.1 + 4.5.2:綁 sidebar group expand/collapse + mobile drawer 互動。
  * Desktop (hover: hover):mouseenter / mouseleave + 300ms timer 防誤觸。
- * Touch (no hover):click on group header → toggle .exp、走手風琴 (開新的收掉舊的)、
- *                  click on sub-item 不擋 (讓 <a href> 自然導頁、瀏覽器導頁會清狀態)。
+ * Touch (no hover):
+ *   - group header click → toggle .exp、手風琴 (開新的收舊的)
+ *   - hamburger / mask / close 按鈕 → 開關 sidebar.open + mask.open class
+ *   - sub-item click → 收抽屜 (sidebar.remove('open')、不 preventDefault、讓 <a href> 自然導頁)
  *
  * @param {HTMLElement} sidebarRoot - <aside id="sidebar">
  * @param {Object} opts
- * @param {boolean} opts.supportsHover - 由 caller 偵測 matchMedia 後傳入
+ * @param {boolean} opts.supportsHover - caller 偵測 matchMedia 後傳入
+ * @param {HTMLElement|null} [opts.hamburger] - mobile header 漢堡按鈕、null 則自己 query
+ * @param {HTMLElement|null} [opts.closeBtn]  - drawer 內 close 按鈕、null 則自己 query
+ * @param {HTMLElement|null} [opts.mask]      - 半透明遮罩、null 則自己 query
  * @returns {void}
  */
-export function attachSidebarInteractions(sidebarRoot, { supportsHover } = {}) {
+export function attachSidebarInteractions(sidebarRoot, opts = {}) {
   if (!sidebarRoot) return;
+  const { supportsHover } = opts;
   const sections = Array.from(sidebarRoot.querySelectorAll('.nav-section'));
 
   if (supportsHover) {
@@ -192,18 +198,42 @@ export function attachSidebarInteractions(sidebarRoot, { supportsHover } = {}) {
     return;
   }
 
-  // Touch / no-hover device: click toggle + 手風琴
+  // ── Touch / no-hover device 分支 ──────────────────────────
+  // 1. group header click → toggle .exp + 手風琴
   for (const sec of sections) {
     const header = sec.querySelector('.nav-section-header');
     if (!header) continue;
     header.addEventListener('click', (e) => {
-      // 防 sub-item 點擊冒泡到 header (理論上 header 跟 items 是 sibling、不會冒泡、
-      // 但 defensive 加 check:若 click target 是 .nav-item 或其後代、跳過)
-      if (e.target.closest('.nav-item')) return;
+      if (e.target.closest('.nav-item')) return;  // sub-item 不觸發 group toggle
       const wasExp = sec.classList.contains('exp');
-      // 手風琴:先收所有、再展開自己 (避免多個同時開)
       for (const other of sections) other.classList.remove('exp');
       if (!wasExp) sec.classList.add('exp');
     });
   }
+
+  // 2. mobile drawer 開關 (hamburger / mask / close 按鈕)
+  const doc = sidebarRoot.ownerDocument || document;
+  const hamburger = opts.hamburger ?? doc.querySelector('.hamburger-btn');
+  const closeBtn  = opts.closeBtn  ?? sidebarRoot.querySelector('.close-btn');
+  const mask      = opts.mask      ?? doc.querySelector('.sidebar-mask');
+
+  const openDrawer = () => {
+    sidebarRoot.classList.add('open');
+    if (mask) mask.classList.add('open');
+  };
+  const closeDrawer = () => {
+    sidebarRoot.classList.remove('open');
+    if (mask) mask.classList.remove('open');
+  };
+
+  if (hamburger) hamburger.addEventListener('click', openDrawer);
+  if (closeBtn)  closeBtn.addEventListener('click',  closeDrawer);
+  if (mask)      mask.addEventListener('click',      closeDrawer);
+
+  // 3. sub-item click → 收抽屜 (不 preventDefault、讓 <a href> 自然導頁)
+  // 用事件委派、綁在 sidebar 上、避免 31 個 sub-item 各別綁
+  sidebarRoot.addEventListener('click', (e) => {
+    const item = e.target.closest('.nav-item');
+    if (item) closeDrawer();
+  });
 }

@@ -256,6 +256,105 @@ describe('attachSidebarInteractions — touch device click toggle (4.5.1)', asyn
   });
 });
 
+// ─── 階段 4.5.2: mobile drawer ───────────────────────────────
+// @vitest-environment happy-dom
+describe('attachSidebarInteractions — mobile drawer (4.5.2)', async () => {
+  const { attachSidebarInteractions, buildSidebarNav, getNavGroups } =
+    await import('../public/js/sidebar/builder.js');
+  const groups = getNavGroups(gatesAllowAll);
+
+  function setupDrawerDOM() {
+    document.body.innerHTML = `
+      <div class="app-mobile-header">
+        <button class="hamburger-btn">☰</button>
+      </div>
+      <aside id="sidebar">
+        <div class="drawer-header">
+          <button class="close-btn">✕</button>
+        </div>
+        <nav>${buildSidebarNav(groups, {}, '/')}</nav>
+      </aside>
+      <div class="sidebar-mask"></div>
+    `;
+    return {
+      sidebar:  document.getElementById('sidebar'),
+      hamburger: document.querySelector('.hamburger-btn'),
+      closeBtn:  document.querySelector('.close-btn'),
+      mask:      document.querySelector('.sidebar-mask'),
+    };
+  }
+  function click(el) {
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+
+  it('點 hamburger → sidebar.open + mask.open class 加上', () => {
+    const { sidebar, hamburger, mask } = setupDrawerDOM();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    expect(sidebar.classList.contains('open')).toBe(false);
+    expect(mask.classList.contains('open')).toBe(false);
+    click(hamburger);
+    expect(sidebar.classList.contains('open')).toBe(true);
+    expect(mask.classList.contains('open')).toBe(true);
+  });
+
+  it('點 mask → sidebar.open + mask.open 移除', () => {
+    const { sidebar, hamburger, mask } = setupDrawerDOM();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    click(hamburger);
+    click(mask);
+    expect(sidebar.classList.contains('open')).toBe(false);
+    expect(mask.classList.contains('open')).toBe(false);
+  });
+
+  it('點 close 按鈕 → sidebar.open + mask.open 移除', () => {
+    const { sidebar, hamburger, closeBtn, mask } = setupDrawerDOM();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    click(hamburger);
+    click(closeBtn);
+    expect(sidebar.classList.contains('open')).toBe(false);
+    expect(mask.classList.contains('open')).toBe(false);
+  });
+
+  it('點 sub-item .nav-item → sidebar.open 移除 (讓導頁前抽屜先收)', () => {
+    const { sidebar, hamburger, mask } = setupDrawerDOM();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    click(hamburger);
+    expect(sidebar.classList.contains('open')).toBe(true);
+    const item = sidebar.querySelector('.nav-item');
+    click(item);
+    expect(sidebar.classList.contains('open')).toBe(false);
+    expect(mask.classList.contains('open')).toBe(false);
+  });
+
+  it('點 sub-item 不 preventDefault (允許 <a href> 導頁)', () => {
+    const { sidebar } = setupDrawerDOM();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    const item = sidebar.querySelector('.nav-item');
+    const evt = new MouseEvent('click', { bubbles: true, cancelable: true });
+    item.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);  // 允許瀏覽器導頁
+  });
+
+  it('點 group header .nav-section-header → toggle .exp、sidebar.open 不變', () => {
+    const { sidebar, hamburger } = setupDrawerDOM();
+    attachSidebarInteractions(sidebar, { supportsHover: false });
+    click(hamburger);
+    expect(sidebar.classList.contains('open')).toBe(true);
+    const sec = sidebar.querySelectorAll('.nav-section')[2];
+    click(sec.querySelector('.nav-section-header'));
+    expect(sec.classList.contains('exp')).toBe(true);
+    expect(sidebar.classList.contains('open')).toBe(true);  // drawer 仍開
+  });
+
+  it('supportsHover=true → 不綁 hamburger / mask click handler', () => {
+    const { sidebar, hamburger, mask } = setupDrawerDOM();
+    attachSidebarInteractions(sidebar, { supportsHover: true });
+    click(hamburger);
+    expect(sidebar.classList.contains('open')).toBe(false);
+    expect(mask.classList.contains('open')).toBe(false);
+  });
+});
+
 describe('buildSidebarNav (整合)', () => {
   const groups = getNavGroups(gatesAllowAll);
 

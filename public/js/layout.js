@@ -88,6 +88,10 @@
   const avatarChar = currentUser?.avatar || userName[0];
 
   sidebar.innerHTML = `
+    <div class="drawer-header">
+      <button class="close-btn" aria-label="關閉選單"><i class="ti ti-x"></i></button>
+      <span class="drawer-title">選單</span>
+    </div>
     <div class="logo">
       <div class="logo-mark">HR · SYSTEM</div>
       <div class="logo-title">人資管理平台</div>
@@ -102,9 +106,26 @@
         <div class="role">${userRole}</div>
       </div>
       ${isMgrOrHR(currentUser) ? `
-      <button onclick="switchToMobile()" title="切換到手機版"
+      <button class="switch-mobile-btn" onclick="switchToMobile()" title="切換到手機版"
         style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-dim);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0">📱</button>` : ''}
     </div>`;
+
+  // 階段 4.5.2:mobile drawer 模式 — 注入 header / mask
+  // (desktop CSS @media (min-width: 769px) hide、不影響桌機)
+  if (!document.querySelector('.app-mobile-header')) {
+    const mh = document.createElement('div');
+    mh.className = 'app-mobile-header';
+    mh.innerHTML = `
+      <button class="hamburger-btn" aria-label="開啟選單"><i class="ti ti-menu-2"></i></button>
+      <span class="app-mobile-title">人資管理平台</span>
+    `;
+    document.body.insertBefore(mh, document.body.firstChild);
+  }
+  if (!document.querySelector('.sidebar-mask')) {
+    const mask = document.createElement('div');
+    mask.className = 'sidebar-mask';
+    document.body.appendChild(mask);
+  }
 
   // ── group expand/collapse 事件綁定 (階段 4.5.1) ──────────────
   // 偵測 hover 能力:desktop 用 hover、touch (mobile / tablet / no hover)
