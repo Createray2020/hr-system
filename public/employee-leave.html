@@ -281,6 +281,40 @@ let currentUser = null, API = '';
 let allLeaves = [], currentFilter = '';
 let selectedFile = null;
 
+// canonical: public/js/leave/reason.js(vitest 抓行為、本檔保持一致)
+// 階段 D1:該日無法請假的 reason 分流 + start_time fallback (sched → shift_types)
+function _leaveGetDayBlockReason(sched) {
+  if (!sched) return 'no_schedule';
+  if (sched.shift_types?.is_off === true) return 'off_day';
+  const start = sched.start_time || sched.shift_types?.start_time;
+  if (!start) return 'no_time';
+  return null;
+}
+function _leaveGetEffectiveStartTime(sched) {
+  return sched?.start_time || sched?.shift_types?.start_time || null;
+}
+function _leaveGetEffectiveEndTime(sched) {
+  return sched?.end_time || sched?.shift_types?.end_time || null;
+}
+function _leaveReasonMessage(reason, dateStr) {
+  switch (reason) {
+    case 'no_schedule': return `${dateStr}:還沒被排班、請聯絡主管確認班表`;
+    case 'off_day':     return `${dateStr}:是您的休假日 / 例假日 / 國定假日、不需請假`;
+    case 'no_time':     return `${dateStr}:排班時間未設定、請主管補填上下班時間`;
+    default:            return `${dateStr}:其他原因`;
+  }
+}
+function _leaveDiagnoseRange(dates, cachedSchedules) {
+  const workable = [], blocked = [];
+  for (const d of (dates || [])) {
+    const sched = (cachedSchedules || []).find(s => String(s?.work_date).slice(0,10) === d);
+    const reason = _leaveGetDayBlockReason(sched);
+    if (reason === null) workable.push(d);
+    else blocked.push({ date: d, reason, message: _leaveReasonMessage(reason, d) });
+  }
+  return { workable, blocked };
+}
+
 // ─── lib/schedule/break-overlap.js mirror (前後端共用 SOT) ───
 // ⚠ SOT 在 lib/schedule/break-overlap.js、改這邊請同步那邊。
 //   後端用 ESM 跑、前端用 vanilla JS、故各自一份、語意必須一致。
@@ -548,33 +582,36 @@ function renderSchedPreview() {
   }
   if (dates.length === 0) { el.innerHTML = ''; return; }
 
-  // 先檢查是不是「整段都沒排班」
-  const workDays = dates.filter(d => {
-    const sched = cachedSchedules.find(s => s.work_date === d);
-    return sched && !sched.shift_types?.is_off && sched.start_time;
-  });
-
-  if (workDays.length === 0) {
-    el.innerHTML = `<div class="sched-warn">⚠️ 您所選區間內 ${dates.length} 天都沒有排班(休息日 / 例假日 / 國定假日 / 未排班),無法請假。請洽主管確認班表。</div>`;
+  // 階段 D1:用 _leaveDiagnoseRange 算每日狀態、blocked 列具體原因
+  const diag = _leaveDiagnoseRange(dates, cachedSchedules);
+  if (diag.workable.length === 0) {
+    const blockedLines = diag.blocked.map(b => `<div>• ${b.message}</div>`).join('');
+    el.innerHTML = `<div class="sched-warn">⚠️ 您所選區間內無法請假:${blockedLines}</div>`;
     return;
   }
 
-  // 顯示班表摘要
+  // 部分可請、部分擋:正常顯示班表、但底下加 blocked 提示
   const lines = dates.map(d => {
-    const sched = cachedSchedules.find(s => s.work_date === d);
+    const sched = cachedSchedules.find(s => String(s.work_date).slice(0,10) === d);
     const dow = ['日','一','二','三','四','五','六'][new Date(d).getDay()];
-    if (!sched) return `${d.substring(5)} (${dow}):未排班`;
+    const reason = _leaveGetDayBlockReason(sched);
+    if (reason === 'no_schedule') return `${d.substring(5)} (${dow}):未排班`;
+    if (reason === 'off_day')     return `${d.substring(5)} (${dow}):${sched.shift_types?.name||''}(無工時)`;
+    if (reason === 'no_time')     return `${d.substring(5)} (${dow}):${sched.shift_types?.name||''}(時間未設)`;
+    // 可請假:用 effective time (sched 沒填時 fallback shift_types 預設)
     const st = sched.shift_types;
-    if (!st) return `${d.substring(5)} (${dow}):—`;
-    if (st.is_off) return `${d.substring(5)} (${dow}):${st.name}(無工時)`;
-    if (sched.start_time) return `${d.substring(5)} (${dow}):${st.name} ${fmtTime(sched.start_time)}-${fmtTime(sched.end_time)}`;
-    return `${d.substring(5)} (${dow}):${st.name}`;
+    const effStart = _leaveGetEffectiveStartTime(sched);
+    const effEnd   = _leaveGetEffectiveEndTime(sched);
+    return `${d.substring(5)} (${dow}):${st?.name||''} ${fmtTime(effStart)}-${fmtTime(effEnd)}`;
   });
+  const blockedNote = diag.blocked.length
+    ? `<div class="sched-warn" style="margin-top:8px">⚠️ 部分日子無法請假:${diag.blocked.map(b => `<div>• ${b.message}</div>`).join('')}</div>`
+    : '';
   el.innerHTML = `
     <div class="sched-info">
       <div class="sched-info-label">當期班表(自動帶入)</div>
       ${lines.join('<br>')}
-    </div>`;
+    </div>${blockedNote}`;
 }
 
 function renderRangeChips() {
@@ -585,8 +622,9 @@ function renderRangeChips() {
   if (!s || !e) { sec.style.display = 'none'; return; }
 
   const isSingleDay = s === e;
-  const sched = cachedSchedules.find(c => c.work_date === s);
-  const hasShift = sched && !sched.shift_types?.is_off && sched.start_time;
+  const sched = cachedSchedules.find(c => String(c.work_date).slice(0,10) === s);
+  // 階段 D1:用 reason code、含 start_time fallback (sched → shift_types)
+  const hasShift = _leaveGetDayBlockReason(sched) === null;
 
   // 多天 / 沒排班 → 只顯示「整天」、不給選項
   if (!isSingleDay || !hasShift) {
@@ -599,8 +637,9 @@ function renderRangeChips() {
 
   // 單天且有排班 → 顯示 4 種選項
   sec.style.display = 'block';
-  const startStr = fmtTime(sched.start_time);
-  const endStr   = fmtTime(sched.end_time);
+  // 階段 D1:start_time / end_time fallback (sched 沒填 → 用 shift_types 預設)
+  const startStr = fmtTime(_leaveGetEffectiveStartTime(sched));
+  const endStr   = fmtTime(_leaveGetEffectiveEndTime(sched));
   // 上下半段切點:fixed break shift 用 break_start/break_end、其他用中點
   const halfBounds = calculateHalfDayBoundaries(sched);
   const morningEnd   = halfBounds?.morning.end   ?? startStr;
@@ -628,10 +667,12 @@ function selectRange(r) {
   renderRangeChips();
   // 切到自訂時,預填當天班表時段
   if (r === 'custom') {
-    const sched = cachedSchedules.find(c => c.work_date === document.getElementById('f-start').value);
-    if (sched && sched.start_time) {
-      document.getElementById('f-time-start').value = fmtTime(sched.start_time);
-      document.getElementById('f-time-end').value   = fmtTime(sched.end_time);
+    const sched = cachedSchedules.find(c => String(c.work_date).slice(0,10) === document.getElementById('f-start').value);
+    const eStart = _leaveGetEffectiveStartTime(sched);
+    const eEnd   = _leaveGetEffectiveEndTime(sched);
+    if (eStart) {
+      document.getElementById('f-time-start').value = fmtTime(eStart);
+      document.getElementById('f-time-end').value   = fmtTime(eEnd);
     }
   }
   recalcHours();
@@ -655,14 +696,15 @@ function getSelectedRange() {
     };
   }
 
-  const sched = cachedSchedules.find(c => c.work_date === s);
-  // 沒班 / 全休 → 不該到這裡(submitLeave 會擋),但保險起見回 0
-  if (!sched || sched.shift_types?.is_off || !sched.start_time) {
+  const sched = cachedSchedules.find(c => String(c.work_date).slice(0,10) === s);
+  // 階段 D1:用 reason code、保險起見回 0(submitLeave 會擋並提示具體原因)
+  if (_leaveGetDayBlockReason(sched) !== null) {
     return { start_at: `${s}T00:00:00+08:00`, end_at: `${s}T23:59:59+08:00`, hours: 0 };
   }
 
-  const startStr = fmtTime(sched.start_time);
-  const endStr   = fmtTime(sched.end_time);
+  // start_time / end_time fallback (sched 沒填 → 用 shift_types 預設)
+  const startStr = fmtTime(_leaveGetEffectiveStartTime(sched));
+  const endStr   = fmtTime(_leaveGetEffectiveEndTime(sched));
   // 上下半段切點:用同一個 SOT
   const halfBounds = calculateHalfDayBoundaries(sched);
 
@@ -703,7 +745,7 @@ function estimateMultiDayHours(s, e) {
   const endD = new Date(e);
   while (cur <= endD) {
     const d = cur.toISOString().substring(0,10);
-    const sched = cachedSchedules.find(c => c.work_date === d);
+    const sched = cachedSchedules.find(c => String(c.work_date).slice(0,10) === d);
     if (sched && !sched.shift_types?.is_off && sched.scheduled_work_minutes) {
       total += Number(sched.scheduled_work_minutes) / 60;
     }
@@ -731,7 +773,16 @@ async function submitLeave() {
 
   const range = getSelectedRange();
   if (!range || range.hours <= 0) {
-    toast('您所選的區間沒有可請假的工時(可能全是休息日 / 例假 / 國假),無法送出', 'warn');
+    // 階段 D1:用 diagnoseRange 給具體原因、不再丟單一含糊訊息
+    const dates = [];
+    const cur = new Date(start), endD = new Date(end);
+    while (cur <= endD) { dates.push(cur.toISOString().substring(0,10)); cur.setDate(cur.getDate()+1); }
+    const diag = _leaveDiagnoseRange(dates, cachedSchedules);
+    const lines = diag.blocked.map(b => `• ${b.message}`).join('\n');
+    const msg = diag.blocked.length === 1
+      ? diag.blocked[0].message
+      : `所選區間無法請假:\n${lines}`;
+    toast(msg, 'warn');
     return;
   }
 

@@ -32,15 +32,20 @@ export function makeLeaveRepo() {
         .select(`
           id, employee_id, work_date, start_time, end_time, crosses_midnight,
           scheduled_work_minutes, segment_no, period_id,
-          shift_types(break_start, break_end, break_minutes, is_off)
+          shift_types(start_time, end_time, break_start, break_end, break_minutes, is_off)
         `)
         .eq('employee_id', employee_id)
         .gte('work_date', dateStart).lte('work_date', dateEnd)
         .order('work_date').order('segment_no');
       if (error) throw error;
+      // 階段 D1:start_time / end_time fallback (sched 沒填 → 用 shift_types 預設)、
+      // 對齊前端 _leaveGetEffectiveStartTime 邏輯、避免「schedule 只選 shift_type 沒覆寫時間」
+      // 撞到 calculateLeaveHours combineDateTime 算出 NaN。
       // Flatten shift_types fields onto top-level so calculateLeaveHours / break-overlap 直接用 s.break_*
       return (data || []).map(s => ({
         ...s,
+        start_time:    s.start_time ?? s.shift_types?.start_time ?? null,
+        end_time:      s.end_time   ?? s.shift_types?.end_time   ?? null,
         break_start:   s.shift_types?.break_start   ?? null,
         break_end:     s.shift_types?.break_end     ?? null,
         break_minutes: s.shift_types?.break_minutes ?? null,
