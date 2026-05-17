@@ -212,10 +212,24 @@ let myRequests = [];     // 我的申請列表
 let pendingItems = [];   // 待我審批列表
 let currentConfig = null; // 開填寫表單時鎖定的 config
 let currentDetailId = null;
+let allLeaveTypes = [];
+let currentDetailSource = null;  // 'approval' | 'leave'
+let currentDetailLeave = null;   // cache 給 approve / reject 用
 
 const STATUS_LABELS = {
   pending:'待審核', in_progress:'審核中',
   completed:'已完成', rejected:'已退回', cancelled:'已取消', draft:'草稿'
+};
+
+const STAGE_LABELS = {
+  pending_mgr: '待主管',
+  pending_ceo: '待執行長',
+  approved: '已核准',
+  rejected: '已退回',
+  cancelled: '已撤回',
+  archived: '已歸檔',
+  terminated: '已終止',
+  pending: '待主管',  // legacy
 };
 
 const BACKOFFICE_ROLES = ['hr','ceo','chairman','admin'];
@@ -259,7 +273,10 @@ function switchTab(t) {
 // ─────────────────────────────────────────
 async function loadAll() {
   try {
-    allConfigs = await apiFetch('/api/approvals?type=configs');
+    [allConfigs, allLeaveTypes] = await Promise.all([
+      apiFetch('/api/approvals?type=configs'),
+      apiFetch('/api/leaves?_resource=leave_types').catch(() => []),
+    ]);
     await Promise.all([loadMine(), loadPending()]);
     if (isManagerOrBackoffice(currentUser)) {
       document.getElementById('tab-pending-btn').style.display = '';
@@ -361,10 +378,120 @@ function fmtLeaveRange(start_at, end_at, hours) {
   return `${fmt(s)} ~ ${fmt(e)} (${hours || 0}h)`;
 }
 
-function openLeaveDetail(leaveId) {
-  // P1 階段:mobile 還沒做 leave detail modal、主管要到桌面版審批請假
-  // P3 階段會接 /api/leaves?id= + 做 leave detail UI
-  toast('請至桌面版 leave-admin.html 審批請假', 'warn');
+async function openLeaveDetail(leaveId) {
+  currentDetailId = leaveId;
+  currentDetailSource = 'leave';
+  currentDetailLeave = null;
+  document.getElementById('detail-title').textContent = '載入中…';
+  document.getElementById('detail-body').innerHTML = '<div class="empty-state">載入中…</div>';
+  document.getElementById('detail-footer').innerHTML = '';
+  document.getElementById('detail-modal').classList.add('open');
+
+  try {
+    const leave = await apiFetch(`/api/leaves?id=${encodeURIComponent(leaveId)}`);
+    currentDetailLeave = leave;
+
+    const lt = allLeaveTypes.find(t => t.code === leave.leave_type);
+    const typeName = lt?.name_zh || leave.leave_type;
+    document.getElementById('detail-title').textContent = `🏖️ 請假申請 - ${typeName}`;
+
+    const stageLabel = STAGE_LABELS[leave.status] || leave.status;
+    let html = '';
+
+    if (leave.emp_name) {
+      html += `<div class="detail-section">
+        <div class="detail-label">申請人</div>
+        <div class="detail-value">${escapeHtml(leave.emp_name)}${leave.dept_name ? ' · ' + escapeHtml(leave.dept_name) : ''}${leave.position ? ' · ' + escapeHtml(leave.position) : ''}</div>
+      </div>`;
+    }
+
+    html += `<div class="detail-section">
+      <div class="detail-label">目前狀態</div>
+      <div class="detail-value"><span class="status-badge s-${leave.status === 'approved' ? 'completed' : leave.status === 'rejected' ? 'rejected' : 'pending'}">${stageLabel}</span></div>
+    </div>`;
+
+    html += `<div class="detail-section">
+      <div class="detail-label">假別</div>
+      <div class="detail-value">${escapeHtml(typeName)}${lt?.is_paid === false ? ' (無薪)' : ''}${lt?.pay_rate != null && lt.pay_rate > 0 && lt.pay_rate < 1 ? ` (${Math.round(Number(lt.pay_rate) * 100)}% 薪)` : ''}</div>
+    </div>`;
+
+    if (leave.start_at && leave.end_at) {
+      html += `<div class="detail-section">
+        <div class="detail-label">請假時間</div>
+        <div class="detail-value">${fmtLeaveRange(leave.start_at, leave.end_at, leave.hours)}</div>
+      </div>`;
+    }
+
+    if (leave.reason) {
+      html += `<div class="detail-section">
+        <div class="detail-label">原因說明</div>
+        <div class="detail-value">${escapeHtml(leave.reason)}</div>
+      </div>`;
+    }
+
+    if (leave.late_application) {
+      html += `<div class="detail-section" style="background:rgba(251,146,60,.08);padding:10px 12px;border-radius:8px;border:0.5px solid rgba(251,146,60,.3);margin:8px 0">
+        <div class="detail-label" style="color:#FB923C">⚠ 遲報申請</div>
+        <div class="detail-value">${leave.late_reason ? escapeHtml(leave.late_reason) : '未填遲報原因'}</div>
+      </div>`;
+    }
+
+    if (leave.proof_status && leave.proof_status !== 'not_required') {
+      const proofLabel = { required: '待補(尚未提交)', submitted: '已提交', expired: '已過期(需 HR 終止)' }[leave.proof_status] || leave.proof_status;
+      const proofColor = leave.proof_status === 'expired' ? '#F87171' : leave.proof_status === 'submitted' ? '#4ADE80' : '#FB923C';
+      html += `<div class="detail-section">
+        <div class="detail-label">證明文件</div>
+        <div class="detail-value" style="color:${proofColor}">${proofLabel}${leave.proof_url ? ` · <a href="${escapeHtml(leave.proof_url)}" target="_blank" style="color:#5B8DEF;text-decoration:underline">查看附件</a>` : ''}${leave.proof_due_at && leave.proof_status === 'required' ? ` · 期限 ${fmtDate(leave.proof_due_at)}` : ''}</div>
+      </div>`;
+    }
+
+    if (leave.attachment_url) {
+      html += `<div class="detail-section">
+        <div class="detail-label">附件</div>
+        <div class="detail-value"><a href="${escapeHtml(leave.attachment_url)}" target="_blank" style="color:#5B8DEF;text-decoration:underline">${escapeHtml(leave.attachment_name || '查看附件')}</a></div>
+      </div>`;
+    }
+
+    if (leave.mgr_decision) {
+      const mgrColor = leave.mgr_decision === 'approved' ? '#4ADE80' : '#F87171';
+      html += `<div class="detail-section">
+        <div class="detail-label">主管審核</div>
+        <div class="detail-value" style="color:${mgrColor}">${leave.mgr_decision === 'approved' ? '✓ 已通過' : '✕ 已退回'}${leave.mgr_reviewed_at ? ' · ' + fmtDate(leave.mgr_reviewed_at) : ''}${leave.mgr_reject_reason ? ' · ' + escapeHtml(leave.mgr_reject_reason) : ''}</div>
+      </div>`;
+    }
+    if (leave.ceo_decision) {
+      const ceoColor = leave.ceo_decision === 'approved' ? '#4ADE80' : '#F87171';
+      html += `<div class="detail-section">
+        <div class="detail-label">執行長審核</div>
+        <div class="detail-value" style="color:${ceoColor}">${leave.ceo_decision === 'approved' ? '✓ 已通過' : '✕ 已退回'}${leave.ceo_reviewed_at ? ' · ' + fmtDate(leave.ceo_reviewed_at) : ''}${leave.ceo_reject_reason ? ' · ' + escapeHtml(leave.ceo_reject_reason) : ''}</div>
+      </div>`;
+    }
+
+    document.getElementById('detail-body').innerHTML = html;
+
+    // footer button
+    const footer = document.getElementById('detail-footer');
+    let btns = '';
+    const callerEffRole = currentUser.is_manager ? 'manager'
+                       : (currentUser.role === 'chairman' ? 'ceo' : currentUser.role);
+    const canApproveThis = (leave.status === 'pending_mgr' && callerEffRole === 'manager')
+                        || (leave.status === 'pending_ceo' && (callerEffRole === 'ceo'));
+    const proofExpired = leave.proof_status === 'expired';
+
+    if (canApproveThis) {
+      btns += `<button class="btn btn-ghost" onclick="rejectLeave()">退回</button>`;
+      if (proofExpired) {
+        btns += `<button class="btn btn-primary" disabled style="opacity:.4;cursor:not-allowed" title="證明已過期、需 HR 終止">核准</button>`;
+      } else {
+        btns += `<button class="btn btn-primary" onclick="approveLeave()">核准</button>`;
+      }
+    }
+    if (!btns) btns = `<button class="btn btn-ghost" onclick="closeModal('detail-modal')">關閉</button>`;
+    footer.innerHTML = btns;
+  } catch(e) {
+    document.getElementById('detail-body').innerHTML =
+      `<div class="empty-state">載入失敗:${escapeHtml(e.message)}</div>`;
+  }
 }
 
 function fmtDate(iso) {
@@ -564,6 +691,8 @@ async function submitRequest() {
 // ─────────────────────────────────────────
 async function openDetail(id) {
   currentDetailId = id;
+  currentDetailSource = 'approval';
+  currentDetailLeave = null;
   document.getElementById('detail-title').textContent = '載入中…';
   document.getElementById('detail-body').innerHTML = '<div class="empty-state">載入中…</div>';
   document.getElementById('detail-footer').innerHTML = '';
@@ -698,6 +827,49 @@ async function rejectStep(stepNum) {
     closeModal('detail-modal');
     toast('已退回', 'success');
     await Promise.all([loadMine(), loadPending()]);
+  } catch(e) { toast('退回失敗:' + e.message, 'error'); }
+}
+
+async function approveLeave() {
+  let override_reason = '';
+  if (currentDetailLeave?.late_application) {
+    override_reason = prompt('遲報申請、需填寫核可原因:') || '';
+    if (!override_reason.trim()) {
+      toast('遲報申請需填寫核可原因', 'warn');
+      return;
+    }
+  }
+  try {
+    await apiFetch(`/api/leaves/${encodeURIComponent(currentDetailId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        decision: 'approve',
+        ...(override_reason.trim() ? { override_reason: override_reason.trim() } : {}),
+      })
+    });
+    closeModal('detail-modal');
+    toast('✅ 已核准', 'success');
+    await loadPending();
+  } catch(e) { toast('核准失敗:' + e.message, 'error'); }
+}
+
+async function rejectLeave() {
+  const reason = prompt('退回原因(必填):');
+  if (!reason || !reason.trim()) {
+    toast('需填寫退回原因', 'warn');
+    return;
+  }
+  try {
+    await apiFetch(`/api/leaves/${encodeURIComponent(currentDetailId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        decision: 'reject',
+        reject_reason: reason.trim(),
+      })
+    });
+    closeModal('detail-modal');
+    toast('已退回', 'success');
+    await loadPending();
   } catch(e) { toast('退回失敗:' + e.message, 'error'); }
 }
 
