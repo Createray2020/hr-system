@@ -132,6 +132,9 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 
   <!-- 待我審批(只主管/HR 顯示) -->
   <div class="scroll-content" id="tab-pending" style="display:none">
+    <div style="margin:0 16px 12px;padding:11px 14px;background:rgba(91,141,239,.08);border:0.5px solid rgba(91,141,239,.2);border-radius:12px;font-size:12px;color:#7FBBFF;line-height:1.55">
+      📋 此清單不含請假審批、請至桌面版 <a href="/leave-admin.html" style="color:#5B8DEF;text-decoration:underline;font-weight:600">leave-admin</a> 處理。
+    </div>
     <div id="pending-list"></div>
   </div>
 
@@ -317,19 +320,21 @@ function renderPendingList() {
     el.innerHTML = `<div class="empty-state"><div class="empty-icon">✨</div>沒有待審批項目</div>`;
     return;
   }
-  el.innerHTML = pendingItems.map(r => {
-    const cfg = allConfigs.find(c => c.request_type === r.request_type);
+  el.innerHTML = pendingItems.map(step => {
+    const r = step.approval_requests;
+    const emp = r?.employees;
+    const cfg = allConfigs.find(c => c.request_type === r?.request_type);
     const icon = cfg?.icon || '📄';
     return `
-      <div class="req-card" onclick="openDetail('${r.id}')">
+      <div class="req-card" onclick="openDetail('${r?.id||''}')">
         <div class="req-top">
           <div>
-            <div class="req-title">${icon} ${cfg?.type_name || r.request_type}</div>
-            <div class="req-time">${r.applicant_name || r.applicant_id} · ${fmtDate(r.created_at)}</div>
+            <div class="req-title">${icon} ${r?.title || cfg?.type_name || r?.request_type || '—'}</div>
+            <div class="req-time">${emp?.name || r?.applicant_id || '—'}${emp?.dept_name ? ' · ' + emp.dept_name : ''} · ${fmtDate(r?.created_at)}</div>
           </div>
-          <span class="status-badge s-${r.status}">${STATUS_LABELS[r.status] || r.status}</span>
+          <span class="status-badge s-${r?.status || 'pending'}">${STATUS_LABELS[r?.status] || r?.status || '—'}</span>
         </div>
-        <div class="req-meta">${formatFormSummary(r)}</div>
+        <div class="req-meta">步驟 ${step.step_number}:${step.step_name || '—'}${r ? ' · ' + formatFormSummary(r) : ''}</div>
       </div>`;
   }).join('');
 }
