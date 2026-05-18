@@ -12,6 +12,7 @@ import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/sched
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
 import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
+import { recomputeAttendanceStatus } from '../../lib/attendance/recompute.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -91,6 +92,48 @@ async function handlePut(req, res, { existing, caller, actorKind, isLateChange }
     .from('schedules').update(patch).eq('id', existing.id).select().maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
 
+  // P8.1: cascade trigger attendance recompute(對齊 P4.1 pattern)
+  // 改 schedule 後、找對應 attendance row(same employee_id + work_date + segment_no)、
+  // 用更新後的 schedule 重算 late/early/status、寫進 attendance + 加 audit 行。
+  // best-effort:cascade 失敗不擋 schedule update。
+  let attendanceCascade = null;
+  try {
+    const { data: attRow } = await supabaseAdmin
+      .from('attendance').select('*')
+      .eq('employee_id', existing.employee_id)
+      .eq('work_date', existing.work_date)
+      .eq('segment_no', existing.segment_no || 1)
+      .maybeSingle();
+
+    if (attRow) {
+      const r = recomputeAttendanceStatus(attRow, data);
+      const auditChanges = [];
+      if (r.late_minutes !== attRow.late_minutes) auditChanges.push(`late_minutes ${attRow.late_minutes ?? 0}→${r.late_minutes}`);
+      if (r.early_leave_minutes !== attRow.early_leave_minutes) auditChanges.push(`early_leave_minutes ${attRow.early_leave_minutes ?? 0}→${r.early_leave_minutes}`);
+      if (r.early_arrival_minutes !== attRow.early_arrival_minutes) auditChanges.push(`early_arrival_minutes ${attRow.early_arrival_minutes ?? 0}→${r.early_arrival_minutes}`);
+      if (r.status !== attRow.status) auditChanges.push(`status ${attRow.status}→${r.status}`);
+
+      if (auditChanges.length > 0) {
+        const nowDate = new Date().toISOString().slice(0, 10);
+        const auditLine = `[${nowDate}] schedule change cascade by ${caller.id}: ${auditChanges.join(', ')}`;
+        const newNote = attRow.note ? `${auditLine}\n${attRow.note}` : auditLine;
+        const { error: updErr } = await supabaseAdmin
+          .from('attendance').update({
+            late_minutes: r.late_minutes,
+            early_arrival_minutes: r.early_arrival_minutes,
+            early_leave_minutes: r.early_leave_minutes,
+            status: r.status,
+            note: newNote,
+          }).eq('id', attRow.id);
+        if (!updErr) {
+          attendanceCascade = { attendance_id: attRow.id, changes: auditChanges };
+        }
+      }
+    }
+  } catch (cascadeErr) {
+    console.error('[schedules/[id]] attendance cascade failed:', cascadeErr.message);
+  }
+
   await writeLogAndMaybeNotify({
     schedule_id: existing.id,
     employee_id: existing.employee_id,
@@ -101,7 +144,7 @@ async function handlePut(req, res, { existing, caller, actorKind, isLateChange }
     callerId: caller.id || existing.employee_id,
   });
 
-  return res.status(200).json({ schedule: data, isLateChange });
+  return res.status(200).json({ schedule: data, isLateChange, attendance_cascade: attendanceCascade });
 }
 
 async function handleDelete(req, res, { existing, caller, actorKind, isLateChange }) {
