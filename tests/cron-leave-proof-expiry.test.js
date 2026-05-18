@@ -119,6 +119,16 @@ describe('cron-leave-proof-expiry — SELECT filter chain', () => {
     expect(typeof lts[0].val).toBe('string');
     expect(lts[0].val).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  // P3.1:cron 漏 status filter 是會把 cancelled / pending / rejected row 也轉事假的 bug。
+  // 加 .eq('status', 'approved')、SQL filter 在 supabase 端、test 只驗 wiring。
+  it("加 .eq('status', 'approved') 防止 cancelled / pending / rejected row 被誤動", async () => {
+    const [req, res] = makeReqRes({ now: '2026-05-10T00:00:00+08:00' });
+    await handler(req, res);
+    const statusEq = calls.eqs.find(e => e.table === 'leave_requests' && e.col === 'status');
+    expect(statusEq).toBeDefined();
+    expect(statusEq.val).toBe('approved');
+  });
 });
 
 describe('cron-leave-proof-expiry — UPDATE 分流(convert vs mark_expired)', () => {

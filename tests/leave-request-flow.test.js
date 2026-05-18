@@ -342,6 +342,29 @@ describe('cancelLeaveRequest', () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('NOT_OWN_REQUEST');
   });
+
+  // P3.1:cancel 同時清 proof_status='not_required'、防 cancelled row 被 cron 撈到
+  it("撤回 pending_mgr → patch 含 proof_status='not_required'(defense in depth)", async () => {
+    const repo = makeRepo({
+      findLeaveRequestById: vi.fn(async () => ({ id:'L1', employee_id:'E001', status:'pending_mgr', proof_status: 'required' })),
+    });
+    const r = await cancelLeaveRequest(repo, { request_id: 'L1', cancelled_by: 'E001' });
+    expect(r.ok).toBe(true);
+    const patch = repo.updateLeaveRequest.mock.calls[0][1];
+    expect(patch.status).toBe('cancelled');
+    expect(patch.proof_status).toBe('not_required');
+  });
+
+  it("撤回 pending_ceo + proof_status='submitted' → 保留 submitted(歷史狀態不洗)", async () => {
+    const repo = makeRepo({
+      findLeaveRequestById: vi.fn(async () => ({ id:'L2', employee_id:'E001', status:'pending_ceo', proof_status: 'submitted' })),
+    });
+    const r = await cancelLeaveRequest(repo, { request_id: 'L2', cancelled_by: 'E001' });
+    expect(r.ok).toBe(true);
+    const patch = repo.updateLeaveRequest.mock.calls[0][1];
+    expect(patch.status).toBe('cancelled');
+    expect(patch.proof_status).toBeUndefined();  // 沒 set、保留原值
+  });
 });
 
 // 三類 shift break 演算覆蓋(對應 lib/schedule/break-overlap.js 的 fixed/flexible/none 分流)

@@ -378,6 +378,29 @@ function fmtLeaveRange(start_at, end_at, hours) {
   return `${fmt(s)} ~ ${fmt(e)} (${hours || 0}h)`;
 }
 
+async function openLeaveAttachment(path) {
+  if (!path) return;
+  // 完整 URL(http/https)直接開、不需簽(例如員工貼的 Google Drive folder URL)
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    window.open(path, '_blank');
+    return;
+  }
+  // 相對 path → supabase storage path、client-side 簽 60 秒 signed URL
+  try {
+    const { data, error } = await _sb.storage
+      .from('leave-attachments')
+      .createSignedUrl(path, 60);
+    if (error) throw error;
+    if (data?.signedUrl) {
+      window.open(data.signedUrl, '_blank');
+    } else {
+      toast('無法產生附件連結', 'error');
+    }
+  } catch(e) {
+    toast('附件載入失敗:' + e.message, 'error');
+  }
+}
+
 async function openLeaveDetail(leaveId) {
   currentDetailId = leaveId;
   currentDetailSource = 'leave';
@@ -441,14 +464,14 @@ async function openLeaveDetail(leaveId) {
       const proofColor = leave.proof_status === 'expired' ? '#F87171' : leave.proof_status === 'submitted' ? '#4ADE80' : '#FB923C';
       html += `<div class="detail-section">
         <div class="detail-label">證明文件</div>
-        <div class="detail-value" style="color:${proofColor}">${proofLabel}${leave.proof_url ? ` · <a href="${escapeHtml(leave.proof_url)}" target="_blank" style="color:#5B8DEF;text-decoration:underline">查看附件</a>` : ''}${leave.proof_due_at && leave.proof_status === 'required' ? ` · 期限 ${fmtDate(leave.proof_due_at)}` : ''}</div>
+        <div class="detail-value" style="color:${proofColor}">${proofLabel}${leave.proof_url ? ` · <a href="javascript:void(0)" data-attachment-path="${escapeHtml(leave.proof_url)}" onclick="openLeaveAttachment(this.dataset.attachmentPath); return false;" style="color:#5B8DEF;text-decoration:underline">查看附件</a>` : ''}${leave.proof_due_at && leave.proof_status === 'required' ? ` · 期限 ${fmtDate(leave.proof_due_at)}` : ''}</div>
       </div>`;
     }
 
     if (leave.attachment_url) {
       html += `<div class="detail-section">
         <div class="detail-label">附件</div>
-        <div class="detail-value"><a href="${escapeHtml(leave.attachment_url)}" target="_blank" style="color:#5B8DEF;text-decoration:underline">${escapeHtml(leave.attachment_name || '查看附件')}</a></div>
+        <div class="detail-value"><a href="javascript:void(0)" data-attachment-path="${escapeHtml(leave.attachment_url)}" onclick="openLeaveAttachment(this.dataset.attachmentPath); return false;" style="color:#5B8DEF;text-decoration:underline">${escapeHtml(leave.attachment_name || '查看附件')}</a></div>
       </div>`;
     }
 

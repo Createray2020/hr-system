@@ -33,6 +33,13 @@ function normalizeStage(status) {
   return status === 'pending' ? 'pending_mgr' : status;
 }
 
+/** admin_edit audit log:把欄位 oldVal/newVal 印成短字串、長字串截斷。 */
+function formatAuditVal(v) {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'string' && v.length > 30) return v.slice(0,27) + '...';
+  return String(v);
+}
+
 /** push 通知 helper(維持舊行為) */
 async function notifyLeaveStatus(repo, requestRow, id) {
   try {
@@ -127,6 +134,91 @@ export default async function handler(req, res) {
         proof_status: 'submitted',
       });
       return res.status(200).json({ ok: true, request: updated });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  // ─── PUT action='admin_edit' HR / CEO / chairman 手動編輯既有 leave row ──
+  // 用途:cron / 業務流程偶發 bug 後的人工修正、或員工提錯假別事後改正。
+  // 範圍故意限縮:只開 leave_type / proof_status / proof_due_at 三個欄位、
+  // 不開 status / 時間 / 員工 / hours(這些動了會破壞 state machine 或 balance、要走既有 flow)。
+  // 故意不 cascade:改 leave_type='sick' 時不會自動把 proof_status 改 'required'、
+  //                HR 要自己 call 第二次 admin_edit 一併處理 proof_status / proof_due_at。
+  if (action === 'admin_edit') {
+    const caller = await requireRole(req, res, ['hr', 'admin', 'ceo', 'chairman']);
+    if (!caller) return;
+
+    const leaveRequest = await repo.findLeaveRequestById(id);
+    if (!leaveRequest) return res.status(404).json({ error: 'NOT_FOUND' });
+
+    // 禁止改的欄位:body 帶到就 reject(defense in depth)
+    const FORBIDDEN_FIELDS = ['status', 'start_at', 'end_at', 'start_date', 'end_date',
+                               'hours', 'finalized_hours', 'days', 'employee_id', 'id'];
+    for (const f of FORBIDDEN_FIELDS) {
+      if (body[f] !== undefined) {
+        return res.status(400).json({
+          error: 'FORBIDDEN_FIELD',
+          detail: `admin_edit 不能改 ${f}、請走既有 flow(reject / cancel / terminate / approve / 代提)`,
+        });
+      }
+    }
+
+    // 允許改的欄位 white list
+    const ALLOWED_FIELDS = ['leave_type', 'proof_status', 'proof_due_at'];
+    const patch = {};
+    const auditEntries = [];
+
+    for (const field of ALLOWED_FIELDS) {
+      if (body[field] === undefined) continue;
+      const newVal = body[field];
+      const oldVal = leaveRequest[field];
+      if (newVal === oldVal) continue;  // 無改動跳過
+      patch[field] = newVal;
+      auditEntries.push(`${field} ${formatAuditVal(oldVal)}→${formatAuditVal(newVal)}`);
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: 'NO_CHANGES', detail: '至少要改一個欄位 (leave_type / proof_status / proof_due_at)' });
+    }
+
+    // 驗證 leave_type 存在
+    if (patch.leave_type !== undefined) {
+      const lt = await repo.findLeaveType(patch.leave_type);
+      if (!lt) {
+        return res.status(400).json({ error: 'INVALID_LEAVE_TYPE', detail: `leave_type ${patch.leave_type} 不存在於 leave_types` });
+      }
+    }
+
+    // 驗證 proof_status enum
+    if (patch.proof_status !== undefined) {
+      const VALID_PROOF_STATUS = ['not_required', 'required', 'submitted', 'expired', 'converted_to_personal'];
+      if (!VALID_PROOF_STATUS.includes(patch.proof_status)) {
+        return res.status(400).json({
+          error: 'INVALID_PROOF_STATUS',
+          detail: `proof_status 必須是 ${VALID_PROOF_STATUS.join(' / ')}`,
+        });
+      }
+    }
+
+    // 驗證 proof_due_at ISO timestamp 或 null
+    if (patch.proof_due_at !== undefined && patch.proof_due_at !== null) {
+      const t = Date.parse(patch.proof_due_at);
+      if (!Number.isFinite(t)) {
+        return res.status(400).json({ error: 'INVALID_PROOF_DUE_AT', detail: 'proof_due_at 必須是 ISO timestamp 或 null' });
+      }
+    }
+
+    // audit handler_note
+    const now = new Date().toISOString();
+    const auditLine = `[${now.slice(0,10)}] ${caller.id} admin_edit: ${auditEntries.join('、')}`;
+    patch.handler_note = leaveRequest.handler_note
+      ? `${leaveRequest.handler_note}\n${auditLine}`
+      : auditLine;
+
+    try {
+      const updated = await repo.updateLeaveRequest(id, patch);
+      return res.status(200).json({ ok: true, request: updated, audit: auditLine });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
