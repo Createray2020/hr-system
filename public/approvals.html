@@ -621,6 +621,17 @@ function renderDetail(data) {
   }
   if (data.note) html += `<div style="font-size:12px;color:var(--text-dim);background:var(--surface2);border-radius:6px;padding:8px 12px;margin-bottom:12px">備注：${data.note}</div>`;
 
+  // P7.2:audit history(read-only、parse admin_audit_note)
+  if (data.admin_audit_note && data.admin_audit_note.trim()) {
+    const lines = data.admin_audit_note.split('\n').filter(l => l.trim());
+    if (lines.length > 0) {
+      html += `<div class="section-sep">📋 修改紀錄</div>
+        <div style="font-size:12px;background:rgba(0,0,0,.12);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-family:'DM Mono',monospace;line-height:1.7;color:var(--text-dim);white-space:pre-wrap">
+          ${lines.map(l => `<div>${l.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</div>`).join('')}
+        </div>`;
+    }
+  }
+
   // Timeline
   html += `<div class="section-sep">審批流程</div><div class="timeline">`;
   steps.forEach((step, i) => {
@@ -663,6 +674,39 @@ function renderDetail(data) {
 
   document.getElementById('detail-body').innerHTML = html;
 
+  // P7.2:append admin-edit-area HTML(預設 hide、點「⚙ 進階編輯」展開)
+  // 動態 render schema-driven inputs(用 FORM_SCHEMA)
+  const aeFields = FORM_SCHEMA[data.request_type] || [];
+  const aeFd = data.form_data || {};
+  let aeInputsHtml = '';
+  aeFields.forEach(f => {
+    const val = aeFd[f.id] ?? '';
+    let input;
+    if (f.type === 'select') {
+      input = `<select class="form-select" id="ae-${f.id}">
+        <option value="">— 請選擇 —</option>
+        ${f.options.map(o=>`<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('')}
+      </select>`;
+    } else if (f.type === 'textarea') {
+      input = `<textarea class="form-input" id="ae-${f.id}" rows="2" style="resize:vertical">${String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>`;
+    } else {
+      const escVal = String(val).replace(/"/g,'&quot;');
+      input = `<input class="form-input" type="${f.type}" id="ae-${f.id}" value="${escVal}">`;
+    }
+    aeInputsHtml += `<div class="form-row"><label class="form-label">${f.label}</label>${input}</div>`;
+  });
+
+  const aeArea = `
+    <div id="admin-edit-area" style="display:none;margin-top:14px;padding:14px;background:rgba(251,146,60,.04);border:1px solid rgba(251,146,60,.25);border-radius:8px">
+      <div style="font-size:11px;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;color:#FB923C;margin-bottom:8px">⚙ 進階編輯 — 修改申請內容</div>
+      <div style="font-size:11px;color:#7FBBFF;background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.2);padding:6px 10px;border-radius:4px;margin-bottom:12px">
+        ℹ 改 form_data 不重觸發 punch_correction 自動寫 attendance / 通知重發。所有變更記錄到 admin_audit_note。<br>
+        ℹ 不開放改 status / step / 申請類型 / 申請人(走既有審批 / 退回 / 取消 flow)。
+      </div>
+      ${aeInputsHtml || '<div style="color:var(--text-dim);font-size:12px">此申請類型無可編輯欄位</div>'}
+    </div>`;
+  document.getElementById('detail-body').insertAdjacentHTML('beforeend', aeArea);
+
   // Actions
   const uid = window.currentUser?.id;
   const isApplicant = data.applicant_id === uid;
@@ -674,6 +718,13 @@ function renderDetail(data) {
   if (isMyStep) {
     actions += `<button class="btn btn-reject" onclick="rejectStep('${data.id}','${currentStep.step_number}')">✗ 退回</button>
                 <button class="btn btn-primary" onclick="approveStep('${data.id}','${currentStep.step_number}')">✓ 審批通過</button>`;
+  }
+  // P7.2:HR / admin / CEO / chairman 看到「⚙ 進階編輯」(status 非 cancelled / completed 才有意義)
+  const canAdminEdit = Roles.isBackofficeRole?.(window.currentUser)
+                    && !['cancelled','completed'].includes(data.status)
+                    && (FORM_SCHEMA[data.request_type]?.length > 0);
+  if (canAdminEdit) {
+    actions += `<button class="btn btn-ghost" style="border:1px solid rgba(251,146,60,.4);color:#FB923C" onclick="openAdminEditApproval('${data.id}')">⚙ 進階編輯</button>`;
   }
   document.getElementById('detail-actions').innerHTML = actions;
 }
@@ -727,6 +778,86 @@ async function cancelRequest(requestId) {
     await loadMyRequests();
     toast('已取消申請', 'success');
   } catch(e) { toast('操作失敗：'+e.message, 'error'); }
+}
+
+// ───── P7.2 Admin Edit approval_requests ─────
+
+function openAdminEditApproval(requestId) {
+  // 隱藏 approve action area(避免衝突)
+  const aa = document.querySelector('#detail-body .action-area');
+  if (aa) aa.style.display = 'none';
+  // 顯示 admin-edit-area
+  const ae = document.getElementById('admin-edit-area');
+  if (ae) ae.style.display = '';
+  // 替換 detail-actions
+  document.getElementById('detail-actions').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeAdminEditApproval('${requestId}')">取消編輯</button>
+    <button class="btn btn-primary" onclick="saveAdminEditApproval('${requestId}')">確認編輯</button>
+  `;
+}
+
+function closeAdminEditApproval(requestId) {
+  // 重新 call openDetail 回到原狀
+  openDetail(requestId);
+}
+
+async function saveAdminEditApproval(requestId) {
+  // 找原 row(用 myRequests / allRequests / pendingItems 並聯)
+  const existing = myRequests.find(r => r.id === requestId)
+                || allRequests.find(r => r.id === requestId)
+                || pendingItems.find(p => p.approval_requests?.id === requestId)?.approval_requests;
+  if (!existing) {
+    // fallback:重抓 detail
+    try {
+      const fresh = await api(`/api/approvals?id=${requestId}`);
+      return saveAdminEditApprovalWithRow(requestId, fresh);
+    } catch(e) { toast('找不到 row、重抓失敗：' + e.message, 'error'); return; }
+  }
+  return saveAdminEditApprovalWithRow(requestId, existing);
+}
+
+async function saveAdminEditApprovalWithRow(requestId, existing) {
+  const fields = FORM_SCHEMA[existing.request_type] || [];
+  if (!fields.length) { toast('無可編輯欄位', 'warn'); return; }
+
+  // 收集當前 form_data
+  const newFormData = { ...(existing.form_data || {}) };  // 保留 existing 內 schema 之外的欄位
+  for (const f of fields) {
+    const el = document.getElementById('ae-' + f.id);
+    if (el) newFormData[f.id] = el.value;
+  }
+
+  // diff:只送有實際變化
+  const oldStr = JSON.stringify(existing.form_data || {});
+  const newStr = JSON.stringify(newFormData);
+  if (oldStr === newStr) { toast('沒有變更', 'warn'); return; }
+
+  // 列出變更 keys for confirm
+  const changedKeys = [];
+  const allKeys = new Set([...Object.keys(existing.form_data || {}), ...Object.keys(newFormData)]);
+  for (const k of allKeys) {
+    if (JSON.stringify(existing.form_data?.[k]) !== JSON.stringify(newFormData[k])) {
+      changedKeys.push(k);
+    }
+  }
+  if (!confirm(`確認以 admin_edit 修改申請 form_data:\n\n變更欄位：${changedKeys.join(', ')}\n\n所有變更會記錄到 admin_audit_note (audit)。`)) return;
+
+  try {
+    const r = await api('/api/approvals', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'admin_edit', id: requestId, form_data: newFormData }),
+    });
+    if (r && r.ok === false) {
+      toast('編輯失敗：' + (r.error || r.detail || 'unknown'), 'error');
+      return;
+    }
+    toast('已編輯');
+    closeModal('detail-modal');
+    await Promise.all([loadMyRequests(), loadPendingApprovals()]);
+    if (currentTab === 'all') await loadAllRequests();
+  } catch(e) {
+    toast('編輯失敗：' + e.message, 'error');
+  }
 }
 
 /* ── Config editor ───────────────────────────────────────────────────────── */
