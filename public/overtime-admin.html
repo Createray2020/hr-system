@@ -81,7 +81,7 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>日期</th><th>員工</th><th>時數</th><th>類別</th><th>補償</th><th>狀態</th><th>金額</th><th>主管</th><th>CEO</th></tr></thead>
+            <thead><tr><th>日期</th><th>員工</th><th>時數</th><th>類別</th><th>補償</th><th>狀態</th><th>金額</th><th>主管</th><th>CEO</th><th>操作</th></tr></thead>
             <tbody id="tbody-requests"></tbody>
           </table>
         </div>
@@ -124,6 +124,46 @@
         <button class="btn btn-ghost" onclick="closeLimit()">取消</button>
         <button class="btn btn-primary" onclick="saveLimit()">儲存</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- P5.2:HR 進階編輯加班申請 -->
+<div class="modal-bg" id="request-edit-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title">⚙ 進階編輯加班申請</div>
+    <input type="hidden" id="r-id">
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px" id="r-meta"></div>
+
+    <!-- audit history(只在有過 admin_edit 紀錄時顯示) -->
+    <div id="r-audit-row" style="display:none;margin-bottom:14px;padding:10px;background:rgba(0,0,0,.15);border-radius:6px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:'DM Mono',monospace">📋 修改紀錄</div>
+      <div id="r-audit-content" style="font-size:12px;line-height:1.7;color:var(--text-dim);font-family:'DM Mono',monospace;white-space:pre-wrap"></div>
+    </div>
+
+    <!-- cascade hint -->
+    <div style="font-size:11px;color:#7FBBFF;background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.2);padding:6px 10px;border-radius:4px;margin-bottom:14px">
+      ℹ 改 hours 後、若 compensation_type ≠ 補休、estimated_pay 自動依規範重算。<br>
+      ℹ 不 cascade is_over_limit / comp_time_balance、HR 自行確認。若已為補休 + 改 hours、請另至補休頁手動調整餘額。
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">加班時數 (hours)</label>
+      <input type="number" class="form-input" id="r-hours" step="0.5" min="0">
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">補償方式 (compensation_type)</label>
+      <select class="form-select" id="r-comp-type">
+        <option value="comp_leave">補休</option>
+        <option value="overtime_pay">加班費</option>
+        <option value="undecided">待決定</option>
+      </select>
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="closeRequestEdit()">取消</button>
+      <button class="btn btn-primary" onclick="saveRequestEdit()">儲存</button>
     </div>
   </div>
 </div>
@@ -224,7 +264,7 @@ function renderRequests(){
     return true;
   });
   const tbody = document.getElementById('tbody-requests');
-  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--text-dim)">無申請</td></tr>`; return; }
+  if (!rows.length) { tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--text-dim)">無申請</td></tr>`; return; }
   tbody.innerHTML = rows.map(r => {
     const emp = empMap[r.employee_id] || {};
     return `
@@ -238,6 +278,7 @@ function renderRequests(){
         <td class="num">${r.estimated_pay != null ? '$'+r.estimated_pay : '—'}</td>
         <td style="font-size:11px">${escHtml(r.manager_decision || '—')}</td>
         <td style="font-size:11px">${escHtml(r.ceo_decision || '—')}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="openRequestEdit('${escHtml(r.id)}')">⚙ 進階編輯</button></td>
       </tr>
     `;
   }).join('');
@@ -308,6 +349,90 @@ async function deleteLimit(){
     closeLimit();
     await loadLimits();
   } catch(e){ toast('刪除失敗:'+e.message,'error'); }
+}
+
+// ───── P5.2 Admin Edit overtime request ─────
+
+function openRequestEdit(id) {
+  const r = allRequests.find(x => x.id === id);
+  if (!r) return;
+  const emp = empMap[r.employee_id] || {};
+  document.getElementById('r-id').value = r.id;
+  document.getElementById('r-meta').textContent = `${emp.name||r.employee_id} · ${r.overtime_date} · 目前 estimated_pay=$${r.estimated_pay ?? '—'}`;
+  document.getElementById('r-hours').value = r.hours ?? '';
+  document.getElementById('r-comp-type').value = r.compensation_type || 'undecided';
+  renderRequestAuditHistory(r.admin_audit_note);
+  document.getElementById('request-edit-modal').classList.add('open');
+}
+
+function closeRequestEdit() {
+  document.getElementById('request-edit-modal').classList.remove('open');
+  // P5.2 reset audit history(避免下次開 modal leak 上次)
+  document.getElementById('r-audit-row').style.display = 'none';
+}
+
+async function saveRequestEdit() {
+  const id = document.getElementById('r-id').value;
+  if (!id) return;
+  const existing = allRequests.find(x => x.id === id);
+  if (!existing) return;
+
+  const newHours = parseFloat(document.getElementById('r-hours').value);
+  const newCompType = document.getElementById('r-comp-type').value;
+
+  if (!Number.isFinite(newHours) || newHours <= 0) {
+    toast('hours 必須 > 0', 'error');
+    return;
+  }
+
+  // 組 body:只送有變更的欄位
+  const body = {};
+  if (newHours !== Number(existing.hours)) body.hours = newHours;
+  if (newCompType !== existing.compensation_type) body.compensation_type = newCompType;
+
+  if (Object.keys(body).length === 0) {
+    toast('沒有變更', 'warn');
+    return;
+  }
+
+  // confirm dialog 列出變更
+  const changes = [];
+  if ('hours' in body) changes.push(`時數 ${existing.hours}h → ${newHours}h`);
+  if ('compensation_type' in body) changes.push(`補償 ${existing.compensation_type} → ${newCompType}`);
+  if (!confirm(`確認以 admin_edit 修改 ${existing.employee_id} 的加班申請:\n\n${changes.join('\n')}\n\n所有變更會記錄到 admin_audit_note (audit)。`)) return;
+
+  try {
+    const r = await api(`/api/overtime-requests/${encodeURIComponent(id)}/admin-edit`, {
+      method: 'PUT', body: JSON.stringify(body),
+    });
+    if (r && r.ok === false) {
+      toast('編輯失敗:' + (r.error || r.detail || 'unknown'), 'error');
+      return;
+    }
+    toast('已編輯');
+    closeRequestEdit();
+    await loadRequests();
+  } catch(e) {
+    toast('編輯失敗:' + e.message, 'error');
+  }
+}
+
+// P5.2:render audit history(parse admin_audit_note 內 admin_edit 行)
+// overtime 的 admin_audit_note 是專用欄位、不混業務 note、簡單顯示就好
+function renderRequestAuditHistory(note) {
+  const row = document.getElementById('r-audit-row');
+  const content = document.getElementById('r-audit-content');
+  if (!note || !note.trim()) {
+    row.style.display = 'none';
+    return;
+  }
+  const lines = note.split('\n').filter(l => l.trim());
+  if (lines.length === 0) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  content.innerHTML = lines.map(l => `<div>${escHtml(l)}</div>`).join('');
 }
 
 buildMonthOptions();
