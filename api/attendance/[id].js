@@ -18,6 +18,8 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
+import { recomputeAttendanceStatus } from '../../lib/attendance/recompute.js';
+import { makeRepo } from './index.js';
 
 const ALLOWED_PUT_FIELDS = new Set([
   'clock_in', 'clock_out',
@@ -29,6 +31,11 @@ const ALLOWED_PUT_FIELDS = new Set([
 ]);
 
 const ALLOWED_STATUSES = new Set(['normal', 'late', 'early_leave', 'absent', 'leave', 'holiday']);
+
+// P4.1:只有 caller 直接送這些欄位才 fetch schedule + recompute(其他欄位改不需要)
+const RECOMPUTE_TRIGGER_FIELDS = new Set(['clock_in', 'clock_out', 'status']);
+// P4.1:recompute 自動算的欄位、caller 送也會被覆寫、audit 不寫(避免雜訊)
+const RECOMPUTE_MANAGED_FIELDS = new Set(['late_minutes', 'early_arrival_minutes', 'early_leave_minutes']);
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -49,20 +56,58 @@ export default async function handler(req, res) {
   if (!existing) return res.status(404).json({ error: 'attendance not found' });
 
   if (req.method === 'PUT') {
-    const patch = {};
+    // 1. caller patch (白名單過濾)
+    const callerPatch = {};
     for (const k of Object.keys(req.body || {})) {
       if (!ALLOWED_PUT_FIELDS.has(k)) continue;
-      patch[k] = req.body[k];
+      callerPatch[k] = req.body[k];
     }
-    if (Object.keys(patch).length === 0) {
+    if (Object.keys(callerPatch).length === 0) {
       return res.status(400).json({ error: 'no allowed fields to update' });
     }
-    if (patch.status !== undefined && !ALLOWED_STATUSES.has(patch.status)) {
+    if (callerPatch.status !== undefined && !ALLOWED_STATUSES.has(callerPatch.status)) {
       return res.status(400).json({ error: 'invalid status' });
     }
 
+    // 2. 決定是否要 recompute (caller 動了 clock_in / clock_out / status 任一)
+    const shouldRecompute = Object.keys(callerPatch).some(k => RECOMPUTE_TRIGGER_FIELDS.has(k));
+
+    let finalPatch = { ...callerPatch };
+
+    // 3. recompute cascade(只在需要時 fetch schedule、省 query)
+    if (shouldRecompute) {
+      const repo = makeRepo();
+      const schedules = await repo.findSchedulesForDate(existing.employee_id, existing.work_date);
+      const schedule = schedules.find(s => s.segment_no === existing.segment_no) || schedules[0] || null;
+      const merged = { ...existing, ...callerPatch };
+      const r = recomputeAttendanceStatus(merged, schedule);
+      finalPatch.late_minutes          = r.late_minutes;
+      finalPatch.early_arrival_minutes = r.early_arrival_minutes;
+      finalPatch.early_leave_minutes   = r.early_leave_minutes;
+      finalPatch.status                = r.status;  // PRESERVED_STATUSES 已內建處理(leave/holiday/absent 保留)
+    }
+
+    // 4. audit log:只記 caller 直接改變的欄位(排除 recompute managed、避免 cascade 雜訊)
+    const auditChanges = [];
+    for (const k of Object.keys(callerPatch)) {
+      if (RECOMPUTE_MANAGED_FIELDS.has(k)) continue;
+      const oldVal = existing[k];
+      const newVal = callerPatch[k];
+      // null / undefined / string 對比用 String 簡化
+      if (String(oldVal ?? '') === String(newVal ?? '')) continue;
+      auditChanges.push(`${k} ${formatAuditVal(oldVal)}→${formatAuditVal(newVal)}`);
+    }
+    if (auditChanges.length > 0) {
+      const nowDate = new Date().toISOString().slice(0, 10);
+      const auditLine = `[${nowDate}] admin_edit by ${caller.id}: ${auditChanges.join(', ')}`;
+      finalPatch.note = existing.note
+        ? `${auditLine}\n${existing.note}`
+        : auditLine;
+    }
+
+    // 5. update DB
     const { data, error } = await supabaseAdmin
-      .from('attendance').update(patch).eq('id', id).select().maybeSingle();
+      .from('attendance').update(finalPatch).eq('id', id).select().maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ attendance: data });
   }
@@ -74,4 +119,10 @@ export default async function handler(req, res) {
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
+}
+
+function formatAuditVal(v) {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'boolean') return String(v);
+  return String(v);
 }
