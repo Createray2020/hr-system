@@ -161,15 +161,15 @@ function escHtml(s) {
 
 /**
  * 階段 4.5.1 + 4.5.2:綁 sidebar group expand/collapse + mobile drawer 互動。
- * Desktop (hover: hover):mouseenter / mouseleave + 300ms timer 防誤觸。
- * Touch (no hover):
- *   - group header click → toggle .exp、手風琴 (開新的收舊的)
+ * 2026-05-19:桌機從 hover-expand 改成 click-expand(對齊 mobile)、所有裝置統一:
+ *   - group header click → toggle .exp、手風琴(開新的收舊的)
  *   - hamburger / mask / close 按鈕 → 開關 sidebar.open + mask.open class
- *   - sub-item click → 收抽屜 (sidebar.remove('open')、不 preventDefault、讓 <a href> 自然導頁)
+ *     (mobile 才有這些 element、desktop 自動 skip via if 守)
+ *   - sub-item click → 收抽屜(mobile 有效、desktop 無 .open class、無副作用)
  *
  * @param {HTMLElement} sidebarRoot - <aside id="sidebar">
  * @param {Object} opts
- * @param {boolean} opts.supportsHover - caller 偵測 matchMedia 後傳入
+ * @param {boolean} [opts.supportsHover] - DEPRECATED 2026-05-19:桌機改 click-expand 後不再使用、保留只為 backward compat(layout.js 仍會傳、本函式忽略)
  * @param {HTMLElement|null} [opts.hamburger] - mobile header 漢堡按鈕、null 則自己 query
  * @param {HTMLElement|null} [opts.closeBtn]  - drawer 內 close 按鈕、null 則自己 query
  * @param {HTMLElement|null} [opts.mask]      - 半透明遮罩、null 則自己 query
@@ -177,28 +177,14 @@ function escHtml(s) {
  */
 export function attachSidebarInteractions(sidebarRoot, opts = {}) {
   if (!sidebarRoot) return;
-  const { supportsHover } = opts;
   const sections = Array.from(sidebarRoot.querySelectorAll('.nav-section'));
 
-  if (supportsHover) {
-    // Desktop: hover-expand + 300ms collapse timer
-    for (const sec of sections) {
-      let timer = null;
-      sec.addEventListener('mouseenter', () => {
-        if (timer) { clearTimeout(timer); timer = null; }
-        sec.classList.add('exp');
-      });
-      sec.addEventListener('mouseleave', () => {
-        timer = setTimeout(() => {
-          sec.classList.remove('exp');
-          timer = null;
-        }, 300);
-      });
-    }
-    return;
-  }
+  // 2026-05-19:桌機 hover-expand 改成 click-expand(對齊 mobile 邏輯)。
+  // 原因:桌機 hover 展開時 group 寬度變化、滑鼠位置 hit target 跳動、
+  // sub-item 點不到。改成 click toggle 後、移開滑鼠不影響展開狀態。
+  // opts.supportsHover 保留為 backward compat、本函式不再依賴。
 
-  // ── Touch / no-hover device 分支 ──────────────────────────
+  // ── 統一 group expand / mobile drawer 邏輯(桌機 + mobile 同) ──
   // 1. group header click → toggle .exp + 手風琴
   for (const sec of sections) {
     const header = sec.querySelector('.nav-section-header');

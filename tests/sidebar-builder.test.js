@@ -243,12 +243,13 @@ describe('attachSidebarInteractions — touch device click toggle (4.5.1)', asyn
     expect(expandedIndices()).toEqual([0]);
   });
 
-  it('supportsHover=true → 不綁 click handler (按 click header 不變化)', () => {
+  it('supportsHover=true(deprecated 2026-05-19)→ 行為與 supportsHover=false 相同、click header 仍展開', () => {
     const sidebar = renderSidebar();
     attachSidebarInteractions(sidebar, { supportsHover: true });
     expect(expandedIndices()).toEqual([]);
     clickHeader(2);
-    expect(expandedIndices()).toEqual([]);  // 沒反應、因為 click 沒被綁
+    // 2026-05-19:桌機 hover-expand 改 click-expand、supportsHover 不再影響行為
+    expect(expandedIndices()).toEqual([2]);
   });
 
   it('null sidebar → 不爆', () => {
@@ -346,12 +347,13 @@ describe('attachSidebarInteractions — mobile drawer (4.5.2)', async () => {
     expect(sidebar.classList.contains('open')).toBe(true);  // drawer 仍開
   });
 
-  it('supportsHover=true → 不綁 hamburger / mask click handler', () => {
+  it('supportsHover=true(deprecated 2026-05-19)→ hamburger / mask 仍綁、drawer 仍可開', () => {
     const { sidebar, hamburger, mask } = setupDrawerDOM();
     attachSidebarInteractions(sidebar, { supportsHover: true });
     click(hamburger);
-    expect(sidebar.classList.contains('open')).toBe(false);
-    expect(mask.classList.contains('open')).toBe(false);
+    // 2026-05-19:supportsHover 不再 short-circuit、所有裝置統一走 click + drawer 邏輯
+    expect(sidebar.classList.contains('open')).toBe(true);
+    expect(mask.classList.contains('open')).toBe(true);
   });
 });
 
