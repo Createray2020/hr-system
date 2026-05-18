@@ -105,6 +105,36 @@
       <input type="text" class="form-input" id="f-override-reason" placeholder="例:員工有急事、主管確認情況核准" style="display:none;margin-top:4px">
     </div>
 
+    <!-- P3.2 Admin Edit 區塊:HR / admin / CEO / chairman 才能展開 -->
+    <div class="form-row" id="admin-edit-row" style="display:none;margin-top:10px;padding:10px;background:rgba(251,146,60,.04);border:1px solid rgba(251,146,60,.2);border-radius:6px">
+      <label class="form-label" style="color:#FB923C">⚙ 進階編輯(HR / 管理層)</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">
+        <div>
+          <label class="form-label" style="font-size:11px;display:block;margin-bottom:2px">假別</label>
+          <select class="form-select" id="ae-leave-type" style="width:100%"></select>
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px;display:block;margin-bottom:2px">證明狀態</label>
+          <select class="form-select" id="ae-proof-status" style="width:100%">
+            <option value="">(不變更)</option>
+            <option value="not_required">not_required(無需證明)</option>
+            <option value="required">required(待補)</option>
+            <option value="submitted">submitted(已交)</option>
+            <option value="expired">expired(已過期)</option>
+            <option value="converted_to_personal">converted_to_personal</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px;display:block;margin-bottom:2px">證明期限</label>
+          <input type="datetime-local" class="form-input" id="ae-proof-due-at" style="width:100%">
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:8px">
+        ℹ 只送有變更的欄位、所有變更會記錄到 handler_note (audit)。<br>
+        ℹ 不開放改 status / 時間 / 員工(請走核准 / 退回 / 撤回 / 終止 / 代提 既有 flow)。
+      </div>
+    </div>
+
     <div class="modal-actions" style="justify-content:space-between;margin-top:14px">
       <button class="btn btn-ghost" onclick="closeModal()">關閉</button>
       <div style="display:flex;gap:8px" id="action-buttons"></div>
@@ -293,6 +323,20 @@ async function openDetail(id) {
   const l = currentLeave;
   const u = window.currentUser;
   const SU = window.HR_Utils;
+
+  // P3.2:populate admin_edit leave_type dropdown + reset values(每次開 modal 都 refresh)
+  const aeLeaveTypeSelect = document.getElementById('ae-leave-type');
+  if (aeLeaveTypeSelect) {
+    const leaveTypes = window.HR_Utils?.leaveTypes?.() || [];
+    aeLeaveTypeSelect.innerHTML = '<option value="">(不變更)</option>'
+      + leaveTypes.map(t => `<option value="${escHtml(t.code)}">${escHtml(t.name_zh)} (${escHtml(t.code)})</option>`).join('');
+  }
+  document.getElementById('admin-edit-row').style.display = 'none';
+  const aeProofStatus = document.getElementById('ae-proof-status');
+  if (aeProofStatus) aeProofStatus.value = '';
+  const aeProofDueAt = document.getElementById('ae-proof-due-at');
+  if (aeProofDueAt) aeProofDueAt.value = '';
+
   const tName = SU.leaveTypeLabel(l.leave_type);
   const hours = l.finalized_hours ?? l.hours ?? '—';
   const stage = normalizeStage(l.status);
@@ -429,6 +473,13 @@ async function openDetail(id) {
     );
   }
 
+  // P3.2:HR / admin / CEO / chairman 在所有 stage 都可開「進階編輯」、與既有 button 並列
+  if (isElevated(u)) {
+    buttons.insertAdjacentHTML('beforeend',
+      `<button class="btn btn-ghost btn-sm" style="border:1px solid rgba(251,146,60,.4);color:#FB923C" onclick="toggleAdminEdit()">⚙ 進階編輯</button>`
+    );
+  }
+
   document.getElementById('detail-modal').classList.add('open');
 }
 
@@ -464,7 +515,83 @@ async function onArchive() {
     await load();
   } catch(e) { toast('歸檔失敗:' + e.message, 'error'); }
 }
-function closeModal(){ document.getElementById('detail-modal').classList.remove('open'); }
+
+// ───── P3.2 Admin Edit (HR / 管理層手動修正 leave row 欄位) ─────
+function toggleAdminEdit() {
+  // 隱藏其他 expandable row、避免衝突
+  document.getElementById('reject-row').style.display = 'none';
+  document.getElementById('override-row').style.display = 'none';
+  document.getElementById('admin-edit-row').style.display = '';
+
+  // 替換 action buttons
+  const buttons = document.getElementById('action-buttons');
+  buttons.innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="closeAdminEdit()">取消</button>
+    <button class="btn btn-primary" onclick="confirmAdminEdit()">確認編輯</button>
+  `;
+}
+
+function closeAdminEdit() {
+  document.getElementById('admin-edit-row').style.display = 'none';
+  // 重新 render 整個 detail(action-buttons 回到原狀)
+  if (currentLeave) openDetail(currentLeave.id);
+}
+
+async function confirmAdminEdit() {
+  if (!currentLeave) return;
+  const leaveType = document.getElementById('ae-leave-type').value;
+  const proofStatus = document.getElementById('ae-proof-status').value;
+  const proofDueAtLocal = document.getElementById('ae-proof-due-at').value;
+
+  const body = { action: 'admin_edit' };
+  if (leaveType) body.leave_type = leaveType;
+  if (proofStatus) body.proof_status = proofStatus;
+  if (proofDueAtLocal) {
+    // datetime-local input 是 'YYYY-MM-DDTHH:MM'(無時區)、加 +08:00 才是台灣時間
+    const t = Date.parse(proofDueAtLocal + ':00+08:00');
+    if (!Number.isFinite(t)) {
+      toast('證明期限格式錯誤', 'error');
+      return;
+    }
+    body.proof_due_at = new Date(t).toISOString();
+  }
+
+  // 至少要改一欄
+  if (!body.leave_type && !body.proof_status && !body.proof_due_at) {
+    toast('請至少選一個要改的欄位', 'warn');
+    return;
+  }
+
+  // confirm dialog 列出變更
+  const SU = window.HR_Utils;
+  const changes = [];
+  if (body.leave_type)   changes.push(`假別 → ${SU.leaveTypeLabel(body.leave_type)} (${body.leave_type})`);
+  if (body.proof_status) changes.push(`證明狀態 → ${body.proof_status}`);
+  if (body.proof_due_at) changes.push(`證明期限 → ${fmtDt(body.proof_due_at)}`);
+  if (!confirm(`確認以 admin_edit 修改 ${currentLeave.emp_name || currentLeave.employee_id} 的假單:\n\n${changes.join('\n')}\n\n所有變更會記錄到 handler_note (audit)。`)) return;
+
+  try {
+    const r = await api(`/api/leaves/${encodeURIComponent(currentLeave.id)}`, {
+      method: 'PUT', body: JSON.stringify(body),
+    });
+    if (r && r.ok === false) {
+      toast('編輯失敗:' + (r.error || r.detail || 'unknown'), 'error');
+      return;
+    }
+    toast('已編輯');
+    closeModal();
+    await load();
+  } catch(e) {
+    toast('編輯失敗:' + e.message, 'error');
+  }
+}
+
+function closeModal() {
+  document.getElementById('detail-modal').classList.remove('open');
+  // P3.2 reset admin_edit row
+  const aeRow = document.getElementById('admin-edit-row');
+  if (aeRow) aeRow.style.display = 'none';
+}
 
 async function onApprove() {
   if (!confirm(`核准 ${currentLeave.emp_name || currentLeave.employee_id} 的 ${window.HR_Utils.leaveTypeLabel(currentLeave.leave_type)} 申請?`)) return;
