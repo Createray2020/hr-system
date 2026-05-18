@@ -68,7 +68,7 @@
       <div class="section-h">⚠ 30 天內到期 <span class="count-badge" id="cnt-warn">0</span></div>
       <div class="table-wrap">
         <table class="ct-tbl">
-          <thead><tr><th>員工</th><th>失效日</th><th>剩餘小時</th><th>取得日</th></tr></thead>
+          <thead><tr><th>員工</th><th>失效日</th><th>剩餘小時</th><th>取得日</th><th>操作</th></tr></thead>
           <tbody id="tbody-warn"></tbody>
         </table>
       </div>
@@ -76,7 +76,7 @@
       <div class="section-h">已失效待處理(manual_review 模式 / payout 未填) <span class="count-badge" id="cnt-action">0</span></div>
       <div class="table-wrap">
         <table class="ct-tbl">
-          <thead><tr><th>員工</th><th>失效日</th><th>狀態</th><th>金額</th><th>處理時間</th></tr></thead>
+          <thead><tr><th>員工</th><th>失效日</th><th>狀態</th><th>金額</th><th>處理時間</th><th>操作</th></tr></thead>
           <tbody id="tbody-action"></tbody>
         </table>
       </div>
@@ -182,7 +182,7 @@ function render() {
   const tbWarn = document.getElementById('tbody-warn');
   document.getElementById('cnt-warn').textContent = warnRows.length;
   if (!warnRows.length) {
-    tbWarn.innerHTML = `<tr><td colspan="4"><div class="empty-st">無 30 天內到期的補休</div></td></tr>`;
+    tbWarn.innerHTML = `<tr><td colspan="5"><div class="empty-st">無 30 天內到期的補休</div></td></tr>`;
   } else {
     tbWarn.innerHTML = warnRows.map(r => `
       <tr class="warn">
@@ -190,6 +190,7 @@ function render() {
         <td class="num">${escHtml(fmtDate(r.expires_at))} <span style="color:#F87171">(${r.days}天)</span></td>
         <td class="num" style="color:#F87171">${r.remaining_hours}h</td>
         <td class="num">${escHtml(fmtDate(r.earned_at))}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="openCompTimeEdit('${escHtml(r.id)}')">⚙ 進階編輯</button></td>
       </tr>
     `).join('');
   }
@@ -198,7 +199,7 @@ function render() {
   const tbAct = document.getElementById('tbody-action');
   document.getElementById('cnt-action').textContent = actionRecords.length;
   if (!actionRecords.length) {
-    tbAct.innerHTML = `<tr><td colspan="5"><div class="empty-st">無待處理失效記錄</div></td></tr>`;
+    tbAct.innerHTML = `<tr><td colspan="6"><div class="empty-st">無待處理失效記錄</div></td></tr>`;
   } else {
     tbAct.innerHTML = actionRecords.map(r => `
       <tr class="action">
@@ -207,13 +208,198 @@ function render() {
         <td><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
         <td class="num">${r.expiry_payout_amount != null ? '$' + r.expiry_payout_amount : '—'}</td>
         <td class="num" style="font-size:11px">${escHtml(fmtDate(r.expiry_processed_at))}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="openCompTimeEdit('${escHtml(r.id)}')">⚙ 進階編輯</button></td>
       </tr>
     `).join('');
   }
 }
 
+// ───── P5.3b Admin Edit comp_time_balance row ─────
+
+// 從 actionRecords 或 allEmps[].records 內找 record (by id)
+function findCompTimeRecord(id) {
+  const fromAction = actionRecords.find(r => String(r.id) === String(id));
+  if (fromAction) return fromAction;
+  for (const e of allEmps) {
+    const r = (e.records || []).find(r => String(r.id) === String(id));
+    if (r) return { ...r, employee_id: e.employee_id, emp_name: e.emp_name };
+  }
+  return null;
+}
+
+function isoToLocalInput(iso){
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function openCompTimeEdit(id) {
+  const r = findCompTimeRecord(id);
+  if (!r) { toast('找不到 record', 'error'); return; }
+  document.getElementById('ct-id').value = r.id;
+  document.getElementById('ct-meta').textContent = `${r.emp_name||r.employee_id} · 取得 ${(r.earned_at||'').slice(0,10) || '—'} · 剩餘 ${r.remaining_hours ?? '—'}h`;
+  document.getElementById('ct-payout-amount').value = r.expiry_payout_amount ?? '';
+  document.getElementById('ct-processed-at').value = isoToLocalInput(r.expiry_processed_at);
+  document.getElementById('ct-status').value = r.status || 'active';
+  document.getElementById('ct-expires-at').value = (r.expires_at || '').slice(0, 10);
+  renderCompTimeAuditHistory(r.admin_audit_note);
+  document.getElementById('ct-edit-modal').classList.add('open');
+}
+
+function closeCompTimeEdit() {
+  document.getElementById('ct-edit-modal').classList.remove('open');
+  // P5.3b reset audit row(避免下次開 modal leak)
+  document.getElementById('ct-audit-row').style.display = 'none';
+}
+
+async function saveCompTimeEdit() {
+  const id = document.getElementById('ct-id').value;
+  if (!id) return;
+  const existing = findCompTimeRecord(id);
+  if (!existing) return;
+
+  const amountStr = document.getElementById('ct-payout-amount').value.trim();
+  const processedLocal = document.getElementById('ct-processed-at').value;
+  const newStatus = document.getElementById('ct-status').value;
+  const newExpiresAt = document.getElementById('ct-expires-at').value;
+
+  // 組 body:只送有變更的欄位
+  const body = {};
+
+  // amount:空 → null;否則 parseFloat
+  const newAmount = amountStr === '' ? null : parseFloat(amountStr);
+  if (newAmount !== null && (!Number.isFinite(newAmount) || newAmount < 0)) {
+    toast('金額必須 >= 0、留空 = null', 'error');
+    return;
+  }
+  if (newAmount !== (existing.expiry_payout_amount ?? null)) {
+    body.expiry_payout_amount = newAmount;
+  }
+
+  // processed_at:datetime-local YYYY-MM-DDTHH:MM、加 +08:00 轉 ISO
+  let newProcessedIso = null;
+  if (processedLocal) {
+    const t = Date.parse(processedLocal + ':00+08:00');
+    if (!Number.isFinite(t)) { toast('處理時間格式錯誤', 'error'); return; }
+    newProcessedIso = new Date(t).toISOString();
+  }
+  const existingProcessedIso = existing.expiry_processed_at
+    ? new Date(existing.expiry_processed_at).toISOString()
+    : null;
+  if (newProcessedIso !== existingProcessedIso) {
+    body.expiry_processed_at = newProcessedIso;
+  }
+
+  // status
+  if (newStatus !== existing.status) body.status = newStatus;
+
+  // expires_at:date string、直接比對
+  const existingExpiresAt = (existing.expires_at || '').slice(0, 10);
+  if (newExpiresAt && newExpiresAt !== existingExpiresAt) {
+    body.expires_at = newExpiresAt;
+  }
+
+  if (Object.keys(body).length === 0) {
+    toast('沒有變更', 'warn');
+    return;
+  }
+
+  // confirm dialog
+  const changes = [];
+  if ('expiry_payout_amount' in body) changes.push(`金額 ${existing.expiry_payout_amount ?? 'null'} → ${body.expiry_payout_amount ?? 'null'}`);
+  if ('expiry_processed_at' in body) changes.push(`處理時間 ${existingProcessedIso || 'null'} → ${body.expiry_processed_at || 'null'}`);
+  if ('status' in body) changes.push(`狀態 ${existing.status} → ${body.status}`);
+  if ('expires_at' in body) changes.push(`失效日 ${existingExpiresAt} → ${body.expires_at}`);
+  if (!confirm(`確認以 admin_edit 修改補休 row:\n\n${changes.join('\n')}\n\n所有變更會記錄到 admin_audit_note (audit)。`)) return;
+
+  try {
+    const r = await api(`/api/comp-time/${encodeURIComponent(id)}`, {
+      method: 'PUT', body: JSON.stringify(body),
+    });
+    if (r && r.ok === false) {
+      toast('編輯失敗:' + (r.error || r.detail || 'unknown'), 'error');
+      return;
+    }
+    toast('已編輯');
+    closeCompTimeEdit();
+    await load();  // reload 整個 page state
+  } catch(e) {
+    toast('編輯失敗:' + e.message, 'error');
+  }
+}
+
+// P5.3b:render audit history
+function renderCompTimeAuditHistory(note) {
+  const row = document.getElementById('ct-audit-row');
+  const content = document.getElementById('ct-audit-content');
+  if (!note || !note.trim()) {
+    row.style.display = 'none';
+    return;
+  }
+  const lines = note.split('\n').filter(l => l.trim());
+  if (lines.length === 0) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  content.innerHTML = lines.map(l => `<div>${escHtml(l)}</div>`).join('');
+}
+
 load();
 </script>
+
+<!-- P5.3b:HR 進階編輯補休 row -->
+<div class="modal-bg" id="ct-edit-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title">⚙ 進階編輯補休</div>
+    <input type="hidden" id="ct-id">
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px" id="ct-meta"></div>
+
+    <!-- audit history -->
+    <div id="ct-audit-row" style="display:none;margin-bottom:14px;padding:10px;background:rgba(0,0,0,.15);border-radius:6px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:'DM Mono',monospace">📋 修改紀錄</div>
+      <div id="ct-audit-content" style="font-size:12px;line-height:1.7;color:var(--text-dim);font-family:'DM Mono',monospace;white-space:pre-wrap"></div>
+    </div>
+
+    <!-- cascade hint -->
+    <div style="font-size:11px;color:#7FBBFF;background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.2);padding:6px 10px;border-radius:4px;margin-bottom:14px">
+      ℹ 補休 row 是 leaf table、改完不影響其他表的計算。<br>
+      ℹ 不開放改 earned_hours / used_hours(會跟 leave_requests / overtime_requests 不一致)、要調整餘額請從加班核准 / 請假審核處理。
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">失效付款金額</label>
+        <input type="number" class="form-input" id="ct-payout-amount" step="1" min="0" placeholder="留空 = null">
+      </div>
+      <div class="form-row">
+        <label class="form-label">處理時間</label>
+        <input type="datetime-local" class="form-input" id="ct-processed-at">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">狀態</label>
+        <select class="form-select" id="ct-status">
+          <option value="active">active(可用)</option>
+          <option value="fully_used">fully_used(用完)</option>
+          <option value="expired_paid">expired_paid(失效付款)</option>
+          <option value="expired_void">expired_void(失效作廢)</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label class="form-label">失效日</label>
+        <input type="date" class="form-input" id="ct-expires-at">
+      </div>
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:6px">
+      <button class="btn btn-ghost" onclick="closeCompTimeEdit()">取消</button>
+      <button class="btn btn-primary" onclick="saveCompTimeEdit()">儲存</button>
+    </div>
+  </div>
+</div>
 
 <script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>

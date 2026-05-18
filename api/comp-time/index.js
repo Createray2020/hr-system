@@ -79,6 +79,7 @@ export default async function handler(req, res) {
         remaining_hours: remaining,
         source_overtime_request_id: r.source_overtime_request_id,
         status: r.status,
+        admin_audit_note: r.admin_audit_note,
       });
     }
     return res.status(200).json({ employees: Object.values(byEmp) });
