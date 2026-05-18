@@ -411,3 +411,114 @@ describe('/api/approvals update_config — hr/admin only', () => {
     expect(res.statusCode).toBe(200);
   });
 });
+
+// ════════════════════════════════════════════════════════════
+// P7.1: admin_edit action — backoffice 修正 form_data / attachments + audit
+// ════════════════════════════════════════════════════════════
+describe('/api/approvals admin_edit — backoffice only + audit', () => {
+  function setupExisting(over = {}) {
+    dataByQuery['approval_requests:maybeSingle'] = {
+      id: 'APR1', applicant_id: 'E1', request_type: 'expense',
+      title: '報銷', status: 'in_progress', current_step: 2, total_steps: 3,
+      form_data: { amount: 1000, location: '台北' },
+      attachments: [{ name: 'r1.pdf', url: 'u1' }],
+      note: '', admin_audit_note: null,
+      ...over,
+    };
+  }
+
+  it('AE1: HR 改 form_data(amount + location)→ 200、audit 列 form_data.{amount, location} updated', async () => {
+    overrides.caller = HR;
+    setupExisting();
+    const [req, res] = makeReqRes({
+      body: { action: 'admin_edit', id: 'APR1',
+              form_data: { amount: 2000, location: '高雄' } },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const upd = calls.updates.find(u => u.table === 'approval_requests');
+    expect(upd.patch.form_data).toEqual({ amount: 2000, location: '高雄' });
+    expect(upd.patch.admin_audit_note).toMatch(/admin_edit by HR1: form_data\.\{amount, location\} updated/);
+  });
+
+  it('AE2: HR 改 attachments(漏附補) → 200、audit 列 attachments updated', async () => {
+    overrides.caller = HR;
+    setupExisting();
+    const newAtt = [{ name: 'r1.pdf', url: 'u1' }, { name: 'r2.pdf', url: 'u2' }];
+    const [req, res] = makeReqRes({
+      body: { action: 'admin_edit', id: 'APR1', attachments: newAtt },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const upd = calls.updates.find(u => u.table === 'approval_requests');
+    expect(upd.patch.attachments).toEqual(newAtt);
+    expect(upd.patch.admin_audit_note).toMatch(/admin_edit by HR1: attachments updated/);
+  });
+
+  it('AE3: HR 同時改 form_data + attachments → audit 同行含兩者', async () => {
+    overrides.caller = HR;
+    setupExisting();
+    const [req, res] = makeReqRes({
+      body: { action: 'admin_edit', id: 'APR1',
+              form_data: { amount: 1500, location: '台北' },  // 只 amount 變
+              attachments: [{ name: 'r2.pdf', url: 'u2' }] },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const upd = calls.updates.find(u => u.table === 'approval_requests');
+    expect(upd.patch.admin_audit_note).toMatch(/form_data\.\{amount\} updated/);
+    expect(upd.patch.admin_audit_note).toMatch(/attachments updated/);
+  });
+
+  it('AE4: form_data 跟 existing 相同 → 400 no actual changes', async () => {
+    overrides.caller = HR;
+    setupExisting();
+    const [req, res] = makeReqRes({
+      body: { action: 'admin_edit', id: 'APR1',
+              form_data: { amount: 1000, location: '台北' } },  // 同值
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('no actual changes');
+    expect(calls.updates.find(u => u.table === 'approval_requests')).toBeUndefined();
+  });
+
+  it('AE5: caller role=employee → 403', async () => {
+    overrides.caller = E1;
+    setupExisting();
+    const [req, res] = makeReqRes({
+      body: { action: 'admin_edit', id: 'APR1', form_data: { amount: 2000 } },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(calls.updates.find(u => u.table === 'approval_requests')).toBeUndefined();
+  });
+
+  it('AE6: row 不存在 → 404', async () => {
+    overrides.caller = HR;
+    // dataByQuery['approval_requests:maybeSingle'] 不 set → null
+    const [req, res] = makeReqRes({
+      body: { action: 'admin_edit', id: 'NOT_EXIST', form_data: { amount: 1 } },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(404);
+    expect(calls.updates.find(u => u.table === 'approval_requests')).toBeUndefined();
+  });
+
+  it('AE7: existing.admin_audit_note 已有 → 新 line 在頂 + \\n 分隔保留原文', async () => {
+    overrides.caller = HR;
+    setupExisting({
+      admin_audit_note: '[2026-05-15] admin_edit by HR1: form_data.{location} updated',
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'admin_edit', id: 'APR1', form_data: { amount: 3000, location: '台北' } },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const upd = calls.updates.find(u => u.table === 'approval_requests');
+    const lines = upd.patch.admin_audit_note.split('\n');
+    expect(lines[0]).toMatch(/admin_edit by HR1: form_data\.\{amount\} updated/);
+    expect(lines[1]).toMatch(/admin_edit by HR1: form_data\.\{location\} updated/);
+  });
+});

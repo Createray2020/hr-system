@@ -355,6 +355,79 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: '流程已更新' });
     }
 
+    // ── 進階編輯既有申請 ────────────────────────────────────────────────────
+    // P7.1:HR / admin / CEO / chairman 修正 applicant 提錯的 form_data / 漏附的
+    // attachments。其他欄位走既有 flow:status / current_step 走 approve/reject/cancel、
+    // request_type / applicant_id / created_at 不可改、approval_steps 不允許 step-level
+    // admin_edit。Audit 寫進 admin_audit_note(2026-05-19 migration 新欄位)。
+    if (body.action === 'admin_edit') {
+      if (!['hr', 'admin', 'ceo', 'chairman'].includes(caller.role)) {
+        return res.status(403).json({ error: '無權進階編輯申請' });
+      }
+      const { id } = body;
+      if (!id) return res.status(400).json({ error: 'id required' });
+
+      const { data: existing } = await supabaseAdmin
+        .from('approval_requests').select('*').eq('id', id).maybeSingle();
+      if (!existing) return res.status(404).json({ error: '找不到申請' });
+
+      // 白名單:只 form_data + attachments
+      const callerPatch = {};
+      if (body.form_data !== undefined) callerPatch.form_data = body.form_data;
+      if (body.attachments !== undefined) callerPatch.attachments = body.attachments;
+      if (Object.keys(callerPatch).length === 0) {
+        return res.status(400).json({ error: 'no allowed fields to update' });
+      }
+
+      // validate
+      if ('form_data' in callerPatch) {
+        const fd = callerPatch.form_data;
+        if (fd === null || typeof fd !== 'object' || Array.isArray(fd)) {
+          return res.status(400).json({ error: 'invalid form_data', detail: 'must be plain object' });
+        }
+      }
+      if ('attachments' in callerPatch && !Array.isArray(callerPatch.attachments)) {
+        return res.status(400).json({ error: 'invalid attachments', detail: 'must be array' });
+      }
+
+      // diff audit changes
+      const changes = [];
+      if ('form_data' in callerPatch) {
+        const oldFd = existing.form_data || {};
+        const newFd = callerPatch.form_data;
+        const allKeys = new Set([...Object.keys(oldFd), ...Object.keys(newFd)]);
+        const changedKeys = [];
+        for (const k of allKeys) {
+          if (JSON.stringify(oldFd[k]) !== JSON.stringify(newFd[k])) changedKeys.push(k);
+        }
+        if (changedKeys.length > 0) changes.push(`form_data.{${changedKeys.join(', ')}} updated`);
+      }
+      if ('attachments' in callerPatch) {
+        const oldAtt = existing.attachments || [];
+        const newAtt = callerPatch.attachments;
+        if (JSON.stringify(oldAtt) !== JSON.stringify(newAtt)) changes.push('attachments updated');
+      }
+      if (changes.length === 0) {
+        return res.status(400).json({ error: 'no actual changes', detail: 'all submitted fields equal existing values' });
+      }
+
+      // audit log
+      const nowDate = new Date().toISOString().slice(0, 10);
+      const auditLine = `[${nowDate}] admin_edit by ${caller.id}: ${changes.join(', ')}`;
+      const finalPatch = {
+        ...callerPatch,
+        admin_audit_note: existing.admin_audit_note
+          ? `${auditLine}\n${existing.admin_audit_note}`
+          : auditLine,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabaseAdmin
+        .from('approval_requests').update(finalPatch).eq('id', id).select().maybeSingle();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ ok: true, request: data, audit: auditLine });
+    }
+
     return res.status(400).json({ error: '未知的 action' });
   }
 
