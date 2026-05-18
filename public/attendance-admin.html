@@ -80,6 +80,17 @@
 
     <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px" id="modal-meta"></div>
 
+    <!-- P4.2:audit history(讀 attendance.note、parse 出 admin_edit log) -->
+    <div id="audit-history-row" style="display:none;margin-bottom:14px;padding:10px;background:rgba(0,0,0,.15);border-radius:6px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:'DM Mono',monospace">📋 修改紀錄</div>
+      <div id="audit-history-content" style="font-size:12px;line-height:1.7;color:var(--text-dim);font-family:'DM Mono',monospace;white-space:pre-wrap"></div>
+    </div>
+
+    <!-- P4.2:cascade recompute hint -->
+    <div style="font-size:11px;color:#7FBBFF;background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.2);padding:6px 10px;border-radius:4px;margin-bottom:14px">
+      ℹ 改 clock_in / clock_out / status 後、儲存時系統會依排班自動重算 late_minutes / early_leave_minutes / status (若 status=leave/holiday/absent 則保留)。
+    </div>
+
     <div class="form-row">
       <label class="form-label">上班時間 (clock_in)</label>
       <input type="datetime-local" class="form-input" id="f-clock-in">
@@ -258,9 +269,47 @@ function openEdit(id) {
   document.getElementById('f-status').value    = r.status || 'normal';
   document.getElementById('f-anomaly').checked = !!r.is_anomaly;
   document.getElementById('f-anomaly-note').value = r.anomaly_note || '';
+  // P4.2:render audit history(從 note 欄位 parse admin_edit 行)
+  renderAuditHistory(r.note);
   document.getElementById('edit-modal').classList.add('open');
 }
-function closeModal(){ document.getElementById('edit-modal').classList.remove('open'); }
+
+// P4.2:render audit history(parse note 內 `[YYYY-MM-DD] admin_edit by ...` 行)
+function renderAuditHistory(note) {
+  const row = document.getElementById('audit-history-row');
+  const content = document.getElementById('audit-history-content');
+  if (!note || !note.trim()) {
+    row.style.display = 'none';
+    return;
+  }
+  const lines = note.split('\n');
+  const auditLines = [];
+  const otherLines = [];
+  const auditRe = /^\[\d{4}-\d{2}-\d{2}\]\s+admin_edit\s+by\s+/;
+  for (const line of lines) {
+    if (auditRe.test(line)) auditLines.push(line);
+    else if (line.trim()) otherLines.push(line);
+  }
+  if (auditLines.length === 0 && otherLines.length === 0) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  let html = '';
+  if (auditLines.length) {
+    html += auditLines.map(l => `<div>${escHtml(l)}</div>`).join('');
+  }
+  if (otherLines.length) {
+    html += `<div style="margin-top:8px;padding-top:8px;border-top:0.5px solid rgba(255,255,255,.08);color:rgba(255,255,255,.5)">其他備註:<br>${otherLines.map(escHtml).join('<br>')}</div>`;
+  }
+  content.innerHTML = html;
+}
+
+function closeModal(){
+  document.getElementById('edit-modal').classList.remove('open');
+  // P4.2:reset audit history(避免下次開 modal 時 leak 上次)
+  document.getElementById('audit-history-row').style.display = 'none';
+}
 
 async function saveAtt() {
   const id = document.getElementById('f-id').value;
