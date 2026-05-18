@@ -92,6 +92,12 @@
     <div class="modal-title" id="modal-title">編輯薪資</div>
     <div id="modal-meta" style="font-size:12px;color:var(--text-dim);margin-bottom:14px"></div>
 
+    <!-- P6.2:audit history(parse admin_audit_note、有內容才顯示) -->
+    <div id="audit-history-row" style="display:none;margin-bottom:14px;padding:10px;background:rgba(0,0,0,.15);border-radius:6px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:'DM Mono',monospace">📋 修改紀錄</div>
+      <div id="audit-history-content" style="font-size:12px;line-height:1.7;color:var(--text-dim);font-family:'DM Mono',monospace;white-space:pre-wrap"></div>
+    </div>
+
     <div style="font-size:12px;color:var(--text-dim);margin:10px 0 6px">自動計算欄位(唯讀)</div>
     <div id="auto-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-bottom:12px;font-size:13px"></div>
 
@@ -112,6 +118,14 @@
     </div>
     <div class="form-row"><label class="form-label">加班備註</label><input type="text" class="form-input" id="m-otn"></div>
     <div class="form-row"><label class="form-label">結算備註</label><input type="text" class="form-input" id="m-sn"></div>
+
+    <!-- P6.2:force override checkbox(預設 hide、撞到 locked 才顯示) -->
+    <div class="form-row" id="force-override-row" style="display:none;align-items:center;gap:8px;background:rgba(248,113,113,.06);border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:8px 12px;margin-top:4px">
+      <input type="checkbox" id="f-force-override" style="margin:0">
+      <label for="f-force-override" style="font-size:12px;color:#F87171;cursor:pointer;margin:0">
+        ⚠ 此 payroll_period 已 locked、勾選後強制覆寫(audit 會留 [FORCE] 標記)
+      </label>
+    </div>
 
     <div style="font-size:12px;color:var(--text-dim);margin:14px 0 6px">即時試算(基於本表單值)</div>
     <div id="preview" style="font-size:14px;font-weight:600;color:#7FBBFF;background:rgba(91,141,239,.06);padding:10px 14px;border-radius:6px"></div>
@@ -319,9 +333,56 @@ function openEdit(id){
   });
   updatePreview();
 
+  // P6.2:render audit history + reset force override
+  renderSalaryAuditHistory(currentRow.admin_audit_note);
+  document.getElementById('f-force-override').checked = false;
+  document.getElementById('force-override-row').style.display = 'none';
+
   document.getElementById('edit-modal').classList.add('open');
 }
-function closeModal(){ document.getElementById('edit-modal').classList.remove('open'); }
+
+// P6.2:render audit history(parse admin_audit_note)
+function renderSalaryAuditHistory(note) {
+  const row = document.getElementById('audit-history-row');
+  const content = document.getElementById('audit-history-content');
+  if (!note || !note.trim()) {
+    row.style.display = 'none';
+    return;
+  }
+  const lines = note.split('\n').filter(l => l.trim());
+  if (lines.length === 0) {
+    row.style.display = 'none';
+    return;
+  }
+  row.style.display = '';
+  content.innerHTML = lines.map(l => {
+    // [FORCE] 標記紅色強調
+    const escaped = escHtml(l);
+    return l.includes('[FORCE]')
+      ? `<div style="color:#F87171">${escaped}</div>`
+      : `<div>${escaped}</div>`;
+  }).join('');
+}
+
+// P6.2:處理 PERIOD_LOCKED 403、progressive disclose force checkbox
+function handleLockError(e) {
+  const msg = e.message || '';
+  // P6.1 後端回 { error: 'PERIOD_LOCKED', detail: '...' }、e.message 通常含 'PERIOD_LOCKED'
+  if (msg.includes('PERIOD_LOCKED')) {
+    document.getElementById('force-override-row').style.display = 'flex';
+    toast('此 payroll_period 已 locked、勾選 force checkbox 後重新儲存可覆寫', 'error');
+    return;
+  }
+  toast('操作失敗:' + msg, 'error');
+}
+
+function closeModal(){
+  document.getElementById('edit-modal').classList.remove('open');
+  // P6.2 reset audit history + force override
+  document.getElementById('audit-history-row').style.display = 'none';
+  document.getElementById('force-override-row').style.display = 'none';
+  document.getElementById('f-force-override').checked = false;
+}
 
 function updatePreview(){
   if (!currentRow) return;
@@ -358,12 +419,17 @@ async function saveManual(){
     overtime_pay_note:   document.getElementById('m-otn').value || null,
     settlement_note:     document.getElementById('m-sn').value || null,
   };
+  // P6.2:force flag(撞到 locked 時、HR 主動勾才送)
+  const force = document.getElementById('f-force-override').checked;
+  const url = `/api/salary/${encodeURIComponent(currentRow.id)}${force ? '?force=true' : ''}`;
   try {
-    await api(`/api/salary/${encodeURIComponent(currentRow.id)}`, { method:'PUT', body: JSON.stringify(payload) });
+    await api(url, { method:'PUT', body: JSON.stringify(payload) });
     toast('已儲存手動欄位');
     closeModal();
     await load();
-  } catch(e){ toast('儲存失敗:'+e.message,'error'); }
+  } catch(e){
+    handleLockError(e);
+  }
 }
 
 async function recalculate(){
@@ -381,23 +447,31 @@ async function recalculate(){
 
 async function confirmRec(){
   if (!currentRow) return;
+  const force = document.getElementById('f-force-override').checked;
+  const url = `/api/salary/${encodeURIComponent(currentRow.id)}?action=confirm${force ? '&force=true' : ''}`;
   try {
-    await api(`/api/salary/${encodeURIComponent(currentRow.id)}?action=confirm`, { method:'PUT' });
+    await api(url, { method:'PUT' });
     toast('已確認');
     closeModal();
     await load();
-  } catch(e){ toast('確認失敗:'+e.message,'error'); }
+  } catch(e){
+    handleLockError(e);
+  }
 }
 
 async function payRec(){
   if (!currentRow) return;
   if (!confirm('標記為已發放?')) return;
+  const force = document.getElementById('f-force-override').checked;
+  const url = `/api/salary/${encodeURIComponent(currentRow.id)}?action=pay${force ? '&force=true' : ''}`;
   try {
-    await api(`/api/salary/${encodeURIComponent(currentRow.id)}?action=pay`, { method:'PUT' });
+    await api(url, { method:'PUT' });
     toast('已標記發放');
     closeModal();
     await load();
-  } catch(e){ toast('標記失敗:'+e.message,'error'); }
+  } catch(e){
+    handleLockError(e);
+  }
 }
 
 buildMonthOptions();
