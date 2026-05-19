@@ -989,10 +989,14 @@ async function loadLeaves() {
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('f-start').value = today;
   document.getElementById('f-end').value   = today;
-  // calcDays() 已被 onDateChange() 取代,不在 init 階段觸發(只有員工選日期才載入)
 
   // 並行：假別下拉 + 假單列表
   await Promise.all([loadLeaveTypes(), loadLeaves()]);
+
+  // 2026-05-19 修補:init 預設 today / today、要主動 trigger 一次 onDateChange、
+  // 否則 <input type="date"> 的 value setter 不 fire input event、
+  // cachedSchedules 永遠是 []、員工按送出撞 "no_schedule" 假錯誤。
+  await onDateChange();
 })();
 </script>
 
