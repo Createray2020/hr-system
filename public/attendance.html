@@ -78,6 +78,11 @@ function todayStr(){
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+function yesterdayStr(){
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 let todaySegs = [];
 let todayAtts = [];
@@ -94,21 +99,31 @@ async function load(retries = 0) {
 
 async function loadTodaySchedule() {
   const today = todayStr();
+  const yesterday = yesterdayStr();
   const [y, m] = today.split('-');
   try {
-    const r = await api(`/api/schedule-periods?year=${y}&month=${parseInt(m)}&employee_id=${currentUser.id}`);
-    const schedules = (r.schedules || []).filter(s => s.work_date === today);
+    const r = await api(`/api/schedule-periods?year=${y}&month=${parseInt(m,10)}&employee_id=${currentUser.id}`);
     const periods = r.periods || [];
     // 只顯示 status 為 approved 或 locked 的 period 對應 schedules
     const validIds = new Set(periods.filter(p => p.status==='approved'||p.status==='locked').map(p=>p.id));
-    todaySegs = schedules.filter(s => validIds.has(s.period_id));
+    // 跨夜班:今天的所有段 + 昨天 crosses_midnight=true 的段(昨天 22:00 開、今天 06:00 結束 → 員工今天 0-6 點仍在班)
+    const schedulesRaw = (r.schedules || []).filter(s =>
+      (s.work_date === today) ||
+      (s.work_date === yesterday && s.crosses_midnight === true)
+    );
+    todaySegs = schedulesRaw.filter(s => validIds.has(s.period_id));
     todaySegs.sort((a,b) => (a.segment_no||1) - (b.segment_no||1));
   } catch(e) { todaySegs = []; }
 
-  // 撈今天的 attendance
+  // 撈 today + yesterday 的 attendance(跨夜班上班卡寫在 yesterday row)
+  // /api/attendance ?date=YYYY-MM-DD 已支援單日 filter(api/attendance/index.js line 103)
   try {
-    const all = await api(`/api/attendance?employee_id=${currentUser.id}&date=${today}`);
-    todayAtts = (all || []).filter(a => a.work_date === today);
+    const [attToday, attYesterday] = await Promise.all([
+      api(`/api/attendance?employee_id=${currentUser.id}&date=${today}`),
+      api(`/api/attendance?employee_id=${currentUser.id}&date=${yesterday}`),
+    ]);
+    const all = [...(attToday || []), ...(attYesterday || [])];
+    todayAtts = all.filter(a => a.work_date === today || a.work_date === yesterday);
   } catch(e) { todayAtts = []; }
 }
 
@@ -126,16 +141,26 @@ async function loadHistory() {
 
 function render() {
   const wrap = document.getElementById('today-segs');
-  if (!todaySegs.length) {
+  const anyOpenAtt = todayAtts.some(a => a.clock_in && !a.clock_out);
+
+  if (!todaySegs.length && !anyOpenAtt) {
     wrap.innerHTML = `<div class="empty">今日無排班,無法打卡</div>`;
     document.getElementById('btn-in').disabled  = true;
     document.getElementById('btn-out').disabled = true;
     return;
   }
 
+  if (!todaySegs.length && anyOpenAtt) {
+    // 跨夜班:今天沒排班但昨天 open attendance 還沒下班 → 只開放下班
+    wrap.innerHTML = `<div class="empty">您目前在跨夜班中,請打下班卡</div>`;
+    document.getElementById('btn-in').disabled  = true;
+    document.getElementById('btn-out').disabled = false;
+    return;
+  }
+
   // 是否已有打過上班卡(任一段)?
   const anyIn  = todayAtts.some(a => a.clock_in);
-  const anyOpen = todayAtts.some(a => a.clock_in && !a.clock_out);
+  const anyOpen = anyOpenAtt;
   document.getElementById('btn-in').disabled  = anyIn && !canClockInAnotherSeg();
   document.getElementById('btn-out').disabled = !anyOpen;
 
@@ -159,9 +184,16 @@ function render() {
 }
 
 function canClockInAnotherSeg() {
-  // 多段班:可能某段還沒打 in
+  // 跨夜班 guard:若已有任何 open attendance(含 yesterday)、絕對不可再開新上班
+  if (todayAtts.some(a => a.clock_in && !a.clock_out)) return false;
+
+  // 多段班:可能某段還沒打 in。
+  // 注意:todayAtts 現在跨兩天、find 必須同時比對 work_date + segment_no、
+  // 不能只比 segment_no 否則昨天跨夜班 row 會被誤認為今天某段紀錄。
   for (const s of todaySegs) {
-    const att = todayAtts.find(a => a.segment_no === (s.segment_no||1));
+    const segDate = s.work_date;
+    const segNo = s.segment_no || 1;
+    const att = todayAtts.find(a => a.work_date === segDate && a.segment_no === segNo);
     if (!att || !att.clock_in) return true;
   }
   return false;
