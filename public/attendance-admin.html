@@ -408,20 +408,22 @@ async function markAnomaly(id, flag) {
 
 // ───── 匯出功能 ─────
 
-function openExportModal() {
+async function openExportModal() {
   // 預設帶當前 f-month value
   document.getElementById('export-month').value = document.getElementById('f-month').value;
 
-  // 載入部門 list(從 allRows 內已 join 的 departments 抓、避免額外 fetch)
-  const deptMap = new Map();
-  for (const r of (allRows || [])) {
-    const dId = r.employees?.dept_id;
-    const dName = r.employees?.departments?.name;
-    if (dId && dName) deptMap.set(dId, dName);
-  }
+  // 從 /api/departments fetch 完整部門 list(對齊 employees.html / 部門管理頁 pattern)
+  // 避免上一版「從 allRows derive」漏掉沒當月出勤紀錄的部門
   const deptSel = document.getElementById('export-dept');
-  deptSel.innerHTML = '<option value="">全部部門</option>'
-    + [...deptMap.entries()].map(([id, name]) => `<option value="${id}">${escHtml(name)}</option>`).join('');
+  deptSel.innerHTML = '<option value="">載入中…</option>';
+  try {
+    const depts = await api('/api/departments');
+    deptSel.innerHTML = '<option value="">全部部門</option>'
+      + (depts || []).map(d => `<option value="${d.id}">${escHtml(d.name)}</option>`).join('');
+  } catch (e) {
+    deptSel.innerHTML = '<option value="">全部部門</option>';
+    toast('載入部門失敗:' + e.message, 'warn');
+  }
 
   document.getElementById('export-modal').classList.add('open');
 }
