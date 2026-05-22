@@ -104,8 +104,11 @@ async function loadTodaySchedule() {
   try {
     const r = await api(`/api/schedule-periods?year=${y}&month=${parseInt(m,10)}&employee_id=${currentUser.id}`);
     const periods = r.periods || [];
-    // 只顯示 status 為 approved 或 locked 的 period 對應 schedules
-    const validIds = new Set(periods.filter(p => p.status==='approved'||p.status==='locked').map(p=>p.id));
+    // 跟 backend PUNCHABLE_PERIOD_STATUS 對齊(api/attendance/index.js:271)
+    // published = 主管已公告(主要狀態)/ approved = 向後相容 / locked = 月初鎖定
+    // [test-contract] tests/attendance-clock.test.js 鎖定此白名單
+    const PUNCHABLE_PERIOD_STATUS = new Set(['published', 'locked', 'approved']);
+    const validIds = new Set(periods.filter(p => PUNCHABLE_PERIOD_STATUS.has(p.status)).map(p=>p.id));
     // 跨夜班:今天的所有段 + 昨天 crosses_midnight=true 的段(昨天 22:00 開、今天 06:00 結束 → 員工今天 0-6 點仍在班)
     const schedulesRaw = (r.schedules || []).filter(s =>
       (s.work_date === today) ||

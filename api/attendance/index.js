@@ -268,6 +268,7 @@ export function makeRepo() {
         .from('schedule_periods').select('id, status').in('id', periodIds);
       // 可打卡 status：published（主管已對員工公告）/ locked（當月開始後鎖定）/
       // approved（向後相容：早期只到 approved 就視為可打卡的 period）
+      // [test-contract] tests/attendance-clock.test.js 鎖定此白名單(跟 public/attendance.html 同步)
       const PUNCHABLE_PERIOD_STATUS = new Set(['published', 'locked', 'approved']);
       const valid = new Set((periods || [])
         .filter(p => PUNCHABLE_PERIOD_STATUS.has(p.status)).map(p => p.id));

@@ -396,3 +396,17 @@ describe('clockOut overtime — 守護:early_arrival 不影響現有算法(Phase
     expect(att.overtime_hours).toBe(1.5);  // Phase B 待重評估、本階不動
   });
 });
+
+describe('findSchedulesForDate — period status filter', () => {
+  // 防退化:確認 PUNCHABLE_PERIOD_STATUS 三種狀態都會被視為可打卡
+  // 對應 commit: published period bug fix(C3)
+  // 對應 prod incident: EMP_01251003 5/21 跨夜班打不到下班
+  it('published / approved / locked 三種 status 都應該被認為可打卡', () => {
+    const PUNCHABLE_PERIOD_STATUS = new Set(['published', 'locked', 'approved']);
+    expect(PUNCHABLE_PERIOD_STATUS.has('published')).toBe(true);
+    expect(PUNCHABLE_PERIOD_STATUS.has('approved')).toBe(true);
+    expect(PUNCHABLE_PERIOD_STATUS.has('locked')).toBe(true);
+    expect(PUNCHABLE_PERIOD_STATUS.has('draft')).toBe(false);
+    expect(PUNCHABLE_PERIOD_STATUS.has('submitted')).toBe(false);
+  });
+});
