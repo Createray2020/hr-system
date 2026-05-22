@@ -51,6 +51,7 @@
         <select class="form-select" id="f-month" onchange="load()" style="width:140px"></select>
         <input type="text" class="form-input" id="f-emp" placeholder="員工 ID / 名稱 篩選" oninput="render()" style="flex:1;max-width:240px">
         <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+        <button class="btn btn-primary" onclick="openExportModal()">📤 匯出</button>
       </div>
 
       <div class="section-h">⚠ 異常 <span class="count-badge" id="cnt-anomaly">0</span></div>
@@ -102,12 +103,12 @@
     <div class="form-row">
       <label class="form-label">狀態</label>
       <select class="form-select" id="f-status">
-        <option value="normal">normal</option>
-        <option value="late">late</option>
-        <option value="early_leave">early_leave</option>
-        <option value="absent">absent</option>
-        <option value="leave">leave</option>
-        <option value="holiday">holiday</option>
+        <option value="normal">正常</option>
+        <option value="late">遲到</option>
+        <option value="early_leave">早退</option>
+        <option value="absent">曠職</option>
+        <option value="leave">請假</option>
+        <option value="holiday">假日</option>
       </select>
     </div>
     <div class="form-row" style="display:flex;gap:14px;align-items:center">
@@ -130,6 +131,50 @@
   </div>
 </div>
 
+<!-- 匯出 modal -->
+<div class="modal-bg" id="export-modal">
+  <div class="modal" style="max-width:480px;width:95vw">
+    <div class="modal-title">📤 匯出打卡狀況</div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+      勾選要匯出的狀態 + 部門。匯出 Excel 檔給主管 review。
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">月份</label>
+      <input type="month" class="form-input" id="export-month">
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">部門</label>
+      <select class="form-select" id="export-dept">
+        <option value="">全部部門</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">狀態(勾選要匯出的)</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:13px">
+        <label><input type="checkbox" id="ex-normal" checked> 正常</label>
+        <label><input type="checkbox" id="ex-late" checked> 遲到</label>
+        <label><input type="checkbox" id="ex-early_leave" checked> 早退</label>
+        <label><input type="checkbox" id="ex-absent" checked> 曠職</label>
+        <label><input type="checkbox" id="ex-leave" checked> 請假</label>
+        <label><input type="checkbox" id="ex-holiday" checked> 假日</label>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px;font-size:11px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="exportSelectAll(true)">全選</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="exportSelectAll(false)">全不選</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="exportSelectAnomaly()">只選異常(遲到/早退/曠職)</button>
+      </div>
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="closeExportModal()">取消</button>
+      <button class="btn btn-primary" onclick="doExport()">匯出 Excel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 function toast(msg, type='success') {
   let wrap = document.getElementById('toast-wrap');
@@ -138,6 +183,17 @@ function toast(msg, type='success') {
 }
 function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmtIsoLocal(iso){ if(!iso) return '—'; const d = new Date(iso); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+
+// 2026-05-19:status 中文 label map(對齊 backend attendance_status_check enum、
+// 不動 code 端 status value、只改 display label)
+const STATUS_LABELS = {
+  normal:      '正常',
+  late:        '遲到',
+  early_leave: '早退',
+  absent:      '曠職',
+  leave:       '請假',
+  holiday:     '假日',
+};
 function isoToLocalInput(iso){
   if (!iso) return '';
   const d = new Date(iso);
@@ -236,7 +292,7 @@ function renderRows(rows) {
       const warn = r.post_hoc_leave ? '<span class="anomaly-flag" style="margin-right:4px">⚠ 補請假</span>' : '';
       statusCell = `${warn}<span class="pill ${overlayCls}" title="${escHtml(tip)}">${escHtml(label)}</span>`;
     } else {
-      statusCell = `<span class="pill p-${escHtml(r.status||'normal')}">${escHtml(r.status||'normal')}</span>${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}`;
+      statusCell = `<span class="pill p-${escHtml(r.status||'normal')}">${escHtml(STATUS_LABELS[r.status] || r.status || '正常')}</span>${r.is_anomaly ? '<span class="anomaly-flag">⚠ 異常</span>' : ''}`;
     }
     return `
       <tr class="${cls}">
@@ -350,11 +406,109 @@ async function markAnomaly(id, flag) {
   } catch(e) { toast('失敗:'+e.message, 'error'); }
 }
 
+// ───── 匯出功能 ─────
+
+function openExportModal() {
+  // 預設帶當前 f-month value
+  document.getElementById('export-month').value = document.getElementById('f-month').value;
+
+  // 載入部門 list(從 allRows 內已 join 的 departments 抓、避免額外 fetch)
+  const deptMap = new Map();
+  for (const r of (allRows || [])) {
+    const dId = r.employees?.dept_id;
+    const dName = r.employees?.departments?.name;
+    if (dId && dName) deptMap.set(dId, dName);
+  }
+  const deptSel = document.getElementById('export-dept');
+  deptSel.innerHTML = '<option value="">全部部門</option>'
+    + [...deptMap.entries()].map(([id, name]) => `<option value="${id}">${escHtml(name)}</option>`).join('');
+
+  document.getElementById('export-modal').classList.add('open');
+}
+
+function closeExportModal() {
+  document.getElementById('export-modal').classList.remove('open');
+}
+
+function exportSelectAll(checked) {
+  ['normal','late','early_leave','absent','leave','holiday'].forEach(s => {
+    document.getElementById('ex-' + s).checked = checked;
+  });
+}
+
+function exportSelectAnomaly() {
+  // 只勾「異常」(遲到/早退/曠職)、其他不勾
+  const anomalyStatuses = ['late', 'early_leave', 'absent'];
+  ['normal','late','early_leave','absent','leave','holiday'].forEach(s => {
+    document.getElementById('ex-' + s).checked = anomalyStatuses.includes(s);
+  });
+}
+
+async function doExport() {
+  const month = document.getElementById('export-month').value;
+  const deptId = document.getElementById('export-dept').value;
+  const selectedStatuses = ['normal','late','early_leave','absent','leave','holiday']
+    .filter(s => document.getElementById('ex-' + s).checked);
+
+  if (selectedStatuses.length === 0) {
+    toast('請至少勾選一個狀態', 'warn');
+    return;
+  }
+
+  // 簡化:跟 f-month 對齊(allRows 已 load 該月)、不同月要 user 先切換 f-month
+  if (month !== document.getElementById('f-month').value) {
+    toast('請先把上方月份切換到要匯出的月份、再開匯出 modal', 'warn');
+    return;
+  }
+
+  let rows = (allRows || []).filter(r => selectedStatuses.includes(r.status));
+  if (deptId) {
+    rows = rows.filter(r => r.employees?.dept_id === deptId);
+  }
+
+  if (rows.length === 0) {
+    toast('沒有符合條件的資料', 'warn');
+    return;
+  }
+
+  const deptName = deptId
+    ? (document.getElementById('export-dept').selectedOptions[0]?.textContent || '部門')
+    : '全公司';
+
+  const config = {
+    sheetName: '打卡狀況',
+    filename: `打卡狀況_${month}_${deptName}`,
+    columns: [
+      { key: '_emp_no',  label: '員工編號', format: (_v, r) => r.employees?.emp_no || r.employee_id || '' },
+      { key: '_name',    label: '姓名',     format: (_v, r) => r.employees?.name || '' },
+      { key: '_dept',    label: '部門',     format: (_v, r) => r.employees?.departments?.name || '' },
+      { key: 'work_date',label: '日期' },
+      { key: '_dow',     label: '星期',     format: (_v, r) => ['日','一','二','三','四','五','六'][new Date(r.work_date).getDay()] },
+      { key: 'segment_no', label: '段次' },
+      { key: 'clock_in', label: '上班打卡' },
+      { key: 'clock_out',label: '下班打卡' },
+      { key: '_status',  label: '狀態',     format: (_v, r) => STATUS_LABELS[r.status] || r.status },
+      { key: '_anomaly', label: '異常標記', format: (_v, r) => r.is_anomaly ? '是' : '' },
+      { key: 'late_minutes',       label: '遲到(分)' },
+      { key: 'early_leave_minutes',label: '早退(分)' },
+      { key: 'work_hours',         label: '工時' },
+      { key: 'overtime_hours',     label: '加班' },
+      { key: 'anomaly_note',       label: '異常備註' },
+      { key: 'note',               label: '其他備註' },
+    ],
+  };
+
+  ExcelTools.exportData(config, rows);
+  closeExportModal();
+}
+
 // Init
 buildMonthOptions();
 load();
 </script>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="/js/excel-tools.js"></script>
 <script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 <script src="/js/pwa.js"></script>
