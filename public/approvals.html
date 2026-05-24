@@ -331,12 +331,32 @@ const FORM_SCHEMA = {
 };
 
 /* ── Load ────────────────────────────────────────────────────────────────── */
+// B20:輪詢等待 layout.js 設好 window.currentUser、避免 race
+// (對齊 dashboard / leave-admin / calendar / orgchart / resigned-archive /
+//  attendance-locations-admin 既有 5 page 內聯模板、不改 global / module 結構)
+// 取代原本 await new Promise(r => setTimeout(r, 600)) 死等 stop-gap、layout.js
+// 載 user 偶爾 >600ms 時整頁卡白(根因:loadMyRequests / loadPendingApprovals
+// 內部 early return + loadAllRequests 在 canViewAllApprovals(undefined) gate 後不 fire)。
+async function waitForCurrentUser(maxMs = 5000) {
+  const step = 100;
+  for (let i = 0; i < maxMs / step; i++) {
+    if (window.currentUser) return window.currentUser;
+    await new Promise(r => setTimeout(r, step));
+  }
+  return null;
+}
+
 window.onload = async () => {
-  await new Promise(r => setTimeout(r, 600));
   const badge = document.getElementById('db-status');
+  const u = await waitForCurrentUser();
+  if (!u) {
+    badge.textContent = '● 未登入';
+    badge.style.cssText = 'background:rgba(248,113,113,.1);color:#F87171;border-color:rgba(248,113,113,.2)';
+    toast('使用者資訊載入失敗、請重新登入', 'error');
+    return;
+  }
   try {
     await Promise.all([loadConfigs(), loadMyRequests(), loadPendingApprovals()]);
-    const u = window.currentUser;
     if (Roles.canViewAllApprovals(u)) {
       document.getElementById('tab-all-btn').style.display = '';
       loadAllRequests();
