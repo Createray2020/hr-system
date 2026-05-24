@@ -366,25 +366,44 @@ async function loadConfigs() {
 async function loadMyRequests() {
   const uid = window.currentUser?.id;
   if (!uid) return;
-  myRequests = await api(`/api/approvals?type=list&applicant_id=${uid}`);
-  renderMine();
-  updateStats();
+  try {
+    myRequests = await api(`/api/approvals?type=list&applicant_id=${uid}`);
+    renderMine();
+    updateStats();
+  } catch(e) {
+    const tbody = document.getElementById('mine-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#F87171;padding:20px">載入失敗:${e.message}</td></tr>`;
+    throw e;
+  }
 }
 
 async function loadPendingApprovals() {
   const effRole = Roles.effectiveApprovalRole(window.currentUser);
   if (!effRole) return;
-  pendingItems = await api(`/api/approvals?type=pending&role=${effRole}`);
-  renderPending();
-  const cnt = pendingItems.length;
-  const badge = document.getElementById('pending-badge');
-  badge.textContent = cnt; badge.style.display = cnt > 0 ? '' : 'none';
-  document.getElementById('st-pending').textContent = cnt;
+  try {
+    pendingItems = await api(`/api/approvals?type=pending&role=${effRole}`);
+    renderPending();
+    const cnt = pendingItems.length;
+    const badge = document.getElementById('pending-badge');
+    badge.textContent = cnt; badge.style.display = cnt > 0 ? '' : 'none';
+    document.getElementById('st-pending').textContent = cnt;
+  } catch(e) {
+    const list = document.getElementById('pending-list');
+    if (list) list.innerHTML = `<div style="text-align:center;color:#F87171;padding:20px">載入失敗:${e.message}</div>`;
+    throw e;
+  }
 }
 
 async function loadAllRequests() {
-  allRequests = await api('/api/approvals');
-  if (currentTab === 'all') renderAll();
+  const tbody = document.getElementById('all-tbody');
+  if (tbody) tbody.innerHTML = '<tr class="loading-row"><td colspan="8">載入中…</td></tr>';
+  try {
+    allRequests = await api('/api/approvals');
+    renderAll();
+  } catch(e) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#F87171;padding:20px">載入失敗:${e.message}</td></tr>`;
+    throw e;
+  }
 }
 
 function updateStats() {
@@ -475,6 +494,10 @@ function renderAll() {
     return true;
   });
   const tbody = document.getElementById('all-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:20px">無資料</td></tr>';
+    return;
+  }
   tbody.innerHTML = rows.map(r => {
     const c   = allConfigs.find(x => x.request_type === r.request_type);
     const emp = r.employees;
