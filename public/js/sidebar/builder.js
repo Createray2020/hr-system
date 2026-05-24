@@ -41,7 +41,7 @@ export function getNavGroups(gates = {}) {
         { page:'announcements',      icon:'ti-speakerphone',    label:'公告欄',   href:'/announcements.html',      gate: isMgrOrHR },
         { page:'announcement-admin', icon:'ti-edit',            label:'公告管理', href:'/announcement-admin.html', gate: canManageAnnouncements },
         { page:'notifications',      icon:'ti-bell',            label:'通知中心', href:'/notifications.html' },
-        { page:'approvals',          icon:'ti-checks',          label:'審批管理', href:'/approvals.html',          gate: isHRish },
+        { page:'approvals',          icon:'ti-checks',          label:'審批管理', href:'/approvals.html',          gate: isMgrOrHR },
       ],
     },
     {

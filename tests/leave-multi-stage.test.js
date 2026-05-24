@@ -46,7 +46,8 @@ function makeStatefulRepo(over = {}) {
     findLeaveType:        vi.fn(async (code) => SEED_LT[code] || null),
     listActiveLeaveTypes: vi.fn(async () => Object.values(SEED_LT)),
     findSchedulesInRange: vi.fn(async (_emp, dStart) => [fullDayShift(dStart)]),
-    findActiveAnnualRecord: vi.fn(async () => over.annualRecord ?? { id: 1, granted_days: 14, used_days: 0 }),
+    // B14:lib 改用 findAnnualRecordCoveringDate(依日期落點)、findActiveAnnualRecord 留給 rollover 用
+    findAnnualRecordCoveringDate: vi.fn(async () => over.annualRecord ?? { id: 1, granted_days: 14, used_days: 0 }),
     findActiveCompBalances: vi.fn(async () => over.compBalances || []),
     findEmployeeById: vi.fn(async (id) => over.employees?.[id]
                                           || { id, role: 'employee', is_manager: false, dept_id: 'D1', manager_id: 'M1' }),

@@ -20,6 +20,9 @@ import { supabaseAdmin } from '../lib/supabase.js';
 import { requireAuth } from '../lib/auth.js';
 import { sendPushToEmployees, sendPushToRoles, createNotifications, createNotificationsForRoles } from '../lib/push.js';
 import { addDeptNameNested, addDeptNameSingle } from '../lib/dept-name-mapper.js';
+// B13:GET 5 個 path 加 dept-scope / 本人 / HR-only 守門
+import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../lib/auth-scope.js';
+import { isBackofficeRole } from '../lib/roles.js';
 
 /**
  * canApproveStep — caller 能否簽某 step。
@@ -57,6 +60,7 @@ export default async function handler(req, res) {
     const { type, id, applicant_id, role, request_type } = req.query;
 
     // ── 申請類型設定 ────────────────────────────────────────────────────────
+    // configs 是公開的流程定義(表單欄位 / 步驟 role)、不含個資、不需 scope
     if (type === 'configs') {
       const { data, error } = await supabaseAdmin
         .from('approval_flow_configs')
@@ -66,6 +70,11 @@ export default async function handler(req, res) {
       return res.status(200).json(data);
     }
 
+    // B13:其餘 GET path 共用 scope(selfOrDept、對齊 leaves / employees endpoint)
+    const scope = await resolveAuthScopeWithDeptIds(
+      caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin),
+    );
+
     // ── 單筆申請詳情（含步驟） ───────────────────────────────────────────────
     if (id) {
       const { data: reqData, error } = await supabaseAdmin
@@ -73,6 +82,10 @@ export default async function handler(req, res) {
         .select('*, employees!applicant_id(name, dept_id, position, avatar, departments(name))')
         .eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到申請' });
+      // B13:申請人本人 OR scope 看得到該員工 → OK,否則 403
+      if (reqData.applicant_id !== caller.id && !canSeeEmployee(scope, reqData.applicant_id)) {
+        return res.status(403).json({ error: '無權看此申請' });
+      }
       if (reqData?.employees) addDeptNameSingle(reqData.employees);
 
       const { data: steps } = await supabaseAdmin
@@ -85,6 +98,10 @@ export default async function handler(req, res) {
 
     // ── 我的申請列表 ────────────────────────────────────────────────────────
     if (type === 'list' && applicant_id) {
+      // B13:本人 OR scope 內 OK,亂猜別人 applicant_id → 403
+      if (applicant_id !== caller.id && !canSeeEmployee(scope, applicant_id)) {
+        return res.status(403).json({ error: '無權看此員工申請' });
+      }
       let q = supabaseAdmin.from('approval_requests')
         .select('*').eq('applicant_id', applicant_id)
         .order('created_at', { ascending: false });
@@ -97,7 +114,7 @@ export default async function handler(req, res) {
     // ── 待我審批（依角色取對應步驟） ──────────────────────────────────────────
     if (type === 'pending' && role) {
       const stepNum = role === 'manager' ? 1 : role === 'ceo' || role === 'chairman' ? 2 : 3;
-      const { data: steps, error } = await supabaseAdmin
+      const { data: stepsRaw, error } = await supabaseAdmin
         .from('approval_steps')
         .select('*, approval_requests(*, employees!applicant_id(name, dept_id, position, avatar, departments(name)))')
         .eq('step_number', stepNum)
@@ -105,11 +122,31 @@ export default async function handler(req, res) {
         .eq('status', 'in_progress')
         .order('created_at', { ascending: false });
       if (error) return res.status(500).json({ error: error.message });
+
+      // B13:role='manager' 時 JS-side dept-scope filter(對齊 api/pending-approvals.js)
+      // 注意:大 dataset 時應改 supabase server-side filter、目前 manager dept 量級小、JS 足夠
+      let steps = stepsRaw || [];
+      if (role === 'manager') {
+        if (scope.mode === 'dept') {
+          const allowed = new Set([scope.selfId, ...(scope.deptEmpIds || [])]);
+          steps = steps.filter(s => s.approval_requests && allowed.has(s.approval_requests.applicant_id));
+        } else if (scope.mode === 'self') {
+          // 邊角:is_manager 但無 dept_id(資料異常)→ 看不到任何 pending
+          steps = [];
+        }
+        // mode='all' (HR/CEO 偽 manager 查詢、極少)→ 不 filter
+      }
       addDeptNameNested(steps, 'employees', 'approval_requests');
-      return res.status(200).json(steps || []);
+      return res.status(200).json(steps);
     }
 
     // ── 全部申請 ────────────────────────────────────────────────────────────
+    // B13:fallthrough HR-only(對齊 frontend canViewAllApprovals gate)
+    if (!isBackofficeRole(caller)) {
+      return res.status(403).json({
+        error: '無權看全部申請、請改用 ?type=list&applicant_id=自己 或 ?type=pending',
+      });
+    }
     const { data, error } = await supabaseAdmin
       .from('approval_requests')
       .select('*, employees!applicant_id(name, dept_id, position, avatar, departments(name))')
@@ -234,6 +271,11 @@ export default async function handler(req, res) {
         // 不寫的話 = 員工申請通過了但 DB 沒紀錄、薪資結算還是會少一天。
         if (request.request_type === 'punch_correction') {
           await applyPunchCorrection(request);
+        }
+        // B7:離職(resignation)核准 → cascade employees.status='resigned' + resigned_at + resigned_reason
+        // 不 cascade 的話 HR 還要手動按「離職」button、容易漏(EMP_01251101 incident 根因)
+        if (request.request_type === 'resignation') {
+          await applyResignation(request, caller);
         }
 
         // 通知申請人:審批完成
@@ -515,5 +557,87 @@ async function applyPunchCorrection(request) {
   } catch (err) {
     // 不擋 approval status,只記 log
     console.error('[applyPunchCorrection] 寫入失敗', { request_id: request.id, err: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// B7:離職核准 → 自動 cascade 員工 employees.status='resigned'
+//
+// form_data 從 approvals.html 的 FORM_SCHEMA.resignation 來:
+//   resign_date : 'YYYY-MM-DD' 預計離職日(approve 後寫入 resigned_at)
+//   reason      : 員工填的離職原因(寫入 resigned_reason)
+//   handover    : 交接事項(不寫入 employees、保留在 form_data 給 HR 看)
+//
+// 設計:
+//   1. β 方案:不寫 employee_change_logs(CHECK 不允許 'status' 欄位、不擴 schema)
+//      audit 走 approval_requests.completed_at + approval_steps.approver_id/handled_at
+//      + employees.resigned_at + Vercel function logs
+//   2. Idempotent guard:先撈 employees row、status 已 'resigned' 直接 return
+//      (兩張 resignation 都 approve 的極端 case、第二張不重複 cascade)
+//   3. try/catch best-effort:cascade 失敗只 log、不擋 approval completed
+//      (寧可 approval 已 completed 但 employees 沒同步、也不要 rollback approval)
+//   4. resigned_at 寫成 `${resign_date}T00:00:00+08:00`(可能是未來日)、
+//      login.html 透過 LoginCheck.shouldBlockResignedLogin 在預計離職日當下才擋
+// ─────────────────────────────────────────────────────────────────
+async function applyResignation(request, caller) {
+  try {
+    const fd = request.form_data || {};
+    const employee_id = request.applicant_id;
+    const resign_date = fd.resign_date;
+    const reason      = fd.reason || null;
+
+    if (!employee_id) {
+      console.error('[applyResignation] missing applicant_id', { request_id: request.id });
+      return;
+    }
+
+    // 撈現況 + idempotent guard
+    const { data: before, error: beforeErr } = await supabaseAdmin
+      .from('employees').select('id, status, resigned_at')
+      .eq('id', employee_id).maybeSingle();
+
+    if (beforeErr) {
+      console.error('[applyResignation] employees fetch failed',
+        { request_id: request.id, employee_id, err: beforeErr.message });
+      return;
+    }
+    if (!before) {
+      console.error('[applyResignation] employee not found',
+        { request_id: request.id, employee_id });
+      return;
+    }
+    if (before.status === 'resigned') {
+      console.log('[applyResignation] employee already resigned, skip',
+        { request_id: request.id, employee_id, before_resigned_at: before.resigned_at });
+      return;
+    }
+
+    // resigned_at:預計離職日 +08:00。沒填 fallback 用 approve 完成的 NOW
+    // (理論 resign_date 是 required、approvals.html FORM_SCHEMA.resignation 強制)
+    const resignedAtIso = resign_date
+      ? `${resign_date}T00:00:00+08:00`
+      : new Date().toISOString();
+
+    const { error: updErr } = await supabaseAdmin.from('employees').update({
+      status: 'resigned',
+      resigned_at: resignedAtIso,
+      resigned_reason: reason,
+    }).eq('id', employee_id);
+
+    if (updErr) {
+      console.error('[applyResignation] employees update failed',
+        { request_id: request.id, employee_id, err: updErr.message });
+      return;
+    }
+
+    console.log('[applyResignation] success', {
+      request_id: request.id,
+      employee_id,
+      resigned_at: resignedAtIso,
+      approver_id: caller?.id,
+    });
+  } catch (err) {
+    console.error('[applyResignation] unexpected error',
+      { request_id: request.id, err: err.message });
   }
 }

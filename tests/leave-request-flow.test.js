@@ -25,7 +25,8 @@ function makeRepo(over = {}) {
     findLeaveType: vi.fn(async (code) => SEED_LT[code] || null),
     listActiveLeaveTypes: vi.fn(async () => Object.values(SEED_LT)),
     findSchedulesInRange: vi.fn(async () => []),
-    findActiveAnnualRecord: vi.fn(async () => null),
+    // B14:findAnnualRecordCoveringDate 是 submit / approve / deduct / refund 共用的 lookup
+    findAnnualRecordCoveringDate: vi.fn(async () => null),
     findEmployeeById: vi.fn(async (id) => ({ id, role: 'employee', is_manager: false, manager_id: 'M1' })),
     lockAndIncrementUsedDays: vi.fn(async () => ({ ok: true, record: { id: 1 } })),
     insertBalanceLog: vi.fn(async () => ({ id: 1 })),
@@ -107,7 +108,7 @@ describe('submitLeaveRequest', () => {
   it('annual + 餘額足夠 → 建立 pending', async () => {
     const repo = makeRepo({
       findSchedulesInRange: vi.fn(async () => [dayShift()]),
-      findActiveAnnualRecord: vi.fn(async () => ({ id: 1, granted_days: 14, used_days: 0 })),
+      findAnnualRecordCoveringDate: vi.fn(async () => ({ id: 1, granted_days: 14, used_days: 0 })),
     });
     const r = await submitLeaveRequest(repo, {
       employee_id: 'E001', leave_type: 'annual',
@@ -125,7 +126,7 @@ describe('submitLeaveRequest', () => {
   it('annual + 餘額不足 → ok:false INSUFFICIENT_BALANCE', async () => {
     const repo = makeRepo({
       findSchedulesInRange: vi.fn(async () => [dayShift()]),
-      findActiveAnnualRecord: vi.fn(async () => ({ id: 1, granted_days: 0.5, used_days: 0 })),
+      findAnnualRecordCoveringDate: vi.fn(async () => ({ id: 1, granted_days: 0.5, used_days: 0 })),
     });
     const r = await submitLeaveRequest(repo, {
       employee_id: 'E001', leave_type: 'annual',
@@ -159,7 +160,7 @@ describe('submitLeaveRequest', () => {
       end_at:   '2026-04-27T18:00:00+08:00',
     });
     expect(r.ok).toBe(true);
-    expect(repo.findActiveAnnualRecord).not.toHaveBeenCalled();
+    expect(repo.findAnnualRecordCoveringDate).not.toHaveBeenCalled();
   });
 
   it('comp + 餘額足夠 → 建 pending', async () => {
@@ -213,7 +214,7 @@ describe('approveLeaveRequest', () => {
     const repo = makeRepo({
       findLeaveRequestById: vi.fn(async () => req),
       findSchedulesInRange: vi.fn(async () => [dayShift()]),
-      findActiveAnnualRecord: vi.fn(async () => ({ id: 1, granted_days: 14, used_days: 0 })),
+      findAnnualRecordCoveringDate: vi.fn(async () => ({ id: 1, granted_days: 14, used_days: 0 })),
     });
     const r = await approveLeaveRequest(repo, { request_id: 'L1', approved_by: 'M001' });
     expect(r.ok).toBe(true);
@@ -289,6 +290,53 @@ describe('approveLeaveRequest', () => {
     const r = await approveLeaveRequest(repo, { request_id: 'L1', approved_by: 'HR1' });
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('NOT_PENDING');
+  });
+
+  // B14 regression:模擬 EMP_01251101 的 multi active records 場景。
+  // Record 73(2026-05-03~2026-11-02、current period)+ Record 74(2026-11-03~2027-10-31、future)
+  // 同時 active。5/11 假單必須挑 Record 73、不能挑 Record 74。
+  it('B14 regression:multi active records、submit + approve 都依 start_at 日期挑對 period(Record 73)', async () => {
+    const rec73 = { id: 73, period_start: '2026-05-03', period_end: '2026-11-02', granted_days: 14, used_days: 0 };
+    const rec74 = { id: 74, period_start: '2026-11-03', period_end: '2027-10-31', granted_days: 14, used_days: 0 };
+    const findByDate = vi.fn(async (emp, date) => {
+      // 模擬 supabase 真實行為:period_start <= date <= period_end
+      if (date >= rec73.period_start && date <= rec73.period_end) return rec73;
+      if (date >= rec74.period_start && date <= rec74.period_end) return rec74;
+      return null;
+    });
+
+    // ── submit(precheck)──
+    const submitRepo = makeRepo({
+      findSchedulesInRange: vi.fn(async () => [dayShift({ work_date: '2026-05-11', start_time: '09:00', end_time: '18:00' })]),
+      findAnnualRecordCoveringDate: findByDate,
+    });
+    const submitR = await submitLeaveRequest(submitRepo, {
+      employee_id: 'EMP_01251101', leave_type: 'annual',
+      start_at: '2026-05-11T09:00:00+08:00',
+      end_at:   '2026-05-11T18:00:00+08:00',
+    });
+    expect(submitR.ok).toBe(true);
+    expect(submitRepo.findAnnualRecordCoveringDate).toHaveBeenCalledWith('EMP_01251101', '2026-05-11');
+
+    // ── approve(deduct)──
+    const req = {
+      id: 'L_511', employee_id: 'EMP_01251101', leave_type: 'annual',
+      start_at: '2026-05-11T09:00:00+08:00', end_at: '2026-05-11T18:00:00+08:00',
+      hours: 8, finalized_hours: null, status: 'pending',
+    };
+    const approveRepo = makeRepo({
+      findLeaveRequestById: vi.fn(async () => req),
+      findSchedulesInRange: vi.fn(async () => [dayShift({ work_date: '2026-05-11', start_time: '09:00', end_time: '18:00' })]),
+      findAnnualRecordCoveringDate: findByDate,
+    });
+    const approveR = await approveLeaveRequest(approveRepo, { request_id: 'L_511', approved_by: 'M001' });
+    expect(approveR.ok).toBe(true);
+    // 關鍵驗證:lockAndIncrementUsedDays 鎖到 Record 73 而非 Record 74
+    expect(approveRepo.lockAndIncrementUsedDays).toHaveBeenCalledWith({
+      record_id: 73, delta_days: 1, allow_negative: false,
+    });
+    const log = approveRepo.insertBalanceLog.mock.calls[0][0];
+    expect(log.annual_record_id).toBe(73);
   });
 });
 

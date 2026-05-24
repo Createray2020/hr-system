@@ -13,6 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/roles.js"></script>
+<script src="/js/login-check.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
@@ -185,7 +186,8 @@ async function doLogin() {
       return;
     }
 
-    if (emp.status === 'resigned') {
+    // B7 A2:resigned_at 已到才擋(未到視同尚未生效、仍可登入到預計離職日)
+    if (LoginCheck.shouldBlockResignedLogin(emp)) {
       showError('此帳號已停用，請聯絡管理員');
       await _sb.auth.signOut();
       btn.textContent = '登入'; btn.disabled = false;

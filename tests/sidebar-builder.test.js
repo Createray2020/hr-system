@@ -83,10 +83,10 @@ describe('filterVisibleGroups', () => {
     expect(visible[1].items.map(it => it.page)).toEqual(['calendar', 'notifications']);
   });
 
-  it('純主管(isMgrOrHR / isMgrOrCEO 通過、isHRish 不通過)→ 看到 4 群組', () => {
+  it('純主管(isMgrOrHR / isMgrOrCEO 通過、isHRish 不通過)→ 看到 5 群組', () => {
     const groups = getNavGroups(gatesManagerOnly);
     const visible = filterVisibleGroups(groups, {});
-    // 我的工作區 6 / 資訊中心 (總覽+行事曆+公告欄+通知中心=4) /
+    // 我的工作區 6 / 資訊中心 (總覽+行事曆+公告欄+通知中心+審批管理=5、B15 後 approvals 走 isMgrOrHR) /
     // 員工管理 (只 orgchart 通過 isMgrOrHR、其他 isHRish 不過、isBackofficeRole 不過 = 1) /
     // 班表&出勤 (排班管理+班表範本=2、其他 isHRish 不過) /
     // 假勤管理 (請假審批+加班審核=2、其他 isHRish 不過) /
@@ -94,6 +94,14 @@ describe('filterVisibleGroups', () => {
     expect(visible.map(g => g.title)).toEqual(['我的工作區', '資訊中心', '員工管理', '班表 & 出勤', '假勤管理']);
     expect(visible.find(g => g.title === '員工管理').items.map(it => it.page)).toEqual(['orgchart']);
     expect(visible.find(g => g.title === '薪資')).toBeUndefined();
+  });
+
+  it('B15 regression — 純主管在「資訊中心」看得到「審批管理」入口', () => {
+    const groups = getNavGroups(gatesManagerOnly);
+    const visible = filterVisibleGroups(groups, {});
+    const infoGroup = visible.find(g => g.title === '資訊中心');
+    expect(infoGroup).toBeDefined();
+    expect(infoGroup.items.map(it => it.page)).toContain('approvals');
   });
 
   it('空 group 自動隱藏 (filterEmployeeOnly 員工管理 / 班表&出勤 / 假勤管理 / 薪資 全部不見)', () => {

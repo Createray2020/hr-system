@@ -54,11 +54,28 @@ export function makeLeaveRepo() {
     },
 
     // ─── annual_leave_records ─────
+    // 注意:findActiveAnnualRecord 是「最新 active record」(DESC + LIMIT 1)、
+    // 語意是「找該結算的 record」、annual-rollover.js 專用。
+    // 對應 leave 扣抵 / 餘額顯示請用 findAnnualRecordCoveringDate(B14 修補後新增)。
     async findActiveAnnualRecord(employee_id) {
       const { data, error } = await supabaseAdmin
         .from('annual_leave_records').select('*')
         .eq('employee_id', employee_id).eq('status', 'active')
         .order('period_start', { ascending: false }).limit(1).maybeSingle();
+      if (error) throw error;
+      return data || null;
+    },
+
+    // 找該員工某日期落點的 active record(period_start <= leaveDate <= period_end)。
+    // 多 active records 並存時(例:HR 手動建未來週期)、舊 DESC 邏輯會挑錯、
+    // 故 deduct / refund / balance 一律走此 method、依「假單真正落在哪 period」決定。
+    async findAnnualRecordCoveringDate(employee_id, leaveDate) {
+      if (!leaveDate) throw new Error('leaveDate required');
+      const { data, error } = await supabaseAdmin
+        .from('annual_leave_records').select('*')
+        .eq('employee_id', employee_id).eq('status', 'active')
+        .lte('period_start', leaveDate).gte('period_end', leaveDate)
+        .limit(1).maybeSingle();
       if (error) throw error;
       return data || null;
     },
