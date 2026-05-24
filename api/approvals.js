@@ -175,12 +175,28 @@ export default async function handler(req, res) {
       const steps = config.steps;
       const reqId = 'APR' + Date.now();
 
+      // B12:撈 applicant 資料、判斷是否要自動跳過 manager step
+      //   sole-manager dept(僅自己一個 manager)→ 自己送 → 找不到其他可批的人 → 跳過 step 1
+      //   採 C 案:step 1 row 留著、status='skipped'、approver_id=NULL、audit note 記錄原因
+      const { data: applicant } = await supabaseAdmin
+        .from('employees').select('id, dept_id, is_manager')
+        .eq('id', realApplicantId).maybeSingle();
+      let skipManagerStep = false;
+      if (applicant?.is_manager) {
+        const otherMgrs = await findOtherActiveManagersInDept(applicant.dept_id, applicant.id);
+        skipManagerStep = otherMgrs.length === 0;
+      }
+
+      // current_step:第一個不被 skip 的 step number(全 skip 退化 fallback 用 steps[0])
+      const firstActive = steps.find(s => !(s.role === 'manager' && skipManagerStep)) || steps[0];
+      const initialCurrentStep = firstActive.step;
+
       const { error: insertErr } = await supabaseAdmin.from('approval_requests').insert([{
         id: reqId,
         request_type,
         title: config.type_name,
         applicant_id: realApplicantId,
-        current_step: 1,
+        current_step: initialCurrentStep,
         total_steps: steps.length,
         status: 'pending',
         form_data: form_data || {},
@@ -190,17 +206,28 @@ export default async function handler(req, res) {
       if (insertErr) return res.status(500).json({ error: insertErr.message });
 
       for (const step of steps) {
+        const shouldSkip = step.role === 'manager' && skipManagerStep;
+        const initialStatus = shouldSkip
+          ? 'skipped'
+          : (step.step === initialCurrentStep ? 'in_progress' : 'waiting');
         await supabaseAdmin.from('approval_steps').insert([{
           id: `${reqId}_S${step.step}`,
           request_id: reqId,
           step_number: step.step,
           step_name: step.name,
           approver_role: step.role,
-          status: step.step === 1 ? 'in_progress' : 'waiting',
+          status: initialStatus,
+          approver_id: null,
+          handled_at: shouldSkip ? new Date().toISOString() : null,
+          note: shouldSkip ? 'B12: auto-skipped (sole manager in dept)' : '',
         }]);
       }
 
-      return res.status(201).json({ id: reqId, message: '申請已送出' });
+      return res.status(201).json({
+        id: reqId,
+        message: '申請已送出',
+        skipped_manager_step: skipManagerStep,
+      });
     }
 
     // ── 審批通過 ────────────────────────────────────────────────────────────
@@ -640,4 +667,20 @@ async function applyResignation(request, caller) {
     console.error('[applyResignation] unexpected error',
       { request_id: request.id, err: err.message });
   }
+}
+
+// B12:撈申請人 dept 內其他 active manager(排除自己),用於 create flow
+// 偵測 sole-manager dept 並自動跳過 step 1 manager(因 sole manager 無法 self-approve)。
+// 同 dept 還有其他 active manager → step 1 走既有 manager 互批 flow(B13 dept-scope 已支援)。
+async function findOtherActiveManagersInDept(deptId, excludeId) {
+  if (!deptId) return [];  // applicant 無 dept_id(資料異常)→ 視同 sole manager、保險升 CEO
+  const { data, error } = await supabaseAdmin
+    .from('employees')
+    .select('id')
+    .eq('dept_id', deptId)
+    .eq('is_manager', true)
+    .eq('status', 'active')
+    .neq('id', excludeId);
+  if (error) throw error;
+  return data || [];
 }

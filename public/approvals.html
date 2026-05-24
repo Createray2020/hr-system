@@ -680,7 +680,8 @@ function renderDetail(data) {
   steps.forEach((step, i) => {
     const isLast = i === steps.length - 1;
     const st = step.status;
-    const dotIco = st==='approved'?'✓': st==='rejected'?'✗': st==='in_progress'?'⏳':'○';
+    // B12:'skipped' 為系統自動跳過(例:sole-manager dept、無人可批),用 ⊘ 區隔於 ○(waiting)
+    const dotIco = st==='approved'?'✓': st==='rejected'?'✗': st==='in_progress'?'⏳': st==='skipped'?'⊘':'○';
     const lineDone = st === 'approved';
     const approverName = step.employees?.name;
     html += `<div class="tl-step">

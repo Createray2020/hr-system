@@ -522,3 +522,145 @@ describe('/api/approvals admin_edit — backoffice only + audit', () => {
     expect(lines[1]).toMatch(/admin_edit by HR1: form_data\.\{location\} updated/);
   });
 });
+
+// ════════════════════════════════════════════════════════════
+// B12: sole-manager dept self-approval skip
+//   申請建立時、若 applicant 是 manager 且本部門無其他 active manager,
+//   step 1 manager 自動標 status='skipped' + approver_id=null + audit note。
+//   採 C 案(step row 留著、語義 'skipped' 對齊 schema 預留 enum)。
+// ════════════════════════════════════════════════════════════
+describe('/api/approvals create — B12 sole-manager dept self-approval skip', () => {
+  // 共用 setup:approval_flow_configs.steps 對齊 prod punch_correction 3-step
+  function setupCreateFlow({ applicant, otherMgrs = [] }) {
+    dataByQuery['approval_flow_configs:single'] = {
+      request_type: 'punch_correction',
+      type_name: '補打卡',
+      steps: [
+        { step: 1, name: '主管審核',  role: 'manager' },
+        { step: 2, name: '執行長核准', role: 'ceo' },
+        { step: 3, name: 'HR 確認',   role: 'hr' },
+      ],
+    };
+    dataByQuery['employees:maybeSingle'] = applicant;
+    // findOtherActiveManagersInDept query 走 .then(回 array)
+    dataByQuery['employees:then'] = otherMgrs;
+  }
+
+  function getStepInserts() {
+    return calls.inserts.filter(i => i.table === 'approval_steps').map(i => i.rows[0]);
+  }
+  function getReqInsert() {
+    return calls.inserts.find(i => i.table === 'approval_requests')?.rows[0];
+  }
+
+  it('B12.1 manager 自己送、dept 只有自己一個 manager → step 1 skipped、step 2 in_progress、current_step=2', async () => {
+    overrides.caller = { id: 'M_SOLE', role: 'employee', is_manager: true, dept_id: 'D_SOLE' };
+    setupCreateFlow({
+      applicant: { id: 'M_SOLE', dept_id: 'D_SOLE', is_manager: true },
+      otherMgrs: [],
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction', form_data: {} },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.skipped_manager_step).toBe(true);
+
+    const stepRows = getStepInserts();
+    expect(stepRows).toHaveLength(3);
+
+    // step 1: skipped + audit
+    expect(stepRows[0].status).toBe('skipped');
+    expect(stepRows[0].approver_id).toBeNull();
+    expect(stepRows[0].handled_at).toBeTruthy();
+    expect(stepRows[0].note).toMatch(/B12.*sole manager/);
+
+    // step 2: in_progress(自動接手)
+    expect(stepRows[1].status).toBe('in_progress');
+    expect(stepRows[1].handled_at).toBeNull();
+
+    // step 3: 仍 waiting
+    expect(stepRows[2].status).toBe('waiting');
+
+    // approval_requests.current_step = 2
+    expect(getReqInsert().current_step).toBe(2);
+    expect(getReqInsert().total_steps).toBe(3);
+  });
+
+  it('B12.2 manager 自己送、dept 還有其他 active manager → step 1 保持 in_progress(不 skip)', async () => {
+    overrides.caller = { id: 'M1', role: 'employee', is_manager: true, dept_id: 'D_MULTI' };
+    setupCreateFlow({
+      applicant: { id: 'M1', dept_id: 'D_MULTI', is_manager: true },
+      otherMgrs: [{ id: 'M2' }],  // 另一 active manager
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction', form_data: {} },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.skipped_manager_step).toBe(false);
+
+    const stepRows = getStepInserts();
+    expect(stepRows[0].status).toBe('in_progress');
+    expect(stepRows[0].note).toBe('');
+    expect(stepRows[0].handled_at).toBeNull();
+    expect(stepRows[1].status).toBe('waiting');
+    expect(getReqInsert().current_step).toBe(1);
+  });
+
+  it('B12.3 employee 送(is_manager=false)→ step 1 正常 in_progress、不跑 sole-manager 偵測', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false, dept_id: 'D1' };
+    setupCreateFlow({
+      applicant: { id: 'E1', dept_id: 'D1', is_manager: false },
+      otherMgrs: [],  // 不會被讀到(is_manager=false 路徑跳過 helper)
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction', form_data: {} },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.skipped_manager_step).toBe(false);
+
+    const stepRows = getStepInserts();
+    expect(stepRows[0].status).toBe('in_progress');
+    expect(stepRows[0].note).toBe('');
+    expect(getReqInsert().current_step).toBe(1);
+  });
+
+  it('B12.4 manager 自己送、其他 manager 都 inactive/resigned → step 1 skipped(視同 sole)', async () => {
+    overrides.caller = { id: 'M_LAST', role: 'employee', is_manager: true, dept_id: 'D_FADED' };
+    setupCreateFlow({
+      applicant: { id: 'M_LAST', dept_id: 'D_FADED', is_manager: true },
+      otherMgrs: [],  // findOtherActiveManagersInDept WHERE status='active' filter 後回 []
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction', form_data: {} },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.skipped_manager_step).toBe(true);
+
+    const stepRows = getStepInserts();
+    expect(stepRows[0].status).toBe('skipped');
+    expect(stepRows[1].status).toBe('in_progress');
+    expect(getReqInsert().current_step).toBe(2);
+  });
+
+  it('B12.5 multi-manager dept、其中一人 resigned 但另一人仍 active → 不 skip', async () => {
+    overrides.caller = { id: 'M_ALIVE', role: 'employee', is_manager: true, dept_id: 'D_HALF' };
+    setupCreateFlow({
+      applicant: { id: 'M_ALIVE', dept_id: 'D_HALF', is_manager: true },
+      otherMgrs: [{ id: 'M_OTHER_ALIVE' }],  // 對方還在
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction', form_data: {} },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.skipped_manager_step).toBe(false);
+
+    const stepRows = getStepInserts();
+    expect(stepRows[0].status).toBe('in_progress');
+    expect(getReqInsert().current_step).toBe(1);
+  });
+});
