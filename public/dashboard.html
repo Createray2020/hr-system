@@ -128,6 +128,15 @@
       </div>
     </div>
 
+    <!-- B6:待我審批(approval_steps 來源、刻意不含 leave_requests、避免跟「待審假單」widget 重複計數)-->
+    <div class="card" id="card-pending-approvals" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="section-title" style="margin-bottom:0">待我審批 <span id="approval-count-pill" class="pill badge-pending" style="margin-left:6px;display:none">0</span></div>
+        <a href="/approvals.html" style="font-size:12px;color:var(--accent);text-decoration:none">前往審批 →</a>
+      </div>
+      <div id="pending-approvals"><div style="color:var(--text-dim);font-size:13px">載入中…</div></div>
+    </div>
+
     <!-- 本月薪資期間(HR-only widget、階段 3.2)-->
     <div class="card" id="card-payroll-period" style="margin-bottom:20px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -198,7 +207,7 @@ window.onload = async () => {
   // 載入假別中文名(idempotent、給 pendingLeaves render 用)
   await window.HR_Utils?.loadLeaveTypeLabels?.();
   try {
-    await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements(), loadCurrentPayrollPeriod()]);
+    await Promise.all([loadDashboard(), loadMiniCalendar(), loadLatestAnnouncements(), loadCurrentPayrollPeriod(), loadPendingApprovals()]);
   } catch(e) { toast('載入失敗：'+e.message,'error'); }
 };
 
@@ -554,6 +563,52 @@ function renderPayrollPeriodWidget(p) {
       最後計算: ${fmtDtFull(p.calculated_at)}${p.approved_at ? ' &nbsp;·&nbsp; 核准: ' + fmtDtFull(p.approved_at) : ''}
     </div>
   `;
+}
+
+// ─── B6:待我審批 widget(approval_steps、不含 leave_requests)──────────────
+// 刻意用 /api/approvals?type=pending 而非 /api/pending-approvals facade:
+// 後者會合併 leave_requests pending_mgr/pending_ceo、跟既有「待審假單」widget 重複計數。
+// gate: effRole 非空(manager / hr / ceo / chairman / admin);純員工(role='employee' &&
+// !is_manager)effRole='' → 隱藏整張卡。manager 走 B13 backend dept-scope filter。
+async function loadPendingApprovals() {
+  const u = window.currentUser;
+  const effRole = window.Roles?.effectiveApprovalRole(u);
+  const cardEl = document.getElementById('card-pending-approvals');
+  const listEl = document.getElementById('pending-approvals');
+  const pillEl = document.getElementById('approval-count-pill');
+
+  if (!effRole) {
+    if (cardEl) cardEl.style.display = 'none';
+    return;
+  }
+
+  try {
+    const items = await api(`/api/approvals?type=pending&role=${encodeURIComponent(effRole)}`);
+    const cnt = (items || []).length;
+    pillEl.textContent = cnt;
+    pillEl.style.display = cnt > 0 ? '' : 'none';
+
+    if (!cnt) {
+      listEl.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px 0">目前沒有待審申請 ✓</div>';
+      return;
+    }
+    listEl.innerHTML = items.slice(0, 5).map(s => {
+      const r = s.approval_requests || {};
+      const emp = r.employees || {};
+      return `
+        <div class="pending-item">
+          <div>
+            <div class="pending-name">${emp.name || r.applicant_id || '—'} <span style="font-size:12px;color:var(--text-dim)">— ${r.title || r.request_type || ''}</span></div>
+            <div class="pending-meta">${fmtDate(r.created_at)} · ${emp.dept_name || ''} · 第 ${s.step_number} 步</div>
+          </div>
+          <div class="pending-action">
+            <a class="btn btn-ghost btn-sm" href="/approvals.html?id=${encodeURIComponent(r.id)}">查看 / 審核</a>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = `<div style="color:#F87171;font-size:13px;padding:8px 0">載入失敗:${e.message}</div>`;
+  }
 }
 
 async function quickLeave(id, status) {
