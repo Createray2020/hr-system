@@ -543,4 +543,84 @@ describe('B7:resignation step 3 approve → cascade employees', () => {
     expect(compLogs[0].rows[0].hours_delta).toBe(-8);
     expect(compLogs[0].rows[0].changed_by).toBe('HR1');
   });
+
+  // ─── B26 批次 3 cascade enhancement #6:salary_records final-month draft ────
+  // (test 接在 cascade flow 後、續用同 setupResignationStep3 mock pattern)
+  //
+  // 注意 setupResignationStep3 預設 resign_date='2026-05-31'(spec 內見)、
+  // 但 employees:maybeSingle 同 mock key、會被 #6 內 .from('salary_records').maybeSingle 共用、
+  // 所以 case 內顯式 set salary_records:maybeSingle 不依賴默認
+
+  it('B26.3 cascade Enhancement #6:既有 salary_records draft → UPDATE is_final_month + 4 欄位', async () => {
+    overrides.caller = HR;
+    setupResignationStep3({
+      employee: {
+        id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1',
+        status: 'active', resigned_at: null,
+        base_salary: 30000, hourly_rate: 125,
+      },
+    });
+    // resign_date='2026-05-31' → recordId = 'S_EMP_01251101_2026_05'
+    // mock 既有 draft(寫進 salary_records:maybeSingle 給 #6 撈)
+    // ⚠ employees:maybeSingle 已被 setupResignationStep3 set、
+    //   而 mock chain 用 dataByQuery['<table>:maybeSingle']、不同 table 各自 key、不衝突
+    dataByQuery['salary_records:maybeSingle'] = {
+      id: 'S_EMP_01251101_2026_05', status: 'draft',
+    };
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // UPDATE salary_records
+    const srUpdate = calls.updates.find(u =>
+      u.table === 'salary_records' && u.patch.is_final_month === true);
+    expect(srUpdate).toBeDefined();
+    expect(srUpdate.patch.worked_days).toBe(31);             // resign_date=5/31 → 31 天
+    expect(srUpdate.patch.total_days_in_month).toBe(31);     // 5 月 31 天
+    expect(srUpdate.patch.pro_rata_mode).toBe('calendar_day');
+    expect(srUpdate.patch.updated_at).toBeTruthy();
+
+    // 沒 INSERT salary_records(existing → UPDATE)
+    const srInsert = calls.inserts.find(i => i.table === 'salary_records');
+    expect(srInsert).toBeUndefined();
+  });
+
+  it('B26.4 cascade Enhancement #6:salary_records 不存在 → INSERT 新 draft', async () => {
+    overrides.caller = HR;
+    setupResignationStep3({
+      employee: {
+        id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1',
+        status: 'active', resigned_at: null,
+        base_salary: 30000, hourly_rate: 125,
+      },
+    });
+    // 不 set salary_records:maybeSingle → null → 走 INSERT path
+
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // INSERT salary_records
+    const srInsert = calls.inserts.find(i => i.table === 'salary_records');
+    expect(srInsert).toBeDefined();
+    const row = srInsert.rows[0];
+    expect(row.id).toBe('S_EMP_01251101_2026_05');
+    expect(row.employee_id).toBe('EMP_01251101');
+    expect(row.year).toBe(2026);
+    expect(row.month).toBe(5);
+    expect(row.base_salary).toBe(30000);
+    expect(row.is_final_month).toBe(true);
+    expect(row.worked_days).toBe(31);
+    expect(row.total_days_in_month).toBe(31);
+    expect(row.pro_rata_mode).toBe('calendar_day');
+    expect(row.status).toBe('draft');
+
+    // 沒 UPDATE salary_records(insertNew → 不走 update path)
+    const srUpdate = calls.updates.find(u => u.table === 'salary_records');
+    expect(srUpdate).toBeUndefined();
+  });
 });

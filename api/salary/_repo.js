@@ -41,6 +41,28 @@ export function makeSalaryRepo() {
       return data || [];
     },
 
+    // B26 批次 3:batch_v2 走 active + 該月離職員工(讓離職員工最後月薪 batch 撈得到)
+    // 用兩條 query Promise.all merge(避開 supabase-js .or + and() nested syntax 不穩)
+    async listEmployeesForPayroll(year, month) {
+      const periodStart = `${year}-${String(month).padStart(2, '0')}-01T00:00:00+08:00`;
+      const nextYear = month === 12 ? year + 1 : year;
+      const nextMonth = month === 12 ? 1 : month + 1;
+      const periodEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01T00:00:00+08:00`;
+
+      const SELECT_COLS = 'id, name, dept_id, departments(name), base_salary, attendance_bonus, employment_type';
+      const q1 = supabaseAdmin.from('employees').select(SELECT_COLS).eq('status', 'active');
+      const q2 = supabaseAdmin.from('employees').select(SELECT_COLS)
+        .eq('status', 'resigned').gte('resigned_at', periodStart).lt('resigned_at', periodEnd);
+
+      const [active, resigned] = await Promise.all([
+        applyExcludeSystemAccountsQuery(q1).order('id'),
+        applyExcludeSystemAccountsQuery(q2).order('id'),
+      ]);
+      if (active.error) throw active.error;
+      if (resigned.error) throw resigned.error;
+      return [...(active.data || []), ...(resigned.data || [])];
+    },
+
     // ─── salary_records ──────────────────────────────────────
     async findSalaryRecord(id) {
       const { data, error } = await supabaseAdmin

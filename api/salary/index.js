@@ -302,8 +302,9 @@ async function handleNewBatch(req, res) {
     if (employee_id) {
       targets = [{ id: employee_id }];
     } else {
+      // B26 批次 3:撈 active + 該月離職員工(讓離職月最後薪資 batch 撈得到)
       // belt-and-suspenders:repo 已 .neq() 過濾、再 client-side 過濾防 query 漏接
-      targets = excludeSystemAccounts(await repo.listActiveEmployees());
+      targets = excludeSystemAccounts(await repo.listEmployeesForPayroll(y, m));
     }
 
     const results = [];

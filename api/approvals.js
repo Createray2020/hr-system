@@ -972,6 +972,68 @@ async function applyResignation(request, caller) {
       console.error('[applyResignation] comp_time cascade failed',
         { request_id: request.id, employee_id, err: err.message });
     }
+
+    // ── B26 批次 3 Cascade Enhancement #6:salary_records final-month draft ──
+    // 在 resigned_at 月份建 / 更新一筆 salary_records draft、標 is_final_month=true。
+    // HR 後續進 /salary.html 點「重 calculate」→ calculator pro-rata 整鏈路算對。
+    // 不在這裡 trigger calculate:避免 cascade chain 越來越長、HR 主動點才跑。
+    // best-effort:失敗只 console.error、不擋。
+    try {
+      // 用 resignedAtIso slice 拆 YYYY-MM-DD(避時區陷阱、不走 Date.getUTCDate)
+      // resignedAtIso = `${resign_date}T00:00:00+08:00`、slice(0,10)直接得 Taipei 日期 string
+      const resignDateStr = resignedAtIso.slice(0, 10);
+      const [yearStr, monthStr, dayStr] = resignDateStr.split('-');
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10);   // 1-indexed
+      const workedDays = parseInt(dayStr, 10); // 月內第幾日 = 在職曆日
+      // Date.UTC 月份是 0-indexed,傳 1-indexed month 後 day=0 = 上月最後日 = 當月日數
+      const totalDaysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+      // recordId pattern 對齊 api/salary/_repo.js:255 upsertSalaryRecord
+      const recordId = `S_${employee_id}_${year}_${String(month).padStart(2, '0')}`;
+      const { data: existing, error: selErr } = await supabaseAdmin
+        .from('salary_records').select('id, status').eq('id', recordId).maybeSingle();
+      if (selErr) throw selErr;
+
+      if (existing) {
+        if (['draft', 'calculating'].includes(existing.status)) {
+          const { error: updErr } = await supabaseAdmin
+            .from('salary_records').update({
+              is_final_month: true,
+              worked_days: workedDays,
+              total_days_in_month: totalDaysInMonth,
+              pro_rata_mode: 'calendar_day',
+              updated_at: new Date().toISOString(),
+            }).eq('id', recordId);
+          if (updErr) throw updErr;
+          console.log('[applyResignation] salary_records UPDATE is_final_month',
+            { record_id: recordId, worked_days: workedDays, total_days: totalDaysInMonth });
+        } else {
+          // confirmed / paid / locked → 不動、HR 需手動 reopen(走既有 salary state machine)
+          console.warn('[applyResignation] salary_records exists but locked, HR 需手動 reopen',
+            { record_id: recordId, status: existing.status });
+        }
+      } else {
+        const { error: insErr } = await supabaseAdmin.from('salary_records').insert([{
+          id: recordId,
+          employee_id,
+          year,
+          month,
+          base_salary: Number(before?.base_salary) || 0,
+          is_final_month: true,
+          worked_days: workedDays,
+          total_days_in_month: totalDaysInMonth,
+          pro_rata_mode: 'calendar_day',
+          status: 'draft',
+        }]);
+        if (insErr) throw insErr;
+        console.log('[applyResignation] salary_records INSERT new draft',
+          { record_id: recordId, worked_days: workedDays, total_days: totalDaysInMonth });
+      }
+    } catch (err) {
+      console.error('[applyResignation] salary_records cascade failed',
+        { request_id: request.id, employee_id, err: err.message });
+    }
   } catch (err) {
     console.error('[applyResignation] unexpected error',
       { request_id: request.id, err: err.message });
