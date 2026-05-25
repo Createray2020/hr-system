@@ -24,6 +24,82 @@ import { addDeptNameNested, addDeptNameSingle } from '../lib/dept-name-mapper.js
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../lib/auth-scope.js';
 import { isBackofficeRole } from '../lib/roles.js';
 
+// ─────────────────────────────────────────────────────────────────
+// 離職檢核表 MVP 預設 46 項(對應 migrations/2026_05_26_resignation_checklist.sql)
+// 由 applyResignation cascade 在離職核准完成後 bulk insert。
+//
+// 分 8 大類、編號 1-46:
+//   1️⃣ HR 行政(9)/ 2️⃣ 薪資結算(6)/ 3️⃣ 系統權限撤銷(9)/ 4️⃣ 排班/出勤/假勤(5)
+//   5️⃣ 組織關係(2)/ 6️⃣ 實體資產回收(7)/ 7️⃣ 工作交接(4)/ 8️⃣ 通知/Audit(4)
+//
+// AUTO_DONE_SEQS 列出 cascade 觸發時即可標 status='done' 的項目
+// (對應「系統自動」的事務:status 翻轉 / login 擋 / push 清 / cascade 通知 / 離職原因記錄)
+// ─────────────────────────────────────────────────────────────────
+const AUTO_DONE_SEQS = new Set([16, 17, 23, 43, 44, 46]);
+const RESIGNATION_CHECKLIST_SEED = [
+  // 1️⃣ HR 行政(9 項)
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 1,  item_name: '勞保退保',                regulation_basis: '勞保條例§11、離職起 5 日內' },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 2,  item_name: '健保退保',                regulation_basis: '健保法§15、離職起 3 日內' },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 3,  item_name: '勞退提繳停止',            regulation_basis: '勞退條例§7' },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 4,  item_name: '就業保險退保',            regulation_basis: '就保法§5' },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 5,  item_name: '服務證明書',              regulation_basis: '勞基法§19、員工要求時提供' },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 6,  item_name: '離職證明書',              regulation_basis: null },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 7,  item_name: '所得稅扣繳憑單',          regulation_basis: '次年 1/31 前發放' },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 8,  item_name: '健保眷屬轉出',            regulation_basis: '如有眷屬掛保' },
+  { category: '1_hr_admin',           category_label: '1️⃣ HR 行政',           item_seq: 9,  item_name: '其他法定文件補充',         regulation_basis: null },
+
+  // 2️⃣ 薪資結算(6 項)
+  { category: '2_payroll',            category_label: '2️⃣ 薪資結算',          item_seq: 10, item_name: '最後月薪 pro-rata',       regulation_basis: '按實際工作日比例' },
+  { category: '2_payroll',            category_label: '2️⃣ 薪資結算',          item_seq: 11, item_name: '加班費結算',              regulation_basis: '勞基法§24、積欠未發' },
+  { category: '2_payroll',            category_label: '2️⃣ 薪資結算',          item_seq: 12, item_name: '特休未休折現',            regulation_basis: '勞基法§38-Ⅳ' },
+  { category: '2_payroll',            category_label: '2️⃣ 薪資結算',          item_seq: 13, item_name: '補休餘額折現',            regulation_basis: null },
+  { category: '2_payroll',            category_label: '2️⃣ 薪資結算',          item_seq: 14, item_name: '獎金/績效金 pro-rata',    regulation_basis: '視合約' },
+  { category: '2_payroll',            category_label: '2️⃣ 薪資結算',          item_seq: 15, item_name: '預發薪資 / 借支扣回',      regulation_basis: '視個案' },
+
+  // 3️⃣ 系統權限撤銷(9 項)
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 16, item_name: 'HR 系統 status=resigned', regulation_basis: '系統自動 ✅' },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 17, item_name: 'HR 系統 login 擋下',      regulation_basis: '系統自動 ✅' },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 18, item_name: 'Supabase Auth 帳號停用',  regulation_basis: '手動 supabase dashboard' },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 19, item_name: '公司 email 帳號停用',     regulation_basis: 'Google Workspace / O365' },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 20, item_name: 'Slack/Notion/SaaS 撤銷',  regulation_basis: null },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 21, item_name: 'VPN / 內網存取撤銷',       regulation_basis: null },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 22, item_name: '共享雲端硬碟所有權轉移',    regulation_basis: null },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 23, item_name: 'Push subscription 清除',  regulation_basis: '系統自動 ✅' },
+  { category: '3_system_access',      category_label: '3️⃣ 系統權限撤銷',      item_seq: 24, item_name: 'GitHub/GitLab 撤銷',     regulation_basis: '如適用' },
+
+  // 4️⃣ 排班/出勤/假勤(5 項)
+  { category: '4_schedule_attendance', category_label: '4️⃣ 排班/出勤/假勤',    item_seq: 25, item_name: '離職日後排班刪除',         regulation_basis: null },
+  { category: '4_schedule_attendance', category_label: '4️⃣ 排班/出勤/假勤',    item_seq: 26, item_name: '離職日後 absent 清除',     regulation_basis: null },
+  { category: '4_schedule_attendance', category_label: '4️⃣ 排班/出勤/假勤',    item_seq: 27, item_name: '未審完 leave_requests 取消', regulation_basis: null },
+  { category: '4_schedule_attendance', category_label: '4️⃣ 排班/出勤/假勤',    item_seq: 28, item_name: '未審完 approval_requests 取消', regulation_basis: '非 resignation' },
+  { category: '4_schedule_attendance', category_label: '4️⃣ 排班/出勤/假勤',    item_seq: 29, item_name: '未審完 overtime_requests 取消', regulation_basis: null },
+
+  // 5️⃣ 組織關係(2 項)
+  { category: '5_org_relation',       category_label: '5️⃣ 組織關係',          item_seq: 30, item_name: '部門 manager_id 轉移',     regulation_basis: '若是部門 manager' },
+  { category: '5_org_relation',       category_label: '5️⃣ 組織關係',          item_seq: 31, item_name: '下屬 manager_id 轉移',     regulation_basis: '若有下屬' },
+
+  // 6️⃣ 實體資產回收(7 項)
+  { category: '6_physical_asset',     category_label: '6️⃣ 實體資產回收',      item_seq: 32, item_name: '電腦 / 筆電歸還',         regulation_basis: null },
+  { category: '6_physical_asset',     category_label: '6️⃣ 實體資產回收',      item_seq: 33, item_name: '手機 / 平板歸還',         regulation_basis: '如配發' },
+  { category: '6_physical_asset',     category_label: '6️⃣ 實體資產回收',      item_seq: 34, item_name: '門禁卡 / 識別證歸還',     regulation_basis: null },
+  { category: '6_physical_asset',     category_label: '6️⃣ 實體資產回收',      item_seq: 35, item_name: '辦公室鑰匙歸還',           regulation_basis: null },
+  { category: '6_physical_asset',     category_label: '6️⃣ 實體資產回收',      item_seq: 36, item_name: '印章 / 大小章交接',        regulation_basis: '如保管' },
+  { category: '6_physical_asset',     category_label: '6️⃣ 實體資產回收',      item_seq: 37, item_name: '公務手機 SIM 卡停用',      regulation_basis: '如配發' },
+  { category: '6_physical_asset',     category_label: '6️⃣ 實體資產回收',      item_seq: 38, item_name: '制服 / 員工專屬物品歸還',  regulation_basis: null },
+
+  // 7️⃣ 工作交接(4 項)
+  { category: '7_handover',           category_label: '7️⃣ 工作交接',          item_seq: 39, item_name: '交接清單確認',            regulation_basis: 'form_data.handover 已填' },
+  { category: '7_handover',           category_label: '7️⃣ 工作交接',          item_seq: 40, item_name: '客戶 / 廠商聯絡轉交',      regulation_basis: null },
+  { category: '7_handover',           category_label: '7️⃣ 工作交接',          item_seq: 41, item_name: '進行中專案 / 任務轉交',    regulation_basis: null },
+  { category: '7_handover',           category_label: '7️⃣ 工作交接',          item_seq: 42, item_name: '離職面談 exit interview', regulation_basis: null },
+
+  // 8️⃣ 通知 / Audit(4 項)
+  { category: '8_notification_audit', category_label: '8️⃣ 通知/Audit',        item_seq: 43, item_name: 'HR 收到 cascade 通知',    regulation_basis: '系統自動 ✅' },
+  { category: '8_notification_audit', category_label: '8️⃣ 通知/Audit',        item_seq: 44, item_name: '直屬主管通知',            regulation_basis: '系統自動 ✅' },
+  { category: '8_notification_audit', category_label: '8️⃣ 通知/Audit',        item_seq: 45, item_name: '同部門同事知悉',          regulation_basis: null },
+  { category: '8_notification_audit', category_label: '8️⃣ 通知/Audit',        item_seq: 46, item_name: '離職原因記錄 + 統計',     regulation_basis: '系統自動 ✅' },
+];
+
 /**
  * canApproveStep — caller 能否簽某 step。
  *
@@ -618,9 +694,9 @@ async function applyResignation(request, caller) {
       return;
     }
 
-    // 撈現況 + idempotent guard
+    // 撈現況 + idempotent guard(name 給 cascade enhancement 3 HR 通知用)
     const { data: before, error: beforeErr } = await supabaseAdmin
-      .from('employees').select('id, status, resigned_at')
+      .from('employees').select('id, name, status, resigned_at')
       .eq('id', employee_id).maybeSingle();
 
     if (beforeErr) {
@@ -663,6 +739,85 @@ async function applyResignation(request, caller) {
       resigned_at: resignedAtIso,
       approver_id: caller?.id,
     });
+
+    // ── Cascade Enhancement #1:清 push_subscriptions(隱私 + 推播成本)──
+    // 離職員工不該繼續收 sendPushToRoles(['employee']) / 部門公告等廣播。
+    // best-effort:失敗只 log、不擋後續。
+    try {
+      await supabaseAdmin.from('push_subscriptions').delete().eq('employee_id', employee_id);
+      console.log('[applyResignation] push_subscriptions cleaned', { employee_id });
+    } catch (err) {
+      console.error('[applyResignation] push_subscriptions cleanup failed',
+        { request_id: request.id, employee_id, err: err.message });
+    }
+
+    // ── Cascade Enhancement #2:建立離職檢核表 + 46 項 ──
+    // 對應 migrations/2026_05_26_resignation_checklist.sql。HR 透過
+    // /resignation-checklist.html?employee_id=X 點開逐項勾選完成。
+    // best-effort:失敗只 log、不擋 approval completed、HR 可手動補建。
+    let checklistId = null;
+    try {
+      checklistId = 'RCL' + Date.now();
+      const { error: clErr } = await supabaseAdmin.from('resignation_checklists').insert([{
+        id: checklistId,
+        employee_id: employee_id,
+        approval_request_id: request.id,
+        status: 'draft',
+      }]);
+      if (clErr) throw clErr;
+
+      // 系統自動完成項目(16/17/23/43/44/46)cascade 觸發時即標 done
+      const nowIso = new Date().toISOString();
+      const tsBase = Date.now();
+      const itemsToInsert = RESIGNATION_CHECKLIST_SEED.map(seed => {
+        const autoDone = AUTO_DONE_SEQS.has(seed.item_seq);
+        return {
+          id: `ITM${tsBase}${String(seed.item_seq).padStart(3, '0')}`,
+          checklist_id: checklistId,
+          category: seed.category,
+          category_label: seed.category_label,
+          item_seq: seed.item_seq,
+          item_name: seed.item_name,
+          regulation_basis: seed.regulation_basis,
+          status: autoDone ? 'done' : 'pending',
+          completed_at: autoDone ? nowIso : null,
+          completed_by: null, // 系統自動完成、approver_id 不適用、保留 null by-design
+          note: autoDone ? '系統自動完成' : '',
+        };
+      });
+
+      const { error: itemsErr } = await supabaseAdmin
+        .from('resignation_checklist_items').insert(itemsToInsert);
+      if (itemsErr) throw itemsErr;
+
+      console.log('[applyResignation] checklist created', {
+        checklist_id: checklistId, items: itemsToInsert.length, employee_id,
+      });
+    } catch (err) {
+      console.error('[applyResignation] checklist creation failed',
+        { request_id: request.id, employee_id, err: err.message });
+      // checklist row 沒寫入(或 partial 寫入)→ reset checklistId 為 null,
+      // 讓 Enhancement #3 URL fallback 到 /employees.html、HR 不會點到不存在的 ?id=
+      checklistId = null;
+    }
+
+    // ── Cascade Enhancement #3:通知 HR 啟動檢核表 ──
+    // best-effort:失敗只 log、HR 可主動查 employees 列表發現新 resigned。
+    try {
+      const employeeName = before?.name || employee_id;
+      const url = checklistId
+        ? `/resignation-checklist.html?employee_id=${encodeURIComponent(employee_id)}`
+        : '/employees.html';
+      await sendPushToRoles(['hr', 'admin'], {
+        title: '✅ 員工離職核准、請啟動離職檢核表',
+        body: `${employeeName} 已核准離職、請執行後續離職事務檢核`,
+        url,
+      });
+      console.log('[applyResignation] HR push sent', { employee_id });
+    } catch (err) {
+      console.error('[applyResignation] HR push failed',
+        { request_id: request.id, employee_id, err: err.message });
+    }
   } catch (err) {
     console.error('[applyResignation] unexpected error',
       { request_id: request.id, err: err.message });

@@ -518,6 +518,7 @@ function renderTable() {
       </td>
       <td><div class="action-btns">
         <button class="btn btn-ghost btn-sm" onclick="openEditModal('${e.id}')">編輯</button>
+        ${e.status === 'resigned' ? `<a class="btn btn-ghost btn-sm" href="/resignation-checklist.html?employee_id=${encodeURIComponent(e.id)}">📋 離職檢核</a>` : ''}
       </div></td>
     </tr>`;
   }).join('');

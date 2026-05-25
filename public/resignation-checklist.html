@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>離職檢核表 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  /* Header / Employee card */
+  .emp-header{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;margin-bottom:20px}
+  .emp-avatar{width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#3B5FD4,#7B6CF6);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff;font-family:'DM Mono',monospace}
+  .emp-info-title{font-size:20px;font-weight:700;margin-bottom:3px}
+  .emp-info-sub{font-size:13px;color:var(--text-dim);font-family:'DM Mono',monospace;display:flex;gap:14px;flex-wrap:wrap}
+  .emp-info-sub b{color:var(--text);font-weight:500}
+
+  /* Progress bar */
+  .progress-wrap{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+  .progress-bar{flex:1;height:8px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden}
+  .progress-fill{height:100%;background:linear-gradient(90deg,#4ADE80,#7FBBFF);transition:width .3s ease;border-radius:4px}
+  .progress-num{font-family:'DM Mono',monospace;font-size:15px;font-weight:600;color:var(--accent2)}
+  .progress-pct{font-family:'DM Mono',monospace;font-size:12px;color:var(--text-dim)}
+
+  /* Category */
+  .cat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:14px;overflow:hidden}
+  .cat-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;transition:background .15s}
+  .cat-header:hover{background:rgba(255,255,255,.03)}
+  .cat-title{font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px}
+  .cat-prog{font-size:12px;color:var(--text-dim);font-family:'DM Mono',monospace}
+  .cat-chevron{font-size:16px;color:var(--text-dim);transition:transform .2s;margin-left:10px}
+  .cat-card.collapsed .cat-chevron{transform:rotate(-90deg)}
+  .cat-body{padding:6px 0 12px;border-top:1px solid var(--border)}
+  .cat-card.collapsed .cat-body{display:none}
+
+  /* Item row */
+  .item-row{display:grid;grid-template-columns:42px 1fr auto;gap:12px;align-items:flex-start;padding:14px 18px;border-bottom:0.5px solid rgba(42,48,72,.5)}
+  .item-row:last-child{border-bottom:none}
+  .item-row.auto-done{background:rgba(74,222,128,.04)}
+  .item-seq{font-family:'DM Mono',monospace;font-size:11px;color:var(--text-dim);padding-top:3px}
+  .item-name{font-size:14px;font-weight:500;margin-bottom:2px}
+  .item-basis{font-size:11px;color:var(--text-dim);font-style:italic;margin-bottom:8px}
+  .item-meta{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+  .item-note-input{width:100%;background:rgba(255,255,255,.04);border:0.5px solid rgba(255,255,255,.08);border-radius:6px;padding:6px 9px;font-size:12px;color:var(--text);font-family:'Noto Sans TC',sans-serif;resize:vertical;min-height:32px;margin-top:6px;outline:none;transition:border-color .15s}
+  .item-note-input:focus{border-color:rgba(91,141,239,.5)}
+
+  /* Tri-state status button group */
+  .st-grp{display:flex;gap:4px;flex-shrink:0}
+  .st-btn{padding:5px 10px;border-radius:6px;border:0.5px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);font-size:12px;color:var(--text-dim);cursor:pointer;transition:all .15s;font-family:'Noto Sans TC',sans-serif;display:flex;align-items:center;gap:4px}
+  .st-btn:hover{background:rgba(255,255,255,.08)}
+  .st-btn.active.pending{background:rgba(251,191,36,.15);color:#FBBF24;border-color:rgba(251,191,36,.3)}
+  .st-btn.active.done   {background:rgba(74,222,128,.15);color:#4ADE80;border-color:rgba(74,222,128,.3)}
+  .st-btn.active.n_a    {background:rgba(122,133,160,.15);color:#9CA3AF;border-color:rgba(122,133,160,.3)}
+
+  /* Save indicator */
+  .save-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-family:'DM Mono',monospace;margin-left:8px;opacity:0;transition:opacity .3s}
+  .save-pill.show{opacity:1}
+  .save-pill.saving{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .save-pill.saved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .save-pill.failed{background:rgba(248,113,113,.15);color:#F87171}
+
+  /* Backlog notice */
+  .backlog-card{margin-top:24px;background:rgba(91,141,239,.03);border:1px dashed rgba(91,141,239,.25);border-radius:var(--radius);padding:18px 22px;font-size:13px;color:var(--text-dim);line-height:1.7}
+  .backlog-card b{color:var(--text);font-weight:600}
+  .backlog-card ul{margin:6px 0 0 18px;padding:0}
+  .backlog-card li{margin-bottom:2px}
+
+  /* Empty state(checklist not yet created)*/
+  .empty-state{text-align:center;padding:60px 20px;color:var(--text-dim)}
+  .empty-state .empty-icon{font-size:48px;margin-bottom:12px;opacity:.4}
+
+  /* Gate blocked */
+  #gate-blocked{display:none;text-align:center;padding:80px 20px;color:var(--text-dim)}
+</style>
+</head>
+<body data-page="resignation-checklist">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+
+    <div id="gate-blocked">
+      <div style="font-size:48px;margin-bottom:14px">🔒</div>
+      <div style="font-size:18px;font-weight:600;margin-bottom:6px">無權存取</div>
+      <div style="font-size:13px">本頁僅供 HR / admin / CEO / chairman 使用</div>
+    </div>
+
+    <div id="main-content">
+
+      <!-- Header bar(title + save status)-->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div style="font-size:22px;font-weight:700">📋 離職檢核表</div>
+          <div style="font-size:13px;color:var(--text-dim);margin-top:2px">勾選每項離職事務、HR 後續追蹤用</div>
+        </div>
+        <span id="save-pill" class="save-pill saved">已儲存</span>
+      </div>
+
+      <!-- Employee header card -->
+      <div class="card" id="emp-card" style="margin-bottom:20px">
+        <div class="emp-header">
+          <div class="emp-avatar" id="emp-avatar">—</div>
+          <div>
+            <div class="emp-info-title" id="emp-name">載入中…</div>
+            <div class="emp-info-sub" id="emp-meta"></div>
+          </div>
+          <div>
+            <a id="emp-approval-link" class="btn btn-ghost btn-sm" href="#" style="display:none">📄 查看離職申請</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Body slot(checklist 存在 → progress + categories;不存在 → empty state)-->
+      <div id="checklist-body">
+        <div style="text-align:center;color:var(--text-dim);font-size:13px;padding:40px">載入中…</div>
+      </div>
+
+      <!-- Backlog notice -->
+      <div class="backlog-card">
+        <b>📌 待補功能(本檢核表 MVP、後續分階段補強)</b>
+        <ul>
+          <li><b>F1</b> 離職檢核表 PDF 匯出(含勾選狀態 / 完成日期 / 經手人 / 備註)</li>
+          <li><b>F2-F4</b> HR / 直屬主管 / 員工本人網頁手寫簽名</li>
+          <li><b>F5</b> PDF 內嵌簽名圖檔(3 角色簽完才生最終版)</li>
+          <li><b>F6</b> 「全部完成」鎖定機制(防匯出後竄改)</li>
+          <li><b>F7</b> 簽名版本控制(每次留 history、不覆寫)</li>
+          <li><b>F8</b> 完成度自動通知(HR 簽完 → 通知主管簽 / 全簽完 → 通知員工)</li>
+          <li><b>F9</b> 離職員工網頁版(員工自己登入看自己檢核表)</li>
+          <li><b>F10</b> L4 電子簽章法等級(CA 認證 + 時間戳記)</li>
+        </ul>
+      </div>
+
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ─── helpers ─────────────────────────────────────────────────
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d);
+  const pad = n => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}/${pad(dt.getMonth()+1)}/${pad(dt.getDate())}`;
+}
+function fmtDateTime(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return String(d);
+  const pad = n => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}/${pad(dt.getMonth()+1)}/${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap=document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el=document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+
+// 輪詢等待 layout.js 設好 window.currentUser(沿用 5/1 stop-gap pattern、避免 race)
+async function waitForCurrentUser(maxMs = 5000) {
+  const step = 100;
+  for (let i = 0; i < maxMs / step; i++) {
+    if (window.currentUser) return window.currentUser;
+    await new Promise(r => setTimeout(r, step));
+  }
+  return null;
+}
+
+// 暫存 caller 給 saved indicator / completed_by 顯示
+let CALLER = null;
+let CHECKLIST = null;
+let ITEMS = [];
+let EMPLOYEE = null;
+
+const STATUS_LABELS = { pending: '待辦', done: '已完成', n_a: '不適用' };
+const STATUS_ICONS  = { pending: '⚪', done: '✓', n_a: '⊘' };
+
+// ─── init ────────────────────────────────────────────────────
+window.onload = async () => {
+  const u = await waitForCurrentUser();
+  CALLER = u;
+
+  // gate:HR-only(對齊 backend isBackofficeRole)
+  if (!u || !window.Roles?.isBackofficeRole(u)) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const employeeId = params.get('employee_id');
+  const checklistId = params.get('id');
+
+  if (!employeeId && !checklistId) {
+    document.getElementById('checklist-body').innerHTML =
+      '<div class="empty-state"><div class="empty-icon">❓</div>缺少 ?employee_id=X 或 ?id=Y query 參數</div>';
+    return;
+  }
+
+  try {
+    const qs = checklistId ? `id=${encodeURIComponent(checklistId)}`
+                           : `employee_id=${encodeURIComponent(employeeId)}`;
+    const data = await api(`/api/resignation-checklists?${qs}`);
+    CHECKLIST = data.checklist;
+    ITEMS = data.items || [];
+    EMPLOYEE = data.employee;
+
+    renderEmployeeHeader();
+    renderBody();
+  } catch (e) {
+    toast('載入失敗:' + e.message, 'error');
+    document.getElementById('checklist-body').innerHTML =
+      `<div class="empty-state"><div class="empty-icon">⚠️</div>載入失敗:${escHtml(e.message)}</div>`;
+  }
+};
+
+// ─── render employee header ──────────────────────────────────
+function renderEmployeeHeader() {
+  if (!EMPLOYEE) {
+    document.getElementById('emp-name').textContent = '查無此員工';
+    return;
+  }
+  document.getElementById('emp-avatar').textContent = (EMPLOYEE.name || EMPLOYEE.id || '?').slice(0, 1);
+  document.getElementById('emp-name').textContent = EMPLOYEE.name || EMPLOYEE.id;
+
+  const metaParts = [];
+  metaParts.push(`員工編號 <b>${escHtml(EMPLOYEE.id)}</b>`);
+  if (EMPLOYEE.dept_name) metaParts.push(`部門 <b>${escHtml(EMPLOYEE.dept_name)}</b>`);
+  if (EMPLOYEE.hire_date) metaParts.push(`入職 <b>${fmtDate(EMPLOYEE.hire_date)}</b>`);
+  if (EMPLOYEE.resigned_at) metaParts.push(`離職日 <b>${fmtDate(EMPLOYEE.resigned_at)}</b>`);
+  if (EMPLOYEE.resigned_reason) metaParts.push(`原因 <b>${escHtml(EMPLOYEE.resigned_reason)}</b>`);
+  document.getElementById('emp-meta').innerHTML = metaParts.join('');
+
+  // approval request deep-link
+  if (CHECKLIST?.approval_request_id) {
+    const linkEl = document.getElementById('emp-approval-link');
+    linkEl.href = `/approvals.html?id=${encodeURIComponent(CHECKLIST.approval_request_id)}`;
+    linkEl.style.display = '';
+  }
+}
+
+// ─── render body(checklist + progress + categories)──────────
+function renderBody() {
+  const bodyEl = document.getElementById('checklist-body');
+
+  if (!CHECKLIST) {
+    // PHASE 4 MVP 不實作「補建按鈕」、僅顯示提示(F-future 加 onclick="rebuildChecklist()")
+    bodyEl.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        該員工尚未建立離職檢核表<br>
+        <span style="font-size:12px;opacity:.6">(applyResignation cascade 未跑、或建立失敗;補建按鈕 backlog)</span>
+      </div>`;
+    return;
+  }
+
+  // 計總進度
+  const total = ITEMS.length;
+  const completed = ITEMS.filter(it => it.status === 'done' || it.status === 'n_a').length;
+  const pct = total ? Math.round((completed / total) * 100) : 0;
+
+  // 按 category 分組(保留 item_seq order)
+  const groups = {};
+  for (const it of ITEMS) {
+    if (!groups[it.category]) {
+      groups[it.category] = { label: it.category_label, items: [] };
+    }
+    groups[it.category].items.push(it);
+  }
+  // 維持 category 順序:用第一個 item 的 seq 排序
+  const catOrder = Object.entries(groups)
+    .sort(([, a], [, b]) => a.items[0].item_seq - b.items[0].item_seq);
+
+  let html = `
+    <div class="card" style="margin-bottom:16px;padding:18px 22px">
+      <div class="progress-wrap">
+        <span class="progress-num"><span id="prog-num">${completed}</span> / ${total}</span>
+        <div class="progress-bar"><div class="progress-fill" id="prog-fill" style="width:${pct}%"></div></div>
+        <span class="progress-pct" id="prog-pct">${pct}%</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);font-family:'DM Mono',monospace;display:flex;gap:14px;flex-wrap:wrap">
+        <span>狀態 <b id="cl-status" style="color:var(--accent2)">${escHtml(CHECKLIST.status)}</b></span>
+        <span>建立 <b>${fmtDateTime(CHECKLIST.created_at)}</b></span>
+        <span>最後更新 <b id="cl-updated">${fmtDateTime(CHECKLIST.updated_at)}</b></span>
+        ${CHECKLIST.completed_at ? `<span>完成 <b style="color:#4ADE80">${fmtDateTime(CHECKLIST.completed_at)}</b></span>` : ''}
+      </div>
+    </div>`;
+
+  // 8 個 category section
+  for (const [catKey, group] of catOrder) {
+    const catDone = group.items.filter(it => it.status === 'done' || it.status === 'n_a').length;
+    html += `
+      <div class="cat-card" data-cat="${escHtml(catKey)}">
+        <div class="cat-header" onclick="toggleCategory(this.parentElement)">
+          <div class="cat-title">${escHtml(group.label)}</div>
+          <div style="display:flex;align-items:center">
+            <span class="cat-prog" id="cat-prog-${escHtml(catKey)}">${catDone} / ${group.items.length}</span>
+            <span class="cat-chevron">▾</span>
+          </div>
+        </div>
+        <div class="cat-body">
+          ${group.items.map(it => renderItemRow(it)).join('')}
+        </div>
+      </div>`;
+  }
+
+  bodyEl.innerHTML = html;
+}
+
+// ─── render single item row ──────────────────────────────────
+function renderItemRow(it) {
+  const isAutoDone = ['系統自動完成', '系統自動 ✅'].includes(String(it.note || '').trim())
+                    || (it.regulation_basis && it.regulation_basis.includes('系統自動'));
+  const completedByName = it.completed_by ? escHtml(it.completed_by) : '系統';
+
+  const stBtns = ['pending', 'done', 'n_a'].map(st => `
+    <button class="st-btn ${it.status === st ? 'active ' + st : ''}"
+            onclick="updateItemStatus('${escHtml(it.id)}', '${st}')">
+      ${STATUS_ICONS[st]} ${STATUS_LABELS[st]}
+    </button>`).join('');
+
+  return `
+    <div class="item-row ${isAutoDone ? 'auto-done' : ''}" data-item-id="${escHtml(it.id)}">
+      <div class="item-seq">#${it.item_seq}</div>
+      <div>
+        <div class="item-name">${escHtml(it.item_name)}</div>
+        ${it.regulation_basis ? `<div class="item-basis">${escHtml(it.regulation_basis)}</div>` : ''}
+        <textarea class="item-note-input" placeholder="備註(離焦自動儲存)"
+                  onblur="updateItemNote('${escHtml(it.id)}', this.value)">${escHtml(it.note || '')}</textarea>
+        <div class="item-meta">
+          ${it.completed_at ? `<span>完成 ${fmtDateTime(it.completed_at)}</span>` : ''}
+          ${it.completed_by ? `<span>經手 ${completedByName}</span>` : (it.status !== 'pending' && it.note === '系統自動完成' ? '<span>經手 系統</span>' : '')}
+        </div>
+      </div>
+      <div class="st-grp">${stBtns}</div>
+    </div>`;
+}
+
+// ─── toggle collapse ─────────────────────────────────────────
+function toggleCategory(card) {
+  card.classList.toggle('collapsed');
+}
+
+// ─── PATCH item status ───────────────────────────────────────
+async function updateItemStatus(itemId, newStatus) {
+  setSavePill('saving', '儲存中…');
+  try {
+    const r = await api(`/api/resignation-checklists?item_id=${encodeURIComponent(itemId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: newStatus }),
+    });
+    // 更新 local cache
+    const idx = ITEMS.findIndex(x => x.id === itemId);
+    if (idx >= 0 && r.item) ITEMS[idx] = r.item;
+    if (r.checklist_status) {
+      CHECKLIST.status = r.checklist_status;
+      if (r.checklist_status === 'completed') CHECKLIST.completed_at = new Date().toISOString();
+      else CHECKLIST.completed_at = null;
+    }
+    CHECKLIST.updated_at = new Date().toISOString();
+
+    rerenderProgressOnly();
+    rerenderItemRow(itemId);
+    setSavePill('saved', '已儲存');
+  } catch (e) {
+    setSavePill('failed', '儲存失敗');
+    toast('儲存失敗:' + e.message, 'error');
+  }
+}
+
+// ─── PATCH item note(onblur)─────────────────────────────────
+async function updateItemNote(itemId, newNote) {
+  const idx = ITEMS.findIndex(x => x.id === itemId);
+  if (idx < 0) return;
+  // 沒改不打
+  if ((ITEMS[idx].note || '') === (newNote || '')) return;
+
+  setSavePill('saving', '儲存中…');
+  try {
+    const r = await api(`/api/resignation-checklists?item_id=${encodeURIComponent(itemId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ note: newNote }),
+    });
+    if (r.item) ITEMS[idx] = r.item;
+    CHECKLIST.updated_at = new Date().toISOString();
+    rerenderProgressMetaOnly();
+    setSavePill('saved', '已儲存');
+  } catch (e) {
+    setSavePill('failed', '儲存失敗');
+    toast('儲存失敗:' + e.message, 'error');
+  }
+}
+
+// ─── 局部 render:只更新進度條 + status 標籤 + category 計數 ──
+function rerenderProgressOnly() {
+  const total = ITEMS.length;
+  const completed = ITEMS.filter(it => it.status === 'done' || it.status === 'n_a').length;
+  const pct = total ? Math.round((completed / total) * 100) : 0;
+
+  const numEl = document.getElementById('prog-num');
+  const fillEl = document.getElementById('prog-fill');
+  const pctEl = document.getElementById('prog-pct');
+  const statusEl = document.getElementById('cl-status');
+  if (numEl) numEl.textContent = completed;
+  if (fillEl) fillEl.style.width = pct + '%';
+  if (pctEl) pctEl.textContent = pct + '%';
+  if (statusEl) statusEl.textContent = CHECKLIST.status;
+  rerenderProgressMetaOnly();
+
+  // 每 category 計數
+  const groups = {};
+  for (const it of ITEMS) {
+    (groups[it.category] = groups[it.category] || []).push(it);
+  }
+  for (const [catKey, items] of Object.entries(groups)) {
+    const done = items.filter(i => i.status === 'done' || i.status === 'n_a').length;
+    const el = document.getElementById(`cat-prog-${catKey}`);
+    if (el) el.textContent = `${done} / ${items.length}`;
+  }
+}
+
+function rerenderProgressMetaOnly() {
+  const upEl = document.getElementById('cl-updated');
+  if (upEl) upEl.textContent = fmtDateTime(CHECKLIST.updated_at);
+}
+
+function rerenderItemRow(itemId) {
+  const it = ITEMS.find(x => x.id === itemId);
+  if (!it) return;
+  const row = document.querySelector(`.item-row[data-item-id="${CSS.escape(itemId)}"]`);
+  if (!row) return;
+  // 三個 st-btn active class 重新算
+  const btns = row.querySelectorAll('.st-btn');
+  ['pending', 'done', 'n_a'].forEach((st, i) => {
+    if (!btns[i]) return;
+    btns[i].className = `st-btn ${it.status === st ? 'active ' + st : ''}`;
+  });
+  // meta(completed_at / completed_by)
+  const meta = row.querySelector('.item-meta');
+  if (meta) {
+    const parts = [];
+    if (it.completed_at) parts.push(`<span>完成 ${fmtDateTime(it.completed_at)}</span>`);
+    if (it.completed_by) parts.push(`<span>經手 ${escHtml(it.completed_by)}</span>`);
+    meta.innerHTML = parts.join('');
+  }
+}
+
+// ─── save indicator ──────────────────────────────────────────
+let savePillTimer = null;
+function setSavePill(kind, text) {
+  const el = document.getElementById('save-pill');
+  el.className = `save-pill show ${kind}`;
+  el.textContent = text;
+  if (savePillTimer) clearTimeout(savePillTimer);
+  if (kind === 'saved') {
+    savePillTimer = setTimeout(() => { el.classList.remove('show'); }, 2000);
+  }
+}
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/utils.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

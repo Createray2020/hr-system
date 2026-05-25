@@ -13,14 +13,20 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const calls = { tables: [], updates: [], inserts: [] };
+const calls = { tables: [], updates: [], inserts: [], deletes: [] };
 const dataByQuery = {};
-const overrides = { caller: null, employeesUpdateError: null };
+const overrides = {
+  caller: null,
+  employeesUpdateError: null,
+  deleteErrors: null,  // { table: errorMessage } — 模擬 delete 失敗
+  insertErrors: null,  // { table: errorMessage } — 模擬 insert 失敗
+};
 
 vi.mock('../lib/supabase.js', () => {
   function chain(table) {
     const c = {};
     let where = {};
+    let opType = 'select'; // select/insert/update/delete — 給 c.then 區分回傳
     c.select = vi.fn(() => c);
     c.eq = vi.fn((col, val) => { where[col] = val; return c; });
     c.neq = vi.fn(() => c);
@@ -28,6 +34,7 @@ vi.mock('../lib/supabase.js', () => {
     c.gte = vi.fn(() => c); c.lte = vi.fn(() => c);
     c.order = vi.fn(() => c); c.limit = vi.fn(() => c);
     c.update = vi.fn((patch) => {
+      opType = 'update';
       calls.updates.push({ table, patch, where: { ...where } });
       // B7 test:模擬 employees update 失敗
       if (table === 'employees' && overrides.employeesUpdateError) {
@@ -35,7 +42,16 @@ vi.mock('../lib/supabase.js', () => {
       }
       return c;
     });
-    c.insert = vi.fn((rows) => { calls.inserts.push({ table, rows }); return c; });
+    c.insert = vi.fn((rows) => {
+      opType = 'insert';
+      calls.inserts.push({ table, rows });
+      return c;
+    });
+    c.delete = vi.fn(() => {
+      opType = 'delete';
+      calls.deletes.push({ table });
+      return c;
+    });
     c.single = vi.fn(() => Promise.resolve({
       data: dataByQuery[`${table}:single`] ?? null,
       error: dataByQuery[`${table}:single`] ? null : { code: 'PGRST116' },
@@ -43,9 +59,25 @@ vi.mock('../lib/supabase.js', () => {
     c.maybeSingle = vi.fn(() => Promise.resolve({
       data: dataByQuery[`${table}:maybeSingle`] ?? null, error: null,
     }));
-    c.then = (onF, onR) => Promise.resolve({
-      data: dataByQuery[`${table}:then`] ?? [], error: null,
-    }).then(onF, onR);
+    c.then = (onF, onR) => {
+      if (opType === 'insert') {
+        const err = overrides.insertErrors?.[table];
+        return Promise.resolve({
+          data: null,
+          error: err ? { message: err } : null,
+        }).then(onF, onR);
+      }
+      if (opType === 'delete') {
+        const err = overrides.deleteErrors?.[table];
+        return Promise.resolve({
+          data: null,
+          error: err ? { message: err } : null,
+        }).then(onF, onR);
+      }
+      return Promise.resolve({
+        data: dataByQuery[`${table}:then`] ?? [], error: null,
+      }).then(onF, onR);
+    };
     return c;
   }
   const client = { from: vi.fn((table) => { calls.tables.push(table); return chain(table); }) };
@@ -59,9 +91,14 @@ vi.mock('../lib/auth.js', () => ({
   }),
 }));
 
+// Hoisted spy — 從外部 capture push.js mock 的呼叫(B7.9-B7.11 assert 用)
+const { sendPushToRolesSpy } = vi.hoisted(() => ({
+  sendPushToRolesSpy: vi.fn(async () => ({ sent: 0 })),
+}));
+
 vi.mock('../lib/push.js', () => ({
   sendPushToEmployees: vi.fn(async () => ({ sent: 0 })),
-  sendPushToRoles:     vi.fn(async () => ({ sent: 0 })),
+  sendPushToRoles:     sendPushToRolesSpy,
   createNotifications: vi.fn(async () => undefined),
   createNotificationsForRoles: vi.fn(async () => undefined),
 }));
@@ -85,10 +122,13 @@ function makeReqRes({ method = 'POST', query = {}, body = {} } = {}) {
 }
 
 beforeEach(() => {
-  calls.tables = []; calls.updates = []; calls.inserts = [];
+  calls.tables = []; calls.updates = []; calls.inserts = []; calls.deletes = [];
   for (const k of Object.keys(dataByQuery)) delete dataByQuery[k];
   overrides.caller = null;
   overrides.employeesUpdateError = null;
+  overrides.deleteErrors = null;
+  overrides.insertErrors = null;
+  sendPushToRolesSpy.mockClear();
   // 預設靜默 console.error / console.log(B7 cascade 預期會輸出 audit log、
   // 不污染 vitest output;個別 case 需要可 spyOn 驗證)
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -256,6 +296,155 @@ describe('B7:resignation step 3 approve → cascade employees', () => {
         employee_id: 'EMP_01251101',
         resigned_at: '2026-05-31T00:00:00+08:00',
         approver_id: 'HR1',
+      }),
+    );
+  });
+
+  // ─── Phase 2 cascade enhancement(B7.7 ~ B7.11)─────────────
+  // 對應 commit 2a0acc7 之後的 Phase 2 patch:cascade 完成「員工 status='resigned'」
+  // 後額外做 3 件事:清 push_subscriptions / 建 checklist + 46 items / 通知 HR
+
+  it('B7.7 cascade 觸發 push_subscriptions DELETE', async () => {
+    overrides.caller = HR;
+    setupResignationStep3({
+      employee: { id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1', status: 'active', resigned_at: null },
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    // 驗 push_subscriptions delete 有被呼叫
+    const psDelete = calls.deletes.find(d => d.table === 'push_subscriptions');
+    expect(psDelete).toBeDefined();
+    // 驗 audit console.log
+    expect(console.log).toHaveBeenCalledWith(
+      '[applyResignation] push_subscriptions cleaned',
+      expect.objectContaining({ employee_id: 'EMP_01251101' }),
+    );
+  });
+
+  it('B7.8 cascade 觸發 checklist + 46 items 建立(6 個 AUTO_DONE done、其餘 pending)', async () => {
+    overrides.caller = HR;
+    setupResignationStep3({
+      employee: { id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1', status: 'active', resigned_at: null },
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // 驗 checklist row(1 筆 status='draft')
+    const clInserts = calls.inserts.filter(i => i.table === 'resignation_checklists');
+    expect(clInserts).toHaveLength(1);
+    const clRow = clInserts[0].rows[0];
+    expect(clRow.employee_id).toBe('EMP_01251101');
+    expect(clRow.approval_request_id).toBe('APR_R1');
+    expect(clRow.status).toBe('draft');
+    expect(clRow.id).toMatch(/^RCL\d+$/);
+
+    // 驗 items 46 筆(單一 bulk insert)
+    const itemInserts = calls.inserts.filter(i => i.table === 'resignation_checklist_items');
+    expect(itemInserts).toHaveLength(1);
+    const items = itemInserts[0].rows;
+    expect(items).toHaveLength(46);
+
+    // AUTO_DONE 6 個(seq 16/17/23/43/44/46)
+    const autoDoneSeqs = new Set([16, 17, 23, 43, 44, 46]);
+    const doneItems = items.filter(it => it.status === 'done');
+    expect(doneItems).toHaveLength(6);
+    expect(new Set(doneItems.map(it => it.item_seq))).toEqual(autoDoneSeqs);
+    doneItems.forEach(it => {
+      expect(it.completed_at).toBeTruthy();
+      expect(it.completed_by).toBeNull();
+      expect(it.note).toBe('系統自動完成');
+    });
+
+    // 其餘 40 個 pending
+    const pendingItems = items.filter(it => it.status === 'pending');
+    expect(pendingItems).toHaveLength(40);
+    pendingItems.forEach(it => {
+      expect(it.completed_at).toBeNull();
+      expect(it.note).toBe('');
+    });
+
+    // 每筆 item 都有 category / category_label / item_name / item_seq
+    items.forEach(it => {
+      expect(it.category).toMatch(/^[1-8]_/);
+      expect(it.category_label).toBeTruthy();
+      expect(it.item_seq).toBeGreaterThanOrEqual(1);
+      expect(it.item_seq).toBeLessThanOrEqual(46);
+      expect(it.item_name).toBeTruthy();
+      expect(it.checklist_id).toBe(clRow.id);
+    });
+  });
+
+  it('B7.9 cascade 觸發 HR push notification(url 含 employee_id、body 含 name)', async () => {
+    overrides.caller = HR;
+    setupResignationStep3({
+      employee: { id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1', status: 'active', resigned_at: null },
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+
+    expect(sendPushToRolesSpy).toHaveBeenCalledWith(
+      ['hr', 'admin'],
+      expect.objectContaining({
+        title: expect.stringContaining('離職核准'),
+        body: expect.stringContaining('柯郁含'),
+        url: expect.stringContaining('employee_id=EMP_01251101'),
+      }),
+    );
+  });
+
+  it('B7.10 push_subscriptions delete 失敗 → checklist 仍建 + HR 通知仍送 + approval completed', async () => {
+    overrides.caller = HR;
+    overrides.deleteErrors = { 'push_subscriptions': 'simulated delete error' };
+    setupResignationStep3({
+      employee: { id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1', status: 'active', resigned_at: null },
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+
+    // approval 仍 200 / completed
+    expect(res.statusCode).toBe(200);
+    const reqUpd = calls.updates.find(u =>
+      u.table === 'approval_requests' && u.patch.status === 'completed');
+    expect(reqUpd).toBeDefined();
+
+    // push delete error 沒擋:checklist 仍建
+    const clInserts = calls.inserts.filter(i => i.table === 'resignation_checklists');
+    expect(clInserts).toHaveLength(1);
+
+    // HR push 仍送
+    expect(sendPushToRolesSpy).toHaveBeenCalledWith(['hr', 'admin'], expect.anything());
+  });
+
+  it('B7.11 checklist insert 失敗 → HR push 仍送、URL fallback /employees.html', async () => {
+    overrides.caller = HR;
+    overrides.insertErrors = { 'resignation_checklists': 'simulated insert error' };
+    setupResignationStep3({
+      employee: { id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1', status: 'active', resigned_at: null },
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+
+    // approval 仍 200(best-effort、不擋)
+    expect(res.statusCode).toBe(200);
+
+    // HR push 仍呼叫、URL fallback 到 /employees.html(checklistId 沒建成功)
+    expect(sendPushToRolesSpy).toHaveBeenCalledWith(
+      ['hr', 'admin'],
+      expect.objectContaining({
+        url: '/employees.html',
       }),
     );
   });
