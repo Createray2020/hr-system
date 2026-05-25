@@ -106,7 +106,9 @@ const RESIGNATION_CHECKLIST_SEED = [
  * 規則(對齊 leave Phase 2.x dept+is_manager 嚴格設計):
  *   step.approver_role='manager':caller.is_manager=true && caller.dept_id === applicant.dept_id
  *   step.approver_role='ceo':    caller.role IN ('ceo','chairman')(admin 不視同)
- *   step.approver_role='hr':     caller.role === 'hr'(admin 不視同)
+ *   step.approver_role='hr':     caller.role IN ('hr','ceo','chairman')
+ *                                B32:中小企業老闆兼 HR 場景、CEO/chairman 可代簽 HR step
+ *                                (admin 不視同、保留既有「admin 不視同 hr」test 不 break)
  *   其他 role:caller.role === step.approver_role 嚴格對等
  *
  * self-approval 在外層擋(此函式只檢 role + dept、不看 applicant id)。
@@ -121,7 +123,7 @@ function canApproveStep(caller, step, applicantDeptId) {
         && caller.dept_id === applicantDeptId;
   }
   if (r === 'ceo')  return caller.role === 'ceo' || caller.role === 'chairman';
-  if (r === 'hr')   return caller.role === 'hr';
+  if (r === 'hr')   return ['hr', 'ceo', 'chairman'].includes(caller.role); // B32
   return caller.role === r;
 }
 
@@ -188,15 +190,22 @@ export default async function handler(req, res) {
     }
 
     // ── 待我審批（依角色取對應步驟） ──────────────────────────────────────────
+    // B32:role='ceo'/'chairman' 撈 step_number IN (2, 3) 兼簽 HR step(中小企業老闆兼 HR)
+    //      role='ceo'/'chairman' 場景不 filter approver_role(可能是 'ceo' 或 'hr')
     if (type === 'pending' && role) {
-      const stepNum = role === 'manager' ? 1 : role === 'ceo' || role === 'chairman' ? 2 : 3;
-      const { data: stepsRaw, error } = await supabaseAdmin
+      const stepNums = role === 'manager' ? [1]
+                     : (role === 'ceo' || role === 'chairman') ? [2, 3]
+                     : [3];
+      let query = supabaseAdmin
         .from('approval_steps')
         .select('*, approval_requests(*, employees!applicant_id(name, dept_id, position, avatar, departments(name)))')
-        .eq('step_number', stepNum)
-        .eq('approver_role', role === 'chairman' ? 'ceo' : role)
-        .eq('status', 'in_progress')
-        .order('created_at', { ascending: false });
+        .in('step_number', stepNums)
+        .eq('status', 'in_progress');
+      // ceo/chairman 兼簽場景不限定 approver_role;其他 role 仍嚴格 filter
+      if (role !== 'ceo' && role !== 'chairman') {
+        query = query.eq('approver_role', role);
+      }
+      const { data: stepsRaw, error } = await query.order('created_at', { ascending: false });
       if (error) return res.status(500).json({ error: error.message });
 
       // B13:role='manager' 時 JS-side dept-scope filter(對齊 api/pending-approvals.js)
@@ -341,23 +350,35 @@ export default async function handler(req, res) {
         });
       }
 
+      // B32:CEO/chairman 代簽 HR step 場景旗標
+      // (公司無獨立 HR、由 CEO 兼;此 case 需要放寬跨 step 同人連簽 guard + 加 audit note)
+      const isCeoActingAsHr = (caller.role === 'ceo' || caller.role === 'chairman')
+                            && step.approver_role === 'hr';
+
       // 跨 step 同人連簽 guard:caller.id 已在其他 step 簽過 → 403
+      // B32 例外:CEO/chairman 代簽 HR step 時允許跨 step 同人(本來就是同人兩個角色)
       const { data: priorSteps } = await supabaseAdmin
         .from('approval_steps').select('approver_id, step_number, status')
         .eq('request_id', request_id).neq('step_number', step_number);
       const alreadySigned = (priorSteps || [])
         .filter(s => s.status === 'approved' && s.approver_id === caller.id);
-      if (alreadySigned.length > 0) {
+      if (alreadySigned.length > 0 && !isCeoActingAsHr) {
         return res.status(403).json({
           error: '同一人不可跨 step 連簽',
           previous_step: alreadySigned[0].step_number,
         });
       }
 
+      // B32:加 audit note 標記 CEO 代簽
+      const auditSuffix = ' [CEO 代簽 HR step(公司無獨立 HR)]';
+      const finalNote = isCeoActingAsHr
+        ? (note ? `${note}${auditSuffix}` : auditSuffix.trim())
+        : (note || '');
+
       await supabaseAdmin.from('approval_steps').update({
         status: 'approved',
         approver_id: caller.id,           // 強制用 caller.id
-        note: note || '',
+        note: finalNote,
         handled_at: new Date().toISOString(),
       }).eq('request_id', request_id).eq('step_number', step_number);
 

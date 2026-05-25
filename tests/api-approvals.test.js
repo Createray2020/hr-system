@@ -275,6 +275,82 @@ describe('/api/approvals approve — gate', () => {
     expect(res.statusCode).toBe(403);
     expect(res.body?.error).toMatch(/不可跨 step 連簽/);
   });
+
+  // ─── B32:CEO/chairman 可代簽 HR step(中小企業老闆兼 HR)──────────
+  it('B32.1 CEO 批 hr 階(step 3、無前 step 連簽)→ 200 + step.note 含 CEO 代簽', async () => {
+    overrides.caller = CEO;
+    setupManagerStep({
+      request: { total_steps: 3 },
+      step: { approver_role: 'hr', step_number: 3 },
+      priorSteps: [
+        { step_number: 1, status: 'approved', approver_id: 'M1' },
+        { step_number: 2, status: 'approved', approver_id: 'OTHER_CEO' }, // 不同人簽 step 2
+      ],
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const stepUpd = calls.updates.find(u =>
+      u.table === 'approval_steps' && u.patch.status === 'approved');
+    expect(stepUpd).toBeDefined();
+    expect(stepUpd.patch.approver_id).toBe('C1');
+    expect(stepUpd.patch.note).toMatch(/CEO 代簽 HR step/);
+  });
+
+  it('B32.2 chairman 批 hr 階(同人 step 2 已簽)→ 200(放寬跨 step guard)+ audit note', async () => {
+    overrides.caller = CHR;
+    setupManagerStep({
+      request: { total_steps: 3 },
+      step: { approver_role: 'hr', step_number: 3 },
+      priorSteps: [
+        { step_number: 1, status: 'approved', approver_id: 'M1' },
+        { step_number: 2, status: 'approved', approver_id: 'CH1' }, // chairman 已簽 step 2
+      ],
+    });
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const stepUpd = calls.updates.find(u =>
+      u.table === 'approval_steps' && u.patch.status === 'approved');
+    expect(stepUpd.patch.note).toMatch(/CEO 代簽 HR step/);
+  });
+
+  it('B32.3 純 employee 批 hr 階 → 403', async () => {
+    overrides.caller = E1;
+    setupManagerStep({
+      request: { applicant_id: 'OTHER_EMP', total_steps: 3 },  // 避開 self-approval guard
+      step: { approver_role: 'hr', step_number: 3 },
+    });
+    dataByQuery['employees:maybeSingle'] = { dept_id: 'D2' };  // applicant 別 dept
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('B32.4 GET ?type=pending&role=ceo 撈 step 2 + step 3 in_progress', async () => {
+    overrides.caller = CEO;
+    dataByQuery['approval_steps:then'] = [
+      { request_id: 'APR_A', step_number: 2, approver_role: 'ceo', status: 'in_progress',
+        approval_requests: { id: 'APR_A', applicant_id: 'E_a', employees: { dept_id: 'D1' } } },
+      { request_id: 'APR_B', step_number: 3, approver_role: 'hr',  status: 'in_progress',
+        approval_requests: { id: 'APR_B', applicant_id: 'E_b', employees: { dept_id: 'D2' } } },
+    ];
+    const [req, res] = makeReqRes({
+      method: 'GET',
+      query: { type: 'pending', role: 'ceo' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveLength(2);
+    const stepNums = res.body.map(s => s.step_number).sort();
+    expect(stepNums).toEqual([2, 3]);
+  });
 });
 
 // ════════════════════════════════════════════════════════════
