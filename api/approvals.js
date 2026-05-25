@@ -715,9 +715,10 @@ async function applyResignation(request, caller) {
       return;
     }
 
-    // 撈現況 + idempotent guard(name 給 cascade enhancement 3 HR 通知用)
+    // 撈現況 + idempotent guard(name 給 cascade enhancement 3 HR 通知用;
+    // base_salary / hourly_rate 給 Enhancement #4/#5 結算公式用 — B26 批次 2)
     const { data: before, error: beforeErr } = await supabaseAdmin
-      .from('employees').select('id, name, status, resigned_at')
+      .from('employees').select('id, name, status, resigned_at, base_salary, hourly_rate')
       .eq('id', employee_id).maybeSingle();
 
     if (beforeErr) {
@@ -837,6 +838,138 @@ async function applyResignation(request, caller) {
       console.log('[applyResignation] HR push sent', { employee_id });
     } catch (err) {
       console.error('[applyResignation] HR push failed',
+        { request_id: request.id, employee_id, err: err.message });
+    }
+
+    // ── B26 批次 2 Cascade Enhancement #4:annual_leave_records 結算 ──
+    // 對所有 status='active' record 標 'paid_out' + settlement_amount = remaining × (base/30)
+    // (§38 法定特休折現公式、不同於 daily_wage_snapshot 用 workdaysInMonth)
+    // leave_balance_logs.changed_by NOT NULL → caller.id 不存在時 fallback employee_id
+    // (對齊 lib/leave/annual-rollover.js:60 「SYSTEM 沒 employees row 用本人 id 佔位」)
+    // best-effort:失敗只 console.error、不擋。
+    try {
+      const baseSalary = Number(before?.base_salary) || 0;
+      const dailyWageSettlement = baseSalary > 0 ? baseSalary / 30 : 0;
+      const changedBy = caller?.id || employee_id;
+
+      const { data: activeRecords, error: selErr } = await supabaseAdmin
+        .from('annual_leave_records')
+        .select('id, granted_days, used_days')
+        .eq('employee_id', employee_id)
+        .eq('status', 'active');
+      if (selErr) throw selErr;
+
+      for (const rec of activeRecords || []) {
+        const remainingDays = Math.max(
+          0,
+          (Number(rec.granted_days) || 0) - (Number(rec.used_days) || 0),
+        );
+        const settlementAmount = Math.round(remainingDays * dailyWageSettlement * 100) / 100;
+
+        const { error: updErr } = await supabaseAdmin
+          .from('annual_leave_records').update({
+            status: 'paid_out',
+            settled_at: new Date().toISOString(),
+            settled_by: changedBy,
+            settlement_amount: settlementAmount,
+          }).eq('id', rec.id);
+        if (updErr) {
+          console.error('[applyResignation] annual_leave UPDATE failed',
+            { request_id: request.id, employee_id, record_id: rec.id, err: updErr.message });
+          continue;
+        }
+
+        // append-only audit log(failed log 不擋 cascade、純 audit 缺失)
+        try {
+          await supabaseAdmin.from('leave_balance_logs').insert([{
+            employee_id,
+            balance_type: 'annual',
+            annual_record_id: rec.id,
+            change_type: 'settle',
+            hours_delta: -(remainingDays * 8),
+            changed_by: changedBy,
+            reason: 'B7 cascade: resignation settlement',
+          }]);
+        } catch (logErr) {
+          console.error('[applyResignation] leave_balance_logs INSERT failed (annual)',
+            { record_id: rec.id, err: logErr.message });
+        }
+
+        console.log('[applyResignation] annual_leave settled',
+          { record_id: rec.id, remaining_days: remainingDays, settlement_amount: settlementAmount });
+      }
+    } catch (err) {
+      console.error('[applyResignation] annual_leave cascade failed',
+        { request_id: request.id, employee_id, err: err.message });
+    }
+
+    // ── B26 批次 2 Cascade Enhancement #5:comp_time_balance 結算 ──
+    // 對所有 status='active' record 標 'expired_paid' + expiry_payout_amount
+    // payout = remaining_hours × hourly_rate × multiplier
+    // MVP 用 multiplier=1.34(平日加班預設、對齊階段 1 偵察決定)、未來如要對齊
+    // overtime_requests.pay_multiplier 需擴邏輯
+    // best-effort:失敗只 console.error、不擋。
+    try {
+      const hourlyRate = Number(before?.hourly_rate)
+                       || (Number(before?.base_salary) / 240)
+                       || 0;
+      const resignedAtDate = resignedAtIso.slice(0, 10);  // 'YYYY-MM-DD'
+      const multiplier = 1.34;
+      const changedBy = caller?.id || employee_id;
+
+      const { data: activeComp, error: selErr } = await supabaseAdmin
+        .from('comp_time_balance')
+        .select('id, earned_hours, used_hours, expires_at')
+        .eq('employee_id', employee_id)
+        .eq('status', 'active');
+      if (selErr) throw selErr;
+
+      for (const rec of activeComp || []) {
+        const remainingHours = Math.max(
+          0,
+          (Number(rec.earned_hours) || 0) - (Number(rec.used_hours) || 0),
+        );
+        const payout = Math.round(remainingHours * hourlyRate * multiplier * 100) / 100;
+
+        // expires_at clamp:取既有 expires_at 跟 resigned_at 較早者
+        // (避免 future expires_at 被覆寫到更晚的 resigned_at)
+        const newExpiresAt = rec.expires_at && rec.expires_at < resignedAtDate
+          ? rec.expires_at
+          : resignedAtDate;
+
+        const { error: updErr } = await supabaseAdmin
+          .from('comp_time_balance').update({
+            status: 'expired_paid',
+            expires_at: newExpiresAt,
+            expiry_payout_amount: payout,
+            expiry_processed_at: new Date().toISOString(),
+          }).eq('id', rec.id);
+        if (updErr) {
+          console.error('[applyResignation] comp_time UPDATE failed',
+            { request_id: request.id, employee_id, record_id: rec.id, err: updErr.message });
+          continue;
+        }
+
+        try {
+          await supabaseAdmin.from('leave_balance_logs').insert([{
+            employee_id,
+            balance_type: 'comp',
+            comp_record_id: rec.id,
+            change_type: 'settle',
+            hours_delta: -remainingHours,
+            changed_by: changedBy,
+            reason: 'B7 cascade: resignation comp settlement',
+          }]);
+        } catch (logErr) {
+          console.error('[applyResignation] leave_balance_logs INSERT failed (comp)',
+            { record_id: rec.id, err: logErr.message });
+        }
+
+        console.log('[applyResignation] comp settled',
+          { record_id: rec.id, remaining_hours: remainingHours, payout });
+      }
+    } catch (err) {
+      console.error('[applyResignation] comp_time cascade failed',
         { request_id: request.id, employee_id, err: err.message });
     }
   } catch (err) {

@@ -448,4 +448,99 @@ describe('B7:resignation step 3 approve → cascade employees', () => {
       }),
     );
   });
+
+  // ─── B26 批次 2 cascade enhancement #4 + #5 ────────────────
+  // 對應 commit 57b81cb 之後的 B26 batch 2 patch:
+  // #4 annual_leave_records 全 active → paid_out + settlement_amount(§38 base/30)
+  // #5 comp_time_balance 全 active → expired_paid + expiry_payout_amount(hourly × multiplier)
+
+  it('B26.1 cascade Enhancement #4:active annual_leave → paid_out + settlement_amount', async () => {
+    overrides.caller = HR;
+    setupResignationStep3({
+      employee: {
+        id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1',
+        status: 'active', resigned_at: null,
+        base_salary: 30000, hourly_rate: 125,
+      },
+    });
+    // 2 筆 active annual_leave_records:Record 73 + Record 74(柯郁含 hotfix 後狀態)
+    dataByQuery['annual_leave_records:then'] = [
+      { id: 73, granted_days: 14, used_days: 3 },  // remaining 11
+      { id: 74, granted_days: 7,  used_days: 0 },  // remaining 7
+    ];
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // 2 個 annual_leave_records UPDATE 都標 paid_out
+    const annualUpdates = calls.updates.filter(u =>
+      u.table === 'annual_leave_records' && u.patch.status === 'paid_out');
+    expect(annualUpdates).toHaveLength(2);
+
+    // 驗 settlement_amount = remaining × (30000/30) = remaining × 1000
+    const settled = annualUpdates.map(u => u.patch.settlement_amount).sort((a, b) => a - b);
+    expect(settled).toEqual([7000, 11000]);
+
+    // 驗 settled_by = caller.id(HR1)、settled_at 有寫
+    annualUpdates.forEach(u => {
+      expect(u.patch.settled_by).toBe('HR1');
+      expect(u.patch.settled_at).toBeTruthy();
+    });
+
+    // 2 個 leave_balance_logs INSERT(annual)
+    const annualLogs = calls.inserts.filter(i =>
+      i.table === 'leave_balance_logs' && i.rows[0].balance_type === 'annual');
+    expect(annualLogs).toHaveLength(2);
+    annualLogs.forEach(log => {
+      expect(log.rows[0].change_type).toBe('settle');
+      expect(log.rows[0].changed_by).toBe('HR1');
+      expect(log.rows[0].reason).toMatch(/resignation settlement/);
+    });
+    // hours_delta = -(remaining_days × 8)
+    const deltas = annualLogs.map(l => l.rows[0].hours_delta).sort((a, b) => a - b);
+    expect(deltas).toEqual([-88, -56]);  // -11×8, -7×8
+  });
+
+  it('B26.2 cascade Enhancement #5:active comp_time → expired_paid + payout(× 1.34 multiplier)', async () => {
+    overrides.caller = HR;
+    setupResignationStep3({
+      employee: {
+        id: 'EMP_01251101', name: '柯郁含', dept_id: 'D1',
+        status: 'active', resigned_at: null,
+        base_salary: 30000, hourly_rate: 125,
+      },
+    });
+    // 1 筆 active comp:earned 8h、used 0h、expires_at 未來日(會被 clamp 到 resigned_at)
+    dataByQuery['comp_time_balance:then'] = [
+      { id: 100, earned_hours: 8, used_hours: 0, expires_at: '2026-12-31' },
+    ];
+    const [req, res] = makeReqRes({
+      body: { action: 'approve', request_id: 'APR_R1', step_number: 3 },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // comp_time_balance UPDATE
+    const compUpdates = calls.updates.filter(u =>
+      u.table === 'comp_time_balance' && u.patch.status === 'expired_paid');
+    expect(compUpdates).toHaveLength(1);
+
+    // payout = 8 × 125 × 1.34 = 1340
+    expect(compUpdates[0].patch.expiry_payout_amount).toBe(1340);
+
+    // expires_at clamp:既有 '2026-12-31' > resigned_at '2026-05-31' → 取 resigned_at
+    expect(compUpdates[0].patch.expires_at).toBe('2026-05-31');
+    expect(compUpdates[0].patch.expiry_processed_at).toBeTruthy();
+
+    // leave_balance_logs INSERT(comp)
+    const compLogs = calls.inserts.filter(i =>
+      i.table === 'leave_balance_logs' && i.rows[0].balance_type === 'comp');
+    expect(compLogs).toHaveLength(1);
+    expect(compLogs[0].rows[0].comp_record_id).toBe(100);
+    expect(compLogs[0].rows[0].change_type).toBe('settle');
+    expect(compLogs[0].rows[0].hours_delta).toBe(-8);
+    expect(compLogs[0].rows[0].changed_by).toBe('HR1');
+  });
 });
