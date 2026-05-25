@@ -114,3 +114,61 @@ describe('B26.7 listEmployeesForPayroll', () => {
     expect(result).toEqual([]);
   });
 });
+
+// ─── B26 批次 4 hourly_rate auto-recalc hook ─────────────────
+// helper 從 api/employees/[id].js export、直接 unit test、不走 handler full mock
+const { autoRecalcHourlyRate } = await import('../api/employees/[id].js');
+
+describe('B26.9 autoRecalcHourlyRate hook', () => {
+  it('傳 base_salary、未帶 hourly_rate → 自動算 base/240', () => {
+    const body = { base_salary: 36000 };
+    autoRecalcHourlyRate(body);
+    expect(body.hourly_rate).toBe(150);   // 36000 / 240 = 150
+  });
+
+  it('傳 base_salary + hourly_rate(前端已算)→ 不覆寫前端值', () => {
+    const body = { base_salary: 36000, hourly_rate: 200 };
+    autoRecalcHourlyRate(body);
+    expect(body.hourly_rate).toBe(200);   // 保留前端傳的
+  });
+
+  it('沒傳 base_salary → 不動 hourly_rate', () => {
+    const body = { dept_id: 'D1' };
+    autoRecalcHourlyRate(body);
+    expect(body.hourly_rate).toBeUndefined();
+  });
+
+  it('base_salary = 0(或負數)→ 不算(防 hourly_rate 變奇怪值)', () => {
+    const body1 = { base_salary: 0 };
+    autoRecalcHourlyRate(body1);
+    expect(body1.hourly_rate).toBeUndefined();
+    const body2 = { base_salary: -1000 };
+    autoRecalcHourlyRate(body2);
+    expect(body2.hourly_rate).toBeUndefined();
+  });
+
+  it('base_salary NaN / 非數字 → 不算', () => {
+    const body1 = { base_salary: 'abc' };
+    autoRecalcHourlyRate(body1);
+    expect(body1.hourly_rate).toBeUndefined();
+    const body2 = { base_salary: null };
+    autoRecalcHourlyRate(body2);
+    expect(body2.hourly_rate).toBeUndefined();
+  });
+
+  it('null / undefined body → 不爆', () => {
+    expect(() => autoRecalcHourlyRate(null)).not.toThrow();
+    expect(() => autoRecalcHourlyRate(undefined)).not.toThrow();
+  });
+
+  it('round2:base_salary 帶小數 → hourly_rate 對齊 2 位小數', () => {
+    const body = { base_salary: 30001 };
+    autoRecalcHourlyRate(body);
+    // 30001 / 240 = 125.00416666... → round2 = 125
+    expect(body.hourly_rate).toBe(125);
+    const body2 = { base_salary: 30500 };
+    autoRecalcHourlyRate(body2);
+    // 30500 / 240 = 127.0833... → round2 = 127.08
+    expect(body2.hourly_rate).toBe(127.08);
+  });
+});

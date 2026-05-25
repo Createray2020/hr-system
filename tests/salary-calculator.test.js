@@ -187,6 +187,10 @@ function makeFullRepo(over = {}) {
     updateAnnualRecord: vi.fn(async () => undefined),
     updateCompBalance:  vi.fn(async () => undefined),
 
+    // B26 批次 4:離職月 settlement source(employee_id-based、不限 month)
+    findAllPaidOutAnnualForEmployee:    vi.fn(async () => []),
+    findAllExpiredPaidCompForEmployee:  vi.fn(async () => []),
+
     // ─── 階段 2.5.2 新增 mock ────────────────────────────
     findEmployeeInsuranceSettings: vi.fn(async () => null),  // 預設無投保
     findActivePayrollPeriod:       vi.fn(async () => null),  // 預設無 active period
@@ -917,5 +921,123 @@ describe('calculateMonthlySalary — 階段 2.7.9 UPSERT idempotency', () => {
     expect(r.deduct_health_ins).toBe(545);
     expect(r.employer_cost_labor).toBe(2285);
     expect(r.employer_cost_health).toBe(1089);
+  });
+});
+
+// ─── B26 批次 4:離職月 pro-rata 整鏈路 ────────────────────────
+describe('calculateMonthlySalary — B26 批次 4 離職月 pro-rata', () => {
+  // 對齊柯郁含案實際數據:base=30000, hourly=125, resign_date=2026-05-13
+  //   worked_days=13, total_days_in_month=31, proRataRatio = 13/31 = 0.4193548...
+  //   prorata_base = round2(30000 × 13/31) = 12580.65
+  //   daily_wage_settlement = 30000 / 30 = 1000
+  function makeFinalMonthRepo(over = {}) {
+    return makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'EMP_01251101', base_salary: 30000, attendance_bonus: 0, employment_type: 'full_time',
+      })),
+      findEmployeeHourlyRate: vi.fn(async () => 125),
+      // existing 含 is_final_month 4 欄位(由 B26 批次 1 schema + 批次 3 cascade #6 填)
+      findSalaryRecord: vi.fn(async () => ({
+        id: 'S_EMP_01251101_2026_05',
+        is_final_month: true,
+        worked_days: 13,
+        total_days_in_month: 31,
+        pro_rata_mode: 'calendar_day',
+        status: 'draft',
+      })),
+      // 投保:勞健保 bracket + direct premium(便於 verify ratio)
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 30000,  labor_ins_employee: 690,  labor_ins_company: 2100,
+        health_ins_bracket: 30000, health_ins_employee: 465, health_ins_company: 1050,
+        pension_wage: 30000, pension_voluntary_rate: 0,
+      })),
+      // 批次 2 cascade #4/#5 寫好的 source data(employee_id-based 撈、不限 month)
+      findAllPaidOutAnnualForEmployee: vi.fn(async () => [
+        { id: 73, settlement_amount: 11000 },  // 11 天 × 1000 = 11000(柯郁含 Record 73)
+        // Record 74 (settlement=0) 不會被撈(>0 filter)
+      ]),
+      findAllExpiredPaidCompForEmployee: vi.fn(async () => [
+        { id: 54, expiry_payout_amount: 1340 },
+      ]),
+      ...over,
+    });
+  }
+
+  it('B26.5 is_final_month=true 整鏈路:prorata_base + settlement + comp + 各欄位 × ratio', async () => {
+    const repo = makeFinalMonthRepo();
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'EMP_01251101', year: 2026, month: 5,
+    });
+
+    // §38 結算日薪、所有 row 都寫
+    expect(record.daily_wage_settlement).toBe(1000);  // 30000 / 30
+
+    // prorata_base:離職月寫值(GENERATED gross/net 用 COALESCE 自動選對)
+    // round2(30000 × 13/31) = 12580.65
+    expect(record.prorata_base).toBe(12580.65);
+
+    // settlement_amount 撈 cascade #4 寫好的(不重算、employee_id-based 不限 month)
+    expect(record.settlement_amount).toBe(11000);
+
+    // comp_expiry_payout 撈 cascade #5 寫好的
+    expect(record.comp_expiry_payout).toBe(1340);
+
+    // 各 deduction × proRataRatio (13/31 = 0.4193548...)
+    // Math.round(690 × 13/31) = Math.round(289.355) = 289
+    expect(record.deduct_labor_ins).toBe(289);
+    // Math.round(465 × 13/31) = Math.round(194.999) = 195
+    expect(record.deduct_health_ins).toBe(195);
+
+    // employer_cost × ratio
+    // Math.round(2100 × 13/31) = Math.round(880.645) = 881
+    expect(record.employer_cost_labor).toBe(881);
+    // Math.round(1050 × 13/31) = Math.round(440.323) = 440
+    expect(record.employer_cost_health).toBe(440);
+  });
+
+  it('B26.6 is_final_month=false 回歸:prorata_base=NULL、deduct_* 不 pro-rata', async () => {
+    // 不傳 is_final_month → existing 為 null → isFinalMonth=false / proRataRatio=1
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 30000, attendance_bonus: 0, employment_type: 'full_time',
+      })),
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 30000,  labor_ins_employee: 690,  labor_ins_company: 2100,
+        health_ins_bracket: 30000, health_ins_employee: 465, health_ins_company: 1050,
+        pension_wage: 30000,
+      })),
+    });
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'E001', year: 2026, month: 5,
+    });
+
+    // prorata_base null(non-final-month、GENERATED COALESCE 走 base_salary)
+    expect(record.prorata_base).toBeNull();
+
+    // daily_wage_settlement 仍寫(無條件、給未來離職月切換用)
+    expect(record.daily_wage_settlement).toBe(1000);
+
+    // deduct_* 跟 employer_cost_* 完全等於整月值(× ratio=1、零回歸)
+    expect(record.deduct_labor_ins).toBe(690);
+    expect(record.deduct_health_ins).toBe(465);
+    expect(record.employer_cost_labor).toBe(2100);
+    expect(record.employer_cost_health).toBe(1050);
+  });
+
+  it('B26.8 step 11 勞健保 pro-rata:4 個欄位 deduct + employer_cost 都 × ratio', async () => {
+    const repo = makeFinalMonthRepo();
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'EMP_01251101', year: 2026, month: 5,
+    });
+
+    const ratio = 13 / 31;
+    // 員工負擔
+    expect(record.deduct_labor_ins).toBe(Math.round(690 * ratio));
+    expect(record.deduct_health_ins).toBe(Math.round(465 * ratio));
+    // 雇主負擔
+    expect(record.employer_cost_labor).toBe(Math.round(2100 * ratio));
+    expect(record.employer_cost_health).toBe(Math.round(1050 * ratio));
   });
 });

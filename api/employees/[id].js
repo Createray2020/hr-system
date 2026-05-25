@@ -7,6 +7,21 @@ import { addDeptNameSingle } from '../../lib/dept-name-mapper.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
 import { logEmployeeChanges } from '../../lib/employee/change-logger.js';
 
+// B26 批次 4:base_salary 改變時自動 recalc hourly_rate(防 hourly_rate=0 init bug 再次發生)
+// 對齊 api/salary/_repo.js findEmployeeHourlyRate 公式:base / monthly_work_hours_base(預設 240)
+// 同 transaction 一起 UPDATE、避免 race(前端改薪資但 hourly_rate 未跟著更新)
+// 若 frontend 已自己算好 hourly_rate 傳進來、不覆蓋(以前端為準)
+// In-place mutate body、不回傳;export 給 vitest 直接 unit test。
+export function autoRecalcHourlyRate(body) {
+  if (!body || typeof body !== 'object') return;
+  if (body.base_salary === undefined) return;
+  if (body.hourly_rate !== undefined) return; // 前端已算好、不覆寫
+  const newBase = Number(body.base_salary);
+  if (Number.isFinite(newBase) && newBase > 0) {
+    body.hourly_rate = Math.round((newBase / 240) * 100) / 100;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -66,6 +81,9 @@ export default async function handler(req, res) {
       if (body.status === 'resigned' && !body.resigned_at) {
         body.resigned_at = new Date().toISOString();
       }
+
+      // B26 批次 4:base_salary 改變自動 recalc hourly_rate(見頂部 autoRecalcHourlyRate helper)
+      autoRecalcHourlyRate(body);
 
       // Phase 1.7.2:撈 before、給 audit 比對用(7 個白名單欄位)
       const { data: beforeRow } = await supabaseAdmin

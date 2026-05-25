@@ -218,8 +218,8 @@ function render(){
   }
   tbody.innerHTML = rows.map(r => `
     <tr>
-      <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div></td>
-      <td class="num">${fmt$(r.base_salary)}</td>
+      <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div>${r.is_final_month ? '<span class="pill" style="margin-top:3px;display:inline-block;background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)">✦ 離職月</span>' : ''}</td>
+      <td class="num">${fmt$(r.base_salary)}${r.is_final_month && r.prorata_base != null ? `<div style="font-size:10px;color:#F87171;font-family:'DM Mono',monospace">→ ${fmt$(r.prorata_base)}</div>` : ''}</td>
       <td class="num auto-cell">${fmt$(r.attendance_bonus_actual)}</td>
       <td class="num auto-cell">${fmt$(r.overtime_pay_auto)}</td>
       <td class="num manual-cell">${fmt$(r.overtime_pay_manual)}</td>
@@ -298,7 +298,23 @@ function openEdit(id){
   currentRow = allRows.find(r => r.id === id);
   if (!currentRow) return;
   document.getElementById('modal-title').textContent = `編輯 ${currentRow.emp_name||currentRow.employee_id}`;
-  document.getElementById('modal-meta').textContent = `${currentRow.year}/${String(currentRow.month).padStart(2,'0')} · 狀態 ${currentRow.status}`;
+  // B26 批次 4:離職月在 modal-meta 顯示 pill + pro-rata 資訊
+  const finalMonthBadge = currentRow.is_final_month
+    ? `<span class="pill" style="margin-left:6px;background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)">✦ 離職月</span>`
+    : '';
+  const proRataInfo = currentRow.is_final_month ? `
+    <div style="margin-top:10px;padding:10px 14px;border:1px solid rgba(248,113,113,.2);border-radius:6px;background:rgba(248,113,113,.04);font-size:12px;line-height:1.7">
+      <div style="font-weight:600;color:#F87171;margin-bottom:6px">✦ 離職月 Pro-rata 結算</div>
+      <div>在職曆日:<b>${currentRow.worked_days || '—'} / ${currentRow.total_days_in_month || '—'}</b> 日(${currentRow.pro_rata_mode || 'calendar_day'})</div>
+      <div>原月薪:<span class="num">${fmt$(currentRow.base_salary)}</span></div>
+      <div>Pro-rata 月薪:<span class="num" style="color:#F87171"><b>${fmt$(currentRow.prorata_base)}</b></span> = ${fmt$(currentRow.base_salary)} × ${currentRow.worked_days}/${currentRow.total_days_in_month}</div>
+      <div>§38 結算日薪:<span class="num">${fmt$(currentRow.daily_wage_settlement)}</span> = ${fmt$(currentRow.base_salary)} / 30</div>
+      <div>特休未休折現:<span class="num">${fmt$(currentRow.settlement_amount)}</span></div>
+      <div>補休餘額折現:<span class="num">${fmt$(currentRow.comp_expiry_payout)}</span></div>
+      <div style="margin-top:6px;color:var(--text-dim);font-size:11px">💡 本月為預扣稅、年度結算可能差額需另行申報</div>
+    </div>` : '';
+  document.getElementById('modal-meta').innerHTML =
+    `${currentRow.year}/${String(currentRow.month).padStart(2,'0')} · 狀態 ${currentRow.status}${finalMonthBadge}${proRataInfo}`;
 
   // Auto fields(唯讀)
   document.getElementById('auto-fields').innerHTML = `

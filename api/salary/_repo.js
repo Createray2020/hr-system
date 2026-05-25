@@ -271,6 +271,27 @@ export function makeSalaryRepo() {
       return data || [];
     },
 
+    // B26 批次 4:離職月專用,撈不限 month 的 paid_out annual records(已由 cascade #4 寫 settlement_amount)
+    // 對齊修正 1:避免「離職在 5/31 但 HR 6/2 簽完 cascade」settled_at month 跟 resigned_at month 不對齊撈不到
+    async findAllPaidOutAnnualForEmployee(employee_id) {
+      const { data, error } = await supabaseAdmin
+        .from('annual_leave_records').select('*')
+        .eq('employee_id', employee_id).eq('status', 'paid_out')
+        .gt('settlement_amount', 0);
+      if (error) throw error;
+      return data || [];
+    },
+
+    // B26 批次 4:離職月專用,撈不限 month 的 expired_paid comp records(已由 cascade #5 寫 expiry_payout_amount)
+    async findAllExpiredPaidCompForEmployee(employee_id) {
+      const { data, error } = await supabaseAdmin
+        .from('comp_time_balance').select('*')
+        .eq('employee_id', employee_id).eq('status', 'expired_paid')
+        .gt('expiry_payout_amount', 0);
+      if (error) throw error;
+      return data || [];
+    },
+
     async getDailyWageSnapshot({ employee_id, year, month }) {
       // 從 salary_records 拿已凍結的 daily_wage_snapshot;若沒 record(理論不會,calculator 主流程會先算)
       // 退而求其次:base_salary / 22 粗估
