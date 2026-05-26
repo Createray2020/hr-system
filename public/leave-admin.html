@@ -538,6 +538,12 @@ async function openDetail(id) {
       `<button class="btn btn-ghost btn-sm" style="border:1px solid rgba(251,146,60,.4);color:#FB923C" onclick="toggleAdminEdit()">⚙ 進階編輯</button>`
     );
   }
+  // 軟刪除按鈕(限 admin/chairman、不看 status,即使 archived/cancelled/terminated 也可刪測試紀錄)
+  if (window.Roles?.canDeleteRecord?.(u)) {
+    buttons.insertAdjacentHTML('beforeend',
+      `<button class="btn btn-danger btn-sm" onclick="openDeleteLeave('${escHtml(l.id)}')">🗑 刪除紀錄</button>`
+    );
+  }
 
   document.getElementById('detail-modal').classList.add('open');
 }
@@ -642,6 +648,32 @@ async function confirmAdminEdit() {
     await load();
   } catch(e) {
     toast('編輯失敗:' + e.message, 'error');
+  }
+}
+
+// ── 軟刪除假單(限 admin/chairman、必填理由)──────────────────────────────────
+// prompt + confirm 兩階段、UX 簡單版;後端 PUT /api/leaves/:id action=delete 寫
+// deleted_at/by/reason + handler_note。刪除後該 row 不再出現於列表 / 待審 / 排班
+// overlay / 薪資結算(SELECT 全加 .is(deleted_at,null))。
+async function openDeleteLeave(id) {
+  const reason = prompt('請輸入刪除理由(必填):\n常見:測試資料 / 重複申請 / 申請錯誤');
+  if (!reason || !reason.trim()) return;
+  const trimmed = reason.trim();
+  if (!confirm(`確定刪除此假單?\n理由:${trimmed}\n\n⚠ 軟刪除後將從所有列表隱藏、包括統計、排班 overlay、薪資結算。需 DB 手動還原。`)) return;
+  try {
+    const r = await api(`/api/leaves/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ action: 'delete', reason: trimmed }),
+    });
+    if (r && r.ok === false) {
+      toast('刪除失敗:' + (r.error || r.detail || 'unknown'), 'error');
+      return;
+    }
+    toast('🗑 已刪除');
+    closeModal();
+    await load();
+  } catch(e) {
+    toast('刪除失敗:' + e.message, 'error');
   }
 }
 
