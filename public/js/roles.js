@@ -29,6 +29,11 @@
       return !!u && ['hr', 'admin'].includes(u.role);
     },
 
+    // 軟刪除權限(最嚴、僅 admin / chairman 可執行不可逆動作)
+    canDeleteRecord(u) {
+      return !!u && ['admin', 'chairman'].includes(u.role);
+    },
+
     // 不認 is_manager（決策：部門主管不能發公告）
     canManageAnnouncements(u) {
       return !!u && BACKOFFICE.includes(u.role);
