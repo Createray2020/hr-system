@@ -76,14 +76,30 @@ export default async function handler(req, res) {
       const caller = await requireAuth(req, res);
       if (!caller) return;
 
-      const { dept, start, end, employee_id } = req.query;
+      const { dept, start, end, employee_id, month } = req.query;
+
+      // calendar.html 帶 ?month=YYYY-MM、legacy handler 原本沒讀此 param、又沒帶 start/end →
+      // query 不加 work_date filter → 撈全表 → 被 Supabase 預設 1000 筆 limit 砍(按 work_date ASC、
+      // 月底資料漏)。此處用 month 推算範圍當 fallback、保留 start/end 顯式呼叫的相容性。
+      let effectiveStart = start;
+      let effectiveEnd = end;
+      if (!effectiveStart && !effectiveEnd && typeof month === 'string') {
+        const [yStr, mStr] = month.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10);
+        if (Number.isInteger(y) && Number.isInteger(m) && m >= 1 && m <= 12) {
+          const lastDay = new Date(y, m, 0).getDate();  // m 1-indexed、day=0 推上月最後日 = 當月最後日
+          effectiveStart = `${y}-${String(m).padStart(2,'0')}-01`;
+          effectiveEnd   = `${y}-${String(m).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+        }
+      }
 
       let q = supabaseAdmin
         .from('schedules')
         .select('*, shift_types(name, color, is_off, is_flexible, start_time, end_time, break_start, break_end, break_minutes)')
         .order('work_date');
-      if (start)       q = q.gte('work_date', start);
-      if (end)         q = q.lte('work_date', end);
+      if (effectiveStart) q = q.gte('work_date', effectiveStart);
+      if (effectiveEnd)   q = q.lte('work_date', effectiveEnd);
 
       // Phase 2:row-level scope filter
       // 既有 canAccessBackoffice 包 is_manager、主管被當 HR 看全公司、漏網。
