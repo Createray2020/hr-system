@@ -80,6 +80,19 @@
 /* ── Btn-reject ── */
 .btn-reject{background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)}
 .btn-reject:hover{background:rgba(248,113,113,.22)}
+/* ── 我的申請 — 三段摺疊區塊（desktop table 風格） ── */
+.mine-section{margin-bottom:8px}
+.mine-section-header{width:100%;display:flex;align-items:center;justify-content:space-between;background:transparent;border:none;padding:12px 8px;cursor:pointer;font-size:14px;font-weight:600;color:var(--text);border-bottom:1px solid var(--border);font-family:'Noto Sans TC',sans-serif}
+.mine-section-header:hover{background:rgba(255,255,255,.03)}
+.mine-section-title{display:flex;align-items:center;gap:10px}
+.mine-section-count{background:rgba(255,255,255,.08);color:var(--text-dim);font-size:12px;font-weight:500;padding:2px 10px;border-radius:10px;font-family:'DM Mono',monospace;min-width:28px;text-align:center}
+.mine-section-chevron{transition:transform .2s;font-size:12px;color:var(--text-dim);display:inline-block}
+.mine-section.collapsed .mine-section-chevron{transform:rotate(-90deg)}
+.mine-section-body{padding:4px 0}
+/* ── 全部申請 — 二級 Tab 主分類 ── */
+.approval-tabs{display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid var(--border)}
+.approval-tabs button{background:none;border:none;padding:10px 16px;cursor:pointer;font-size:14px;color:var(--text-dim);border-bottom:2px solid transparent;font-family:'Noto Sans TC',sans-serif}
+.approval-tabs button.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 </style>
 </head>
 <body data-page="approvals">
@@ -122,17 +135,59 @@
           <option value="completed">已完成</option>
           <option value="rejected">已退回</option>
           <option value="cancelled">已取消</option>
+          <option value="draft">草稿</option>
         </select>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>類型</th><th>標題</th><th>申請時間</th><th>進度</th><th>狀態</th><th>操作</th>
-          </tr></thead>
-          <tbody id="mine-tbody"><tr class="loading-row"><td colspan="6">載入中…</td></tr></tbody>
-        </table>
+      <div class="mine-section" data-section="pending">
+        <button type="button" class="mine-section-header" onclick="toggleMineSection('pending')">
+          <span class="mine-section-title">待處理 <span class="mine-section-count" id="mine-count-pending">0</span></span>
+          <span class="mine-section-chevron">▾</span>
+        </button>
+        <div class="mine-section-body" id="mine-body-pending">
+          <div class="table-wrap">
+            <table class="mine-table">
+              <thead><tr>
+                <th>類型</th><th>標題</th><th>申請時間</th><th>進度</th><th>狀態</th><th>操作</th>
+              </tr></thead>
+              <tbody id="mine-tbody-pending"><tr class="loading-row"><td colspan="6">載入中…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </div>
-      <div id="mine-empty" class="empty-state" style="display:none"><div class="icon">📋</div><div>目前沒有申請記錄<br><button class="btn btn-primary" style="margin-top:12px" onclick="openNewRequestModal()">＋ 送出第一筆申請</button></div></div>
+
+      <div class="mine-section collapsed" data-section="draft" id="mine-section-draft" style="display:none">
+        <button type="button" class="mine-section-header" onclick="toggleMineSection('draft')">
+          <span class="mine-section-title">草稿 <span class="mine-section-count" id="mine-count-draft">0</span></span>
+          <span class="mine-section-chevron">▾</span>
+        </button>
+        <div class="mine-section-body" id="mine-body-draft" style="display:none">
+          <div class="table-wrap">
+            <table class="mine-table">
+              <thead><tr>
+                <th>類型</th><th>標題</th><th>申請時間</th><th>進度</th><th>狀態</th><th>操作</th>
+              </tr></thead>
+              <tbody id="mine-tbody-draft"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="mine-section collapsed" data-section="done">
+        <button type="button" class="mine-section-header" onclick="toggleMineSection('done')">
+          <span class="mine-section-title">已完成 <span class="mine-section-count" id="mine-count-done">0</span></span>
+          <span class="mine-section-chevron">▾</span>
+        </button>
+        <div class="mine-section-body" id="mine-body-done" style="display:none">
+          <div class="table-wrap">
+            <table class="mine-table">
+              <thead><tr>
+                <th>類型</th><th>標題</th><th>申請時間</th><th>進度</th><th>狀態</th><th>操作</th>
+              </tr></thead>
+              <tbody id="mine-tbody-done"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Tab: 待我審批 -->
@@ -143,6 +198,11 @@
 
     <!-- Tab: 全部申請 -->
     <div id="tab-all" style="display:none">
+      <div class="approval-tabs" id="all-approval-tabs">
+        <button type="button" data-tab="my_pending" class="active" onclick="onAllTabClick('my_pending')">待處理</button>
+        <button type="button" data-tab="done" onclick="onAllTabClick('done')">已完成</button>
+        <button type="button" data-tab="all" onclick="onAllTabClick('all')">全部</button>
+      </div>
       <div class="filter-bar">
         <input type="text" id="all-search" placeholder="搜尋姓名、標題…" oninput="renderAll()">
         <select id="all-type-f" onchange="renderAll()"><option value="">全部類型</option></select>
@@ -152,6 +212,8 @@
           <option value="in_progress">審核中</option>
           <option value="completed">已完成</option>
           <option value="rejected">已退回</option>
+          <option value="cancelled">已取消</option>
+          <option value="draft">草稿</option>
         </select>
       </div>
       <div class="table-wrap">
@@ -230,6 +292,71 @@ const ROLE_LABELS = { manager:'直屬主管', ceo:'執行長', hr:'人資', admi
 const STATUS_LABELS = { pending:'待審核', in_progress:'審核中', completed:'已完成', rejected:'已退回', cancelled:'已取消', draft:'草稿' };
 const STATUS_CLS    = { pending:'badge-pending', in_progress:'badge-in_progress', completed:'badge-completed', rejected:'badge-rejected', cancelled:'badge-cancelled', draft:'badge-cancelled' };
 const CAT_ICONS     = { 人事:'🧑‍💼', 出勤:'⏱️', 財務:'💰', 採購:'🛒', 行政:'📋' };
+
+// ── 「我的申請」三段摺疊分類 ──
+const MINE_PENDING_STATUSES = new Set(['pending', 'in_progress']);
+const MINE_DRAFT_STATUSES   = new Set(['draft']);
+const MINE_DONE_STATUSES    = new Set(['completed', 'rejected', 'cancelled']);
+function classifyMineStatus(status) {
+  if (MINE_PENDING_STATUSES.has(status)) return 'pending';
+  if (MINE_DRAFT_STATUSES.has(status))   return 'draft';
+  if (MINE_DONE_STATUSES.has(status))    return 'done';
+  return 'done'; // 未知狀態保底歸已完成
+}
+function toggleMineSection(section) {
+  const sec = document.querySelector(`.mine-section[data-section="${section}"]`);
+  if (!sec) return;
+  const body = sec.querySelector('.mine-section-body');
+  const collapsed = sec.classList.toggle('collapsed');
+  body.style.display = collapsed ? 'none' : '';
+}
+
+// ── 「全部申請」二級 Tab 主分類 ──
+let currentAllTab = 'my_pending';
+const ALL_TAB_STATUS_MAP = {
+  my_pending: ['pending', 'in_progress'],
+  done:       ['completed', 'rejected', 'cancelled'],
+  all:        null, // null = 不做 tab 層過濾
+};
+const ALL_STATUS_OPTIONS_BY_TAB = {
+  my_pending: [
+    { value: '__tab_default', label: '待處理(合併)' },
+    { value: 'pending',       label: '待審核' },
+    { value: 'in_progress',   label: '審核中' },
+  ],
+  done: [
+    { value: '__tab_default', label: '已完成(合併)' },
+    { value: 'completed',     label: '已完成' },
+    { value: 'rejected',      label: '已退回' },
+    { value: 'cancelled',     label: '已取消' },
+  ],
+  all: [
+    { value: '',            label: '全部狀態' },
+    { value: 'pending',     label: '待審核' },
+    { value: 'in_progress', label: '審核中' },
+    { value: 'completed',   label: '已完成' },
+    { value: 'rejected',    label: '已退回' },
+    { value: 'cancelled',   label: '已取消' },
+    { value: 'draft',       label: '草稿' },
+  ],
+};
+function applyAllTabToStatusSelect(tab) {
+  const sel = document.getElementById('all-status-f');
+  if (!sel) return;
+  const opts = ALL_STATUS_OPTIONS_BY_TAB[tab];
+  sel.innerHTML = opts.map((o, i) =>
+    `<option value="${o.value}"${i === 0 ? ' selected' : ''}>${o.label}</option>`
+  ).join('');
+}
+function onAllTabClick(tab) {
+  if (currentAllTab === tab) return;
+  currentAllTab = tab;
+  document.querySelectorAll('#all-approval-tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  applyAllTabToStatusSelect(tab);
+  renderAll();
+}
 
 /* ── Form schema ─────────────────────────────────────────────────────────── */
 const FORM_SCHEMA = {
@@ -359,6 +486,7 @@ window.onload = async () => {
     await Promise.all([loadConfigs(), loadMyRequests(), loadPendingApprovals()]);
     if (Roles.canViewAllApprovals(u)) {
       document.getElementById('tab-all-btn').style.display = '';
+      applyAllTabToStatusSelect(currentAllTab);  // 初始化 status select 對齊預設 tab
       loadAllRequests();
     }
     if (Roles.canEditApprovalConfig(u)) {
@@ -451,17 +579,22 @@ function renderMine() {
   const search = document.getElementById('mine-search').value.toLowerCase();
   const typeF  = document.getElementById('mine-type-f').value;
   const statF  = document.getElementById('mine-status-f').value;
-  const rows = myRequests.filter(r => {
+
+  // 沿用原 filter(search / type / status select)
+  const filtered = myRequests.filter(r => {
     if (typeF && r.request_type !== typeF) return false;
     if (statF && r.status !== statF) return false;
     if (search && !(r.title||'').toLowerCase().includes(search)) return false;
     return true;
   });
-  const tbody = document.getElementById('mine-tbody');
-  const empty = document.getElementById('mine-empty');
-  if (!rows.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
-  empty.style.display = 'none';
-  tbody.innerHTML = rows.map(r => {
+
+  // 過濾後再依 classifyMineStatus 分三組
+  const groups = { pending: [], draft: [], done: [] };
+  for (const r of filtered) {
+    groups[classifyMineStatus(r.status)].push(r);
+  }
+
+  const renderRow = (r) => {
     const c = allConfigs.find(x => x.request_type === r.request_type);
     return `<tr style="cursor:pointer" onclick="openDetail('${r.id}')">
       <td><span style="font-size:16px">${c?.icon||'📋'}</span> <span style="font-size:12px">${c?.type_name||r.request_type}</span></td>
@@ -471,7 +604,28 @@ function renderMine() {
       <td>${statusBadge(r.status)}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDetail('${r.id}')">詳情</button></td>
     </tr>`;
-  }).join('');
+  };
+  const emptyRow = '<tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:20px">目前無資料</td></tr>';
+
+  // 待處理 / 已完成:永遠顯示 section、空 → placeholder
+  for (const key of ['pending', 'done']) {
+    const list = groups[key];
+    document.getElementById(`mine-tbody-${key}`).innerHTML =
+      list.length ? list.map(renderRow).join('') : emptyRow;
+    document.getElementById(`mine-count-${key}`).textContent = list.length;
+  }
+
+  // 草稿:空則整段隱藏、有資料才顯示(收起/展開狀態保留)
+  const draftList = groups.draft;
+  const draftSection = document.getElementById('mine-section-draft');
+  document.getElementById('mine-count-draft').textContent = draftList.length;
+  if (draftList.length) {
+    draftSection.style.display = '';
+    document.getElementById('mine-tbody-draft').innerHTML = draftList.map(renderRow).join('');
+  } else {
+    draftSection.style.display = 'none';
+    document.getElementById('mine-tbody-draft').innerHTML = '';
+  }
 }
 
 /* ── Pending approvals ───────────────────────────────────────────────────── */
@@ -507,9 +661,14 @@ function renderAll() {
   const search = document.getElementById('all-search').value.toLowerCase();
   const typeF  = document.getElementById('all-type-f').value;
   const statF  = document.getElementById('all-status-f').value;
+  // 主分類:依 currentAllTab 過濾 status 範圍(null = 不過濾)
+  const tabStatuses = ALL_TAB_STATUS_MAP[currentAllTab];
   const rows = allRequests.filter(r => {
+    // tab 層主分類
+    if (tabStatuses !== null && !tabStatuses.includes(r.status)) return false;
+    // 次級 status select:'__tab_default' = 不再做細篩(沿用 tabStatuses 範圍);''=全部;其他 = 具體 status
+    if (statF && statF !== '__tab_default' && r.status !== statF) return false;
     if (typeF && r.request_type !== typeF) return false;
-    if (statF && r.status !== statF) return false;
     if (search && !(r.title||'').toLowerCase().includes(search) && !(r.employees?.name||'').toLowerCase().includes(search)) return false;
     return true;
   });
