@@ -26,6 +26,9 @@
   .l-row{display:grid;grid-template-columns:140px 80px 1fr 70px 110px 170px;gap:10px;padding:10px 12px;border-bottom:0.5px solid rgba(255,255,255,.06);align-items:center;font-size:13px}
   .l-row.head{font-weight:600;color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px;background:rgba(0,0,0,.15)}
   .filter-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .approval-tabs{display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid var(--border)}
+  .approval-tabs button{background:none;border:none;padding:10px 16px;cursor:pointer;font-size:14px;color:var(--text-dim);border-bottom:2px solid transparent}
+  .approval-tabs button.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
   .live-recalc{background:rgba(91,141,239,.1);border:1px solid rgba(91,141,239,.4);color:#7FBBFF;padding:8px 12px;border-radius:6px;font-size:13px;margin:10px 0}
   .late-warn{background:rgba(251,146,60,.1);border:1px solid rgba(251,146,60,.3);color:#FB923C;padding:8px 12px;border-radius:6px;font-size:13px;margin:8px 0}
   .proof-info{background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);color:#FBBF24;padding:8px 12px;border-radius:6px;font-size:13px;margin:8px 0}
@@ -55,6 +58,11 @@
     </div>
 
     <div id="main-content">
+      <div class="approval-tabs">
+        <button type="button" data-tab="my_pending" class="active" onclick="onTabClick('my_pending')">待我處理</button>
+        <button type="button" data-tab="done" onclick="onTabClick('done')">已完成</button>
+        <button type="button" data-tab="all" onclick="onTabClick('all')">全部</button>
+      </div>
       <div class="filter-bar">
         <select class="form-select" id="f-status" onchange="render()" style="width:170px">
           <option value="my_pending" selected>待我審</option>
@@ -158,6 +166,56 @@ let allLeaves = [];
 let empMap = {};
 let currentLeave = null;
 
+// 頂部 Tab 主分類（待我處理 / 已完成 / 全部）
+// status select 變次級細篩、依 currentTab 動態調整 option list
+let currentTab = 'my_pending';
+const ALL_STATUS_OPTIONS = [
+  { value: 'my_pending',   label: '待我審' },
+  { value: 'all_pending',  label: '全部 pending' },
+  { value: 'approved',     label: '已核准待歸檔' },
+  { value: 'archived',     label: '已歸檔' },
+  { value: 'rejected',     label: '已退回' },
+  { value: 'cancelled',    label: '已撤回' },
+  { value: 'expired',      label: '證明過期(待 HR 處理)' },
+  { value: 'terminated',   label: '已終結(HR 終止)' },
+  { value: 'history',      label: '歷史(歸檔/退回/撤回/終結)' },
+  { value: '',             label: '全部' },
+];
+const DONE_STATUS_VALUES = ['history', 'approved', 'archived', 'rejected', 'cancelled', 'terminated'];
+
+function applyTabToStatusSelect(tab) {
+  const sel = document.getElementById('f-status');
+  if (!sel) return;
+  let opts, defaultVal, disabled;
+  if (tab === 'my_pending') {
+    opts = ALL_STATUS_OPTIONS.filter(o => o.value === 'my_pending');
+    defaultVal = 'my_pending';
+    disabled = true;
+  } else if (tab === 'done') {
+    opts = ALL_STATUS_OPTIONS.filter(o => DONE_STATUS_VALUES.includes(o.value));
+    defaultVal = 'history';
+    disabled = false;
+  } else {
+    opts = ALL_STATUS_OPTIONS.slice();
+    defaultVal = '';
+    disabled = false;
+  }
+  sel.innerHTML = opts.map(o =>
+    `<option value="${o.value}"${o.value === defaultVal ? ' selected' : ''}>${o.label}</option>`
+  ).join('');
+  sel.disabled = disabled;
+}
+
+function onTabClick(tab) {
+  if (currentTab === tab) return;
+  currentTab = tab;
+  document.querySelectorAll('.approval-tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  applyTabToStatusSelect(tab);
+  render();
+}
+
 // caller role helpers
 const ELEVATED_ROLES = ['hr', 'admin', 'ceo', 'chairman'];
 function isElevated(u) { return u && ELEVATED_ROLES.includes(u.role); }
@@ -210,6 +268,7 @@ async function load(retries = 0) {
     // 載入假別中文名 + 完整 row
     await window.HR_Utils?.loadLeaveTypeLabels?.();
     populateTypeFilter();
+    applyTabToStatusSelect(currentTab);
 
     // Phase 1.4.5:純主管限本部門 employee id Set、HR+ 設 null(不過濾)
     await loadDeptScope();
