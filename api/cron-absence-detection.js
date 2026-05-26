@@ -73,6 +73,7 @@ function supabaseRepo() {
       const dayEnd   = `${date}T23:59:59+08:00`;
       const { data, error } = await supabaseAdmin
         .from('leave_requests').select('id, leave_type, start_at, end_at')
+        .is('deleted_at', null)
         .eq('employee_id', employee_id).eq('status', 'approved')
         .lte('start_at', dayEnd).gte('end_at', dayStart)
         .limit(1).maybeSingle();

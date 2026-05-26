@@ -158,6 +158,7 @@ export default async function handler(req, res) {
       const { data: reqData, error } = await supabaseAdmin
         .from('approval_requests')
         .select('*, employees!applicant_id(name, dept_id, position, avatar, departments(name))')
+        .is('deleted_at', null)
         .eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到申請' });
       // B13:申請人本人 OR scope 看得到該員工 → OK,否則 403
@@ -181,7 +182,7 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: '無權看此員工申請' });
       }
       let q = supabaseAdmin.from('approval_requests')
-        .select('*').eq('applicant_id', applicant_id)
+        .select('*').is('deleted_at', null).eq('applicant_id', applicant_id)
         .order('created_at', { ascending: false });
       if (request_type) q = q.eq('request_type', request_type);
       const { data, error } = await q;
@@ -235,6 +236,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabaseAdmin
       .from('approval_requests')
       .select('*, employees!applicant_id(name, dept_id, position, avatar, departments(name))')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     addDeptNameNested(data, 'employees');
@@ -322,7 +324,7 @@ export default async function handler(req, res) {
 
       // 撈 request + applicant dept_id(canApproveStep 需要)
       const { data: request } = await supabaseAdmin
-        .from('approval_requests').select('*').eq('id', request_id).single();
+        .from('approval_requests').select('*').is('deleted_at', null).eq('id', request_id).single();
       if (!request) return res.status(404).json({ error: '找不到申請' });
 
       // self-approval guard
@@ -443,7 +445,7 @@ export default async function handler(req, res) {
       const { request_id, step_number, note } = body;
 
       const { data: request } = await supabaseAdmin
-        .from('approval_requests').select('*').eq('id', request_id).single();
+        .from('approval_requests').select('*').is('deleted_at', null).eq('id', request_id).single();
       if (!request) return res.status(404).json({ error: '找不到申請' });
 
       // self-approval guard
@@ -493,7 +495,7 @@ export default async function handler(req, res) {
     if (body.action === 'cancel') {
       const { request_id } = body;
       const { data: request } = await supabaseAdmin
-        .from('approval_requests').select('id, applicant_id, status').eq('id', request_id).maybeSingle();
+        .from('approval_requests').select('id, applicant_id, status').is('deleted_at', null).eq('id', request_id).maybeSingle();
       if (!request) return res.status(404).json({ error: '找不到申請' });
       if (caller.id !== request.applicant_id) {
         return res.status(403).json({ error: '只有申請人本人能取消' });
@@ -534,7 +536,7 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'id required' });
 
       const { data: existing } = await supabaseAdmin
-        .from('approval_requests').select('*').eq('id', id).maybeSingle();
+        .from('approval_requests').select('*').is('deleted_at', null).eq('id', id).maybeSingle();
       if (!existing) return res.status(404).json({ error: '找不到申請' });
 
       // 白名單:只 form_data + attachments

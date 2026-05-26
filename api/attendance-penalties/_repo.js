@@ -129,6 +129,7 @@ export function makeAttendancePenaltyRepo() {
       const { data: leaves, error } = await supabaseAdmin
         .from('leave_requests')
         .select('id, leave_type, hours, finalized_hours, days, start_at, end_at')
+        .is('deleted_at', null)
         .eq('employee_id', employee_id).eq('status', 'approved')
         .gte('start_at', start).lte('start_at', end);
       if (error) throw error;
@@ -150,6 +151,7 @@ export function makeAttendancePenaltyRepo() {
       const { data: leaves, error } = await supabaseAdmin
         .from('leave_requests')
         .select('id, leave_type, hours, finalized_hours, days, start_at, end_at')
+        .is('deleted_at', null)
         .eq('employee_id', employee_id).eq('status', 'approved')
         .gte('start_at', start).lte('start_at', end);
       if (error) throw error;

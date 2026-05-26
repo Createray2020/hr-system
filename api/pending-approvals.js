@@ -79,6 +79,7 @@ export default async function handler(req, res) {
     let leaveQ = supabaseAdmin
       .from('leave_requests')
       .select('id, employee_id, leave_type, start_at, end_at, hours, applied_at, status, reason, late_application, proof_status, proof_due_at, attachment_url, employees!employee_id(name, dept_id, position, avatar, departments(name))')
+      .is('deleted_at', null)
       .eq('status', leaveStage)
       .order('applied_at', { ascending: false });
 

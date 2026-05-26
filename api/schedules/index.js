@@ -230,6 +230,7 @@ async function attachLeaveOverlay(rows) {
   const { data: leaves } = await supabaseAdmin
     .from('leave_requests')
     .select('id, employee_id, leave_type, start_at, end_at, hours, finalized_hours, status')
+    .is('deleted_at', null)
     .in('employee_id', empIds)
     .eq('status', 'approved')
     .lte('start_at', dayEnd)

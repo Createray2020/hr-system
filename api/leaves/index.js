@@ -86,7 +86,7 @@ export default async function handler(req, res) {
       const caller = await requireAuth(req, res);
       if (!caller) return;
       const { data: leave, error } = await supabaseAdmin
-        .from('leave_requests').select('*').eq('id', id).single();
+        .from('leave_requests').select('*').is('deleted_at', null).eq('id', id).single();
       if (error) return res.status(404).json({ error: '找不到假單' });
       const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
       if (!canSeeEmployee(scope, leave.employee_id)) {
@@ -108,7 +108,7 @@ export default async function handler(req, res) {
       // Phase 2:?stats=true 加 requireAuth(原本裸奔、不該外洩聚合 count)
       const caller = await requireAuth(req, res);
       if (!caller) return;
-      const { data, error } = await supabaseAdmin.from('leave_requests').select('status');
+      const { data, error } = await supabaseAdmin.from('leave_requests').select('status').is('deleted_at', null);
       if (error) return res.status(500).json({ error: error.message });
       const stats = { pending: 0, approved: 0, rejected: 0, total: data.length };
       data.forEach(r => { if (r.status in stats) stats[r.status]++; });
@@ -116,7 +116,7 @@ export default async function handler(req, res) {
     }
 
     const { status, dept, dept_id, type, search } = req.query;
-    let q = supabaseAdmin.from('leave_requests').select('*').order('applied_at', { ascending: false });
+    let q = supabaseAdmin.from('leave_requests').select('*').is('deleted_at', null).order('applied_at', { ascending: false });
     if (status) q = q.eq('status',     status);
     if (type)   q = q.eq('leave_type', type);
 
@@ -227,6 +227,7 @@ async function handleNewGet(req, res) {
   }
 
   let q = supabaseAdmin.from('leave_requests').select('*')
+    .is('deleted_at', null)
     .order('start_at', { ascending: false });
 
   if (employee_id) {

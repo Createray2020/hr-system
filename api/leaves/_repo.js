@@ -151,7 +151,7 @@ export function makeLeaveRepo() {
     },
     async findLeaveRequestById(id) {
       const { data, error } = await supabaseAdmin
-        .from('leave_requests').select('*').eq('id', id).maybeSingle();
+        .from('leave_requests').select('*').is('deleted_at', null).eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
     },

@@ -43,6 +43,7 @@ export default async function handler(req, res) {
     const { data: rows, error } = await supabaseAdmin
       .from('leave_requests')
       .select('id, employee_id, leave_type, proof_status, proof_due_at, handler_note')
+      .is('deleted_at', null)
       .eq('proof_status', 'required')
       .lt('proof_due_at', nowIso)
       .eq('status', 'approved');  // 只動已批准的 leave、pending_* / cancelled / rejected / archived / terminated 一律不動

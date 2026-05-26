@@ -115,6 +115,7 @@ async function handleDetail(req, res, id) {
     // leave_requests:含 Phase 1.6 全 7 status
     supabaseAdmin.from('leave_requests')
       .select('id, leave_type, start_at, end_at, start_date, end_date, days, hours, finalized_hours, status, proof_status, applied_at, archived_at, terminated_at')
+      .is('deleted_at', null)
       .eq('employee_id', id)
       .gte('start_date', startDate).lte('start_date', endDate)
       .order('applied_at', { ascending: false })
