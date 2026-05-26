@@ -22,7 +22,7 @@ import { sendPushToEmployees, sendPushToRoles, createNotifications, createNotifi
 import { addDeptNameNested, addDeptNameSingle } from '../lib/dept-name-mapper.js';
 // B13:GET 5 個 path 加 dept-scope / 本人 / HR-only 守門
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../lib/auth-scope.js';
-import { isBackofficeRole } from '../lib/roles.js';
+import { isBackofficeRole, canDeleteRecord } from '../lib/roles.js';
 
 // ─────────────────────────────────────────────────────────────────
 // 離職檢核表 MVP 預設 46 項(對應 migrations/2026_05_26_resignation_checklist.sql)
@@ -594,6 +594,53 @@ export default async function handler(req, res) {
         .from('approval_requests').update(finalPatch).eq('id', id).select().maybeSingle();
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ ok: true, request: data, audit: auditLine });
+    }
+
+    // ── 軟刪除既有申請 ──────────────────────────────────────────────────────
+    // 限 admin / chairman、必填 reason。寫入 deleted_at/deleted_by/delete_reason
+    // 三欄位 + append 一行 admin_audit_note。後續 SELECT 全部已加 .is('deleted_at',null)
+    // filter,刪除後該 row 不再出現在任何列表 / 詳情 / 待審。
+    // 還原:DB 直接 UPDATE SET deleted_at=NULL(無 UI 入口)。
+    if (body.action === 'delete') {
+      const { id, reason } = body;
+      if (!canDeleteRecord(caller)) {
+        return res.status(403).json({ error: '無刪除權限(限 admin / chairman)' });
+      }
+      if (!id) return res.status(400).json({ error: 'id required' });
+      if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({ error: '刪除理由必填' });
+      }
+      const trimmedReason = reason.trim();
+      if (trimmedReason.length > 500) {
+        return res.status(400).json({ error: '刪除理由過長(上限 500 字)' });
+      }
+
+      // 撈 existing(.is('deleted_at',null) 防重複刪除已刪除的)
+      const { data: existing } = await supabaseAdmin
+        .from('approval_requests')
+        .select('id, admin_audit_note, deleted_at')
+        .is('deleted_at', null)
+        .eq('id', id)
+        .maybeSingle();
+      if (!existing) return res.status(404).json({ error: '找不到申請' });
+
+      const now = new Date();
+      const noteLine = `[${now.toISOString().slice(0, 10)}] deleted by ${caller.id}: ${trimmedReason}`;
+      const newNote = existing.admin_audit_note
+        ? `${existing.admin_audit_note}\n${noteLine}`
+        : noteLine;
+
+      const { error: updErr } = await supabaseAdmin
+        .from('approval_requests')
+        .update({
+          deleted_at: now.toISOString(),
+          deleted_by: caller.id,
+          delete_reason: trimmedReason,
+          admin_audit_note: newNote,
+        })
+        .eq('id', id);
+      if (updErr) return res.status(500).json({ error: updErr.message });
+      return res.status(200).json({ ok: true });
     }
 
     return res.status(400).json({ error: '未知的 action' });

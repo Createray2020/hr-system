@@ -224,6 +224,48 @@ export default async function handler(req, res) {
     }
   }
 
+  // ─── PUT action='delete' 軟刪除假單 ──────────────────────────────
+  // 限 admin / chairman、必填 reason。寫入 deleted_at/deleted_by/delete_reason
+  // 三欄位 + append 一行 handler_note。後續 SELECT 全部已加 .is('deleted_at',null)
+  // filter、刪除後該 row 不再出現在列表 / 詳情 / 待審 / 排班 overlay / 薪資結算。
+  // 還原:DB 直接 UPDATE SET deleted_at=NULL(無 UI 入口)。
+  if (action === 'delete') {
+    const caller = await requireRole(req, res, ['admin', 'chairman']);
+    if (!caller) return;
+
+    const { reason } = body;
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+      return res.status(400).json({ error: '刪除理由必填' });
+    }
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length > 500) {
+      return res.status(400).json({ error: '刪除理由過長(上限 500 字)' });
+    }
+
+    // 撈 existing(repo.findLeaveRequestById 已含 .is('deleted_at',null) filter、
+    // 防重複刪除已刪除的)
+    const existing = await repo.findLeaveRequestById(id);
+    if (!existing) return res.status(404).json({ error: 'NOT_FOUND' });
+
+    const now = new Date();
+    const noteLine = `[${now.toISOString().slice(0, 10)}] ${caller.id} deleted: ${trimmedReason}`;
+    const newNote = existing.handler_note
+      ? `${existing.handler_note}\n${noteLine}`
+      : noteLine;
+
+    try {
+      await repo.updateLeaveRequest(id, {
+        deleted_at: now.toISOString(),
+        deleted_by: caller.id,
+        delete_reason: trimmedReason,
+        handler_note: newNote,
+      });
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
   // ─── 以下:approve / reject / cancel / archive 都需要主管以上 ──
   const caller = await requireRole(req, res, BACKOFFICE_ROLES, { allowManager: true });
   if (!caller) return;
