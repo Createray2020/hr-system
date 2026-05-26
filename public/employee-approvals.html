@@ -98,6 +98,16 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 .toast.error{border-left:3px solid #F87171}
 .toast.warn{border-left:3px solid #FB923C}
 
+/* ── 我的申請 — 三段摺疊區塊（待處理 / 草稿 / 已完成） ── */
+.mine-section{margin-bottom:4px}
+.mine-section-header{width:100%;display:flex;align-items:center;justify-content:space-between;background:transparent;border:none;padding:14px 16px 10px;cursor:pointer;font-size:13px;font-weight:600;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transparent}
+.mine-section-header:active{background:rgba(255,255,255,.03)}
+.mine-section-title{display:flex;align-items:center;gap:8px}
+.mine-section-count{background:rgba(255,255,255,.08);color:rgba(255,255,255,.55);font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px;min-width:22px;text-align:center;font-family:'DM Mono',monospace}
+.mine-section-chevron{transition:transform .2s;font-size:11px;color:rgba(255,255,255,.5);display:inline-block}
+.mine-section.collapsed .mine-section-chevron{transform:rotate(-90deg)}
+.mine-section-body{padding:0}
+
 /* ── Bottom Nav(對齊其他 mobile 頁的 class 命名) ── */
 .mobile-bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0a0c12;border-top:0.5px solid rgba(255,255,255,.08);display:flex;padding:10px 0 24px;z-index:50}
 .mobile-nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;text-decoration:none}
@@ -125,9 +135,31 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
     <button class="m-tab" id="tab-pending-btn" onclick="switchTab('pending')" style="display:none">待我審批</button>
   </div>
 
-  <!-- 我的申請 -->
+  <!-- 我的申請 — 拆三摺疊區塊（待處理預設展開、草稿/已完成預設收起） -->
   <div class="scroll-content" id="tab-mine">
-    <div id="mine-list"></div>
+    <div class="mine-section" data-section="pending">
+      <button type="button" class="mine-section-header" onclick="toggleMineSection('pending')">
+        <span class="mine-section-title">待處理 <span class="mine-section-count" id="mine-count-pending">0</span></span>
+        <span class="mine-section-chevron">▾</span>
+      </button>
+      <div class="mine-section-body" id="mine-list-pending"></div>
+    </div>
+
+    <div class="mine-section collapsed" data-section="draft" id="mine-section-draft" style="display:none">
+      <button type="button" class="mine-section-header" onclick="toggleMineSection('draft')">
+        <span class="mine-section-title">草稿 <span class="mine-section-count" id="mine-count-draft">0</span></span>
+        <span class="mine-section-chevron">▾</span>
+      </button>
+      <div class="mine-section-body" id="mine-list-draft" style="display:none"></div>
+    </div>
+
+    <div class="mine-section collapsed" data-section="done">
+      <button type="button" class="mine-section-header" onclick="toggleMineSection('done')">
+        <span class="mine-section-title">已完成 <span class="mine-section-count" id="mine-count-done">0</span></span>
+        <span class="mine-section-chevron">▾</span>
+      </button>
+      <div class="mine-section-body" id="mine-list-done" style="display:none"></div>
+    </div>
   </div>
 
   <!-- 待我審批(只主管/HR 顯示) -->
@@ -232,6 +264,30 @@ const STAGE_LABELS = {
   pending: '待主管',  // legacy
 };
 
+// 「我的申請」三段摺疊分類（status 跨兩表:approval_requests + leave_requests）
+const MINE_PENDING_STATUSES = new Set([
+  'pending', 'in_progress',        // approval_requests
+  'pending_mgr', 'pending_ceo',    // leave_requests
+]);
+const MINE_DRAFT_STATUSES = new Set(['draft']);
+const MINE_DONE_STATUSES = new Set([
+  'completed', 'rejected', 'cancelled',    // approval_requests
+  'approved', 'archived', 'terminated',    // leave_requests(rejected/cancelled 兩表共用、Set 自動去重)
+]);
+function classifyMineStatus(status) {
+  if (MINE_PENDING_STATUSES.has(status)) return 'pending';
+  if (MINE_DRAFT_STATUSES.has(status))   return 'draft';
+  if (MINE_DONE_STATUSES.has(status))    return 'done';
+  return 'done'; // 未知狀態保底歸已完成、避免漏顯示
+}
+function toggleMineSection(section) {
+  const sec = document.querySelector(`.mine-section[data-section="${section}"]`);
+  if (!sec) return;
+  const body = sec.querySelector('.mine-section-body');
+  const collapsed = sec.classList.toggle('collapsed');
+  body.style.display = collapsed ? 'none' : '';
+}
+
 const BACKOFFICE_ROLES = ['hr','ceo','chairman','admin'];
 function isBackoffice(u) { return !!u && BACKOFFICE_ROLES.includes(u.role); }
 function isManagerOrBackoffice(u) { return isBackoffice(u) || (u && u.is_manager === true); }
@@ -305,12 +361,13 @@ async function loadPending() {
 // Render
 // ─────────────────────────────────────────
 function renderMineList() {
-  const el = document.getElementById('mine-list');
-  if (!myRequests.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div>還沒有申請紀錄<br>點右下角＋新增申請</div>`;
-    return;
+  // 依 status 歸三類、各段保留後端順序(created_at DESC)
+  const groups = { pending: [], draft: [], done: [] };
+  for (const r of myRequests) {
+    groups[classifyMineStatus(r.status)].push(r);
   }
-  el.innerHTML = myRequests.map(r => {
+
+  const renderCard = (r) => {
     const cfg = allConfigs.find(c => c.request_type === r.request_type);
     const icon = cfg?.icon || '📄';
     return `
@@ -324,7 +381,28 @@ function renderMineList() {
         </div>
         <div class="req-meta">第 ${r.current_step} / ${r.total_steps} 步 · ${formatFormSummary(r)}</div>
       </div>`;
-  }).join('');
+  };
+  const emptyHtml = '<div class="empty-state" style="padding:24px 20px">目前無資料</div>';
+
+  // 待處理 / 已完成:永遠顯示 section、空 → placeholder
+  for (const key of ['pending', 'done']) {
+    const list = groups[key];
+    document.getElementById(`mine-list-${key}`).innerHTML =
+      list.length ? list.map(renderCard).join('') : emptyHtml;
+    document.getElementById(`mine-count-${key}`).textContent = list.length;
+  }
+
+  // 草稿:空則整段隱藏、有資料才顯示(收起/展開狀態保留)
+  const draftList = groups.draft;
+  const draftSection = document.getElementById('mine-section-draft');
+  document.getElementById('mine-count-draft').textContent = draftList.length;
+  if (draftList.length) {
+    draftSection.style.display = '';
+    document.getElementById('mine-list-draft').innerHTML = draftList.map(renderCard).join('');
+  } else {
+    draftSection.style.display = 'none';
+    document.getElementById('mine-list-draft').innerHTML = '';
+  }
 }
 
 function renderPendingList() {
