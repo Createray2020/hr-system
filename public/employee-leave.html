@@ -154,6 +154,27 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 
   <!-- 申請表單 -->
   <div class="scroll-content" id="tab-apply">
+
+    <!-- 我的額度卡(loadQuotaSummary 在 init Promise.all 內並行載入)-->
+    <div class="mobile-card" id="quota-card">
+      <div class="card-label">我的額度</div>
+
+      <!-- 特休 + 補休 雙 days-display -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="days-display">
+          <div class="days-num" id="quota-annual-remain">—</div>
+          <div class="days-label">特休剩餘(天)</div>
+        </div>
+        <div class="days-display">
+          <div class="days-num" id="quota-comp-remain">—</div>
+          <div class="days-label">補休剩餘(小時)</div>
+        </div>
+      </div>
+
+      <!-- 累積型病/事假 list、JS 動態 render、is_over_limit 用 #FB923C 橘色 -->
+      <div id="quota-accumulating"></div>
+    </div>
+
     <div class="mobile-card">
       <div class="card-label">申請請假</div>
 
@@ -978,6 +999,58 @@ async function loadLeaves() {
   } catch(e) { allLeaves = []; }
 }
 
+// ─── 假期額度卡(quota_summary endpoint)─────────────────────────
+// 失敗時 console.warn + 卡內留 '—'、不擋整頁 init。
+async function loadQuotaSummary() {
+  if (!currentUser) return;
+  try {
+    const data = await apiFetch(
+      `/api/leaves?_resource=quota_summary&employee_id=${encodeURIComponent(currentUser.id)}`,
+    );
+    renderQuotaCard(data);
+  } catch (e) {
+    console.warn('[quota] load failed:', e.message);
+    // 保留 DOM 預設值 '—'、不額外動
+  }
+}
+
+function renderQuotaCard(d) {
+  // 特休剩餘天數(無 record 時顯示 '—')
+  const annualEl = document.getElementById('quota-annual-remain');
+  if (annualEl) {
+    annualEl.textContent = d?.annual?.has_record ? d.annual.remaining_days : '—';
+  }
+
+  // 補休剩餘小時(防 null、預設 0、固定 1 位小數)
+  const compEl = document.getElementById('quota-comp-remain');
+  if (compEl) {
+    compEl.textContent = Number(d?.comp?.total_remaining_hours || 0).toFixed(1);
+  }
+
+  // 累積型病/事假 row、is_over_limit=true 用 #FB923C 橘 + ⚠
+  const accuEl = document.getElementById('quota-accumulating');
+  if (accuEl) {
+    const rows = (d?.accumulating || []).map(a => {
+      const name = a?.name_zh || a?.code || '—';
+      const used = a?.used_days ?? 0;
+      const max  = a?.legal_max_days ?? '—';
+      const over = a?.is_over_limit === true;
+      const color = over ? '#FB923C' : '#E8EAF0';
+      const warn  = over ? ' ⚠' : '';
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;
+                    padding:8px 0;border-top:0.5px solid rgba(255,255,255,.08);
+                    font-size:13px">
+          <span style="color:rgba(255,255,255,.65)">${name}</span>
+          <span style="font-family:'DM Mono',monospace;color:${color}">
+            ${used} / ${max} 天${warn}
+          </span>
+        </div>`;
+    }).join('');
+    accuEl.innerHTML = rows;
+  }
+}
+
 (async () => {
   API = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'http://localhost:3000' : '';
   const { data: { session } } = await _sb.auth.getSession();
@@ -990,8 +1063,8 @@ async function loadLeaves() {
   document.getElementById('f-start').value = today;
   document.getElementById('f-end').value   = today;
 
-  // 並行：假別下拉 + 假單列表
-  await Promise.all([loadLeaveTypes(), loadLeaves()]);
+  // 並行：假別下拉 + 假單列表 + 假期額度卡
+  await Promise.all([loadLeaveTypes(), loadLeaves(), loadQuotaSummary()]);
 
   // 2026-05-19 修補:init 預設 today / today、要主動 trigger 一次 onDateChange、
   // 否則 <input type="date"> 的 value setter 不 fire input event、
