@@ -312,7 +312,7 @@ let allEmps = [];                // 役色過濾後的完整 active 員工（HR=
 let visibleEmps = [];            // allEmps 再套部門過濾後、實際渲染的員工
 let selectedDeptId = '';         // dept filter（'' = 全部、HR 專屬）
 let allSchedules = {};           // { emp_id: [schedules] }
-let allPeriods = {};             // { emp_id: period }
+let allPeriods = {};             // F1:{ `${empId}_${yyyy-mm}`: period } 複合 key、防跨月 race
 let holidayDates = new Set();    // C12-3:該年 holidays（不含 makeup_workday）
 let gcalEvents = [];             // C13:該週 GCal 公司活動
 let editing = { date: null, empId: null, segs: [], off: false };
@@ -418,8 +418,12 @@ async function load(retries = 0) {
     const [year, mm] = ym.split('-');
     try {
       const r = await api(`/api/schedule-periods?year=${year}&month=${parseInt(mm)}`);
+      // F1:用 (empId, yyyy-mm) composite key 儲存、跨月週 5 月 / 6 月 row 都保留,
+      // 避免原本 first-wins(`if (!allPeriods[empId]) ...`)受 Promise.all resolve 順序影響、
+      // 同員工標籤在「已公告 / 無排班」之間隨機跳動。下游 5 處 caller 用 getPeriodFor() 查。
       (r.periods || []).forEach(p => {
-        if (!allPeriods[p.employee_id]) allPeriods[p.employee_id] = p;
+        const ym = `${p.period_year}-${String(p.period_month).padStart(2, '0')}`;
+        allPeriods[`${p.employee_id}_${ym}`] = p;
       });
       (r.schedules || []).forEach(s => {
         if (!allSchedules[s.employee_id]) allSchedules[s.employee_id] = [];
@@ -515,6 +519,19 @@ function isLateChangeFor(date, periodStatus) {
   return date === todayStr();
 }
 
+// F1:allPeriods 用 composite key (empId_yyyy-mm),helper 寬鬆接受 'yyyy-mm' 或 'yyyy-mm-dd'。
+function getPeriodFor(empId, dateOrYM) {
+  if (!empId || !dateOrYM) return null;
+  const ym = String(dateOrYM).substring(0, 7);
+  return allPeriods[`${empId}_${ym}`] || null;
+}
+// 該週「中間日」(weekStart + 3 天) 所屬月份 = 該週多數天月份(7 天必 ≥4 天落同月、deterministic)。
+function primaryMonthOf(weekStartStr) {
+  const start = new Date(weekStartStr);
+  const mid = new Date(start.getTime() + 3 * 86400000);
+  return `${mid.getFullYear()}-${String(mid.getMonth() + 1).padStart(2, '0')}`;
+}
+
 function render() {
   const weekStart = new Date(currentWeekStart);
   const dates = getWeekDates(weekStart);
@@ -561,10 +578,12 @@ function render() {
 
   const weekStartStr = fmtDate(weekStart);
   const weekEndStr = fmtDate(weekEnd);
+  // F1:跨月週 row 標籤改取「該週多數天月份」對應的 period、避免 race
+  const weekPrimaryMonth = primaryMonthOf(weekStartStr);
 
   const empRows = visibleEmps.map(emp => {
     const schs = allSchedules[emp.id] || [];
-    const period = allPeriods[emp.id];
+    const period = getPeriodFor(emp.id, weekPrimaryMonth);
     const periodStatus = period?.status;
     const isManagerPhase = !!periodStatus && periodStatus !== 'draft';
 
@@ -747,7 +766,8 @@ function onCellClick(empId, dateStr) {
 async function applyPillToCell(empId, dateStr) {
   const emp = visibleEmps.find(e => e.id === empId);
   if (!emp) return;
-  const period = allPeriods[empId];
+  // F1:該 cell 操作對齊該日期月份的 period(跨月週時不會誤判另一個月的狀態)
+  const period = getPeriodFor(empId, dateStr);
   if (!period) {
     toast('該員工此月尚未建立排班 period、請員工先建立或 HR 代建', 'error');
     return;
@@ -1089,11 +1109,12 @@ async function handleImportFile(evt) {
   const validRows = [];
   const periodErrors = [];
   for (const r of result.rows) {
-    const period = allPeriods[r.employee_id];
+    // F1:用該筆 work_date 對應月份查 period(跨月貼上時不會找錯月)
+    const period = getPeriodFor(r.employee_id, r.work_date);
     if (!period) {
       periodErrors.push({
         row: 0, col: 0,
-        message: `${r.employee_id} ${r.work_date}：該員工 ${year}/${month} 尚未建立 period、請先建`,
+        message: `${r.employee_id} ${r.work_date}:該員工 ${year}/${month} 尚未建立 period、請先建`,
       });
       continue;
     }
@@ -1227,7 +1248,8 @@ async function runImportConfirm() {
 function openDayModal(empId, date) {
   currentEmp = visibleEmps.find(e => e.id === empId);
   if (!currentEmp) return;
-  currentPeriod = allPeriods[empId] || null;
+  // F1:該日 modal 用該日所屬月份的 period(跨月週時不會打開錯月份的 modal)
+  currentPeriod = getPeriodFor(empId, date);
   currentSchedules = allSchedules[empId] || [];
 
   if (!currentPeriod) {
