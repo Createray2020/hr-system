@@ -162,6 +162,38 @@ export function makeLeaveRepo() {
       return data;
     },
 
+    // ─── quota_summary 用:撈某員工某時段、白名單 codes 的已核准假單 + group by ──
+    // 對應 lib/leave/quota.js calculateAccumulatingUsage、給病/事假累積額度算用。
+    // 半開區間 [startInclusive, endExclusive),用 start_at 落點判定年度歸屬。
+    // 已用 status 條件:approved + archived(對齊 lib/leave/overlay.js:11 + stages.js:7)。
+    // soft-delete 必帶 .is('deleted_at', null)(B7 教訓)。
+    //
+    // 量級小、JS reduce 不走 PostgREST GROUP BY(對齊 findActiveCompBalances 風格)。
+    // 零單 code 補 { used_days: 0, used_count: 0 } 不漏(quota lib 層也再保險一次)。
+    async sumLeaveDaysByTypeInYear({ employee_id, codes, startInclusive, endExclusive }) {
+      const { data, error } = await supabaseAdmin
+        .from('leave_requests')
+        .select('leave_type, days, id')
+        .eq('employee_id', employee_id)
+        .in('leave_type', codes)
+        .gte('start_at', startInclusive)
+        .lt('start_at', endExclusive)
+        .in('status', ['approved', 'archived'])
+        .is('deleted_at', null);
+      if (error) throw error;
+
+      const byCode = {};
+      for (const row of (data || [])) {
+        const c = row.leave_type;
+        if (!byCode[c]) byCode[c] = { code: c, used_days: 0, used_count: 0 };
+        byCode[c].used_days  += Number(row.days) || 0;
+        byCode[c].used_count += 1;
+      }
+      return (codes || []).map(
+        (c) => byCode[c] || { code: c, used_days: 0, used_count: 0 },
+      );
+    },
+
     // ─── comp_time_balance(Batch 6 加,deductCompTime / refundCompTime / getCompBalance 用)──
     async findActiveCompBalances(employee_id) {
       const { data, error } = await supabaseAdmin
