@@ -52,7 +52,18 @@ function setupMocks({ period, updated, empDeptId, withDeptLookup = false, withUp
     });
   }
 
-  // 3. update status（只有 transition ok 才會走到）
+  // 3. F2 撈 schedules(守門、thenable for `await sb.from().select().eq()`)
+  //    舊測試的 period 沒帶 period_start / period_end → 純函式走「寬鬆 ok:true」、
+  //    schedules 空陣列也能通過守門。withUpdate=true 必然會走到守門 → 必 mock。
+  if (withUpdate) {
+    fromMock.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: (onF, onR) => Promise.resolve({ data: [], error: null }).then(onF, onR),
+    });
+  }
+
+  // 4. update status（只有 transition ok 才會走到）
   if (withUpdate) {
     fromMock.mockReturnValueOnce({
       update: vi.fn().mockReturnThis(),
