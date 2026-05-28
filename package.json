@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "xlsx": "^0.18.5"
   },
   "engines": {
     "node": "24.x"
