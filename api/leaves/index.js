@@ -155,19 +155,17 @@ export default async function handler(req, res) {
     return res.status(200).json(rows);
   }
 
-  // POST(legacy:start_date/end_date/days)
+  // POST(legacy:start_date/end_date/days)— 已棄用。
+  // 此路徑原本無 requireAuth、任何人(含未登入)可猜 employee_id 直接 INSERT 假單;
+  // 又沒走 lib/leave/request-flow.js 的合法 stage / 時數重算 / 餘額扣除、寫入即髒資料。
+  // 對齊同檔 legacy PUT(下方)的處理 pattern:直接回 410 GONE。
+  // 現役前端兩個請假入口(employee-leave.html / leave.html)都送新欄位 start_at、
+  // 走上方 handleNewPost(L75);改 410 對任何現役頁面零影響。
   if (req.method === 'POST') {
-    const { employee_id, leave_type, start_date, end_date, days, reason, attachment_url, attachment_name } = req.body;
-    if (!employee_id || !leave_type || !start_date || !end_date || !days)
-      return res.status(400).json({ error: '缺少必填欄位' });
-    const lid = 'L' + Date.now();
-    // Phase 1.5:legacy POST 預設寫 pending_mgr(從前是 'pending'、Phase 1.5 cleanup 後
-    // CHECK 已移除 'pending'、不能再寫舊值)。
-    const { error } = await supabaseAdmin.from('leave_requests')
-      .insert([{ id: lid, employee_id, leave_type, start_date, end_date, days, reason, status: 'pending_mgr',
-                 attachment_url: attachment_url || null, attachment_name: attachment_name || null }]);
-    if (error) return res.status(500).json({ error: error.message });
-    return res.status(201).json({ id: lid, message: '假單已建立' });
+    return res.status(410).json({
+      error: 'GONE',
+      message: 'legacy POST /api/leaves(start_date/end_date/days)已棄用。請改用 POST /api/leaves body { start_at, end_at, leave_type, reason } 走 lib/leave/request-flow.js',
+    });
   }
 
   // PUT(legacy 審核)— 已棄用。
