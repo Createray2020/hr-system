@@ -31,6 +31,9 @@ function makeChain(table) {
     return c;
   });
   c.in = vi.fn((col, vals) => { filters.push(['in', col, vals]); return c; });
+  // 對齊 8c44806 soft-delete 加的 .is('deleted_at', null) filter,實作 IS NULL 語意:
+  // .is(col, null) → 該欄為 NULL / undefined / 缺欄位 → 視為符合(對齊 SQL `col IS NULL`)
+  c.is = vi.fn((col, val) => { filters.push(['is', col, val]); return c; });
   c.or = vi.fn(() => c);
   c.gte = vi.fn(() => c); c.lte = vi.fn(() => c);
   c.gt = vi.fn(() => c); c.lt = vi.fn(() => c);
@@ -43,6 +46,8 @@ function makeChain(table) {
         if (op === 'eq'  && row[col] !== val) return false;
         if (op === 'neq' && row[col] === val) return false;
         if (op === 'in'  && !val.includes(row[col])) return false;
+        // .is(col, null):row[col] 必須是 null / undefined(對齊 SQL `col IS NULL`)
+        if (op === 'is'  && val === null && row[col] != null) return false;
       }
       return true;
     });

@@ -31,6 +31,7 @@ vi.mock('../lib/supabase.js', () => {
     c.eq = vi.fn((col, val) => { where[col] = val; return c; });
     c.neq = vi.fn(() => c);
     c.in = vi.fn(() => c);
+    c.is = vi.fn(() => c);    // 對齊 8c44806 soft-delete 加的 .is('deleted_at', null) filter
     c.gte = vi.fn(() => c); c.lte = vi.fn(() => c);
     c.order = vi.fn(() => c); c.limit = vi.fn(() => c);
     c.update = vi.fn((patch) => {

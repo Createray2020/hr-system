@@ -23,6 +23,7 @@ vi.mock('../lib/supabase.js', () => {
     c.order = vi.fn((col, opts) => { calls.orders.push({ table, col, opts }); return c; });
     c.limit = vi.fn(() => c);
     c.in = vi.fn(() => c);
+    c.is = vi.fn(() => c);    // 對齊 8c44806 soft-delete 加的 .is('deleted_at', null) filter
     c.maybeSingle = vi.fn(() => Promise.resolve({
       data: dataByQuery[`${table}:maybeSingle`] ?? null, error: null,
     }));

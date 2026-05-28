@@ -26,6 +26,7 @@ vi.mock('../lib/supabase.js', () => {
     c.order = vi.fn(() => c);
     c.limit = vi.fn(() => c);
     c.in = vi.fn(() => c);
+    c.is = vi.fn(() => c);    // 對齊 8c44806 soft-delete 加的 .is('deleted_at', null) filter
     c.maybeSingle = vi.fn(() => Promise.resolve({ data: null, error: null }));
     c.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
     // SELECT 回 dataByTable[table] || [] (UPDATE chain 同樣會走 then、但 update().eq() 之後不再 await 結果)
