@@ -102,12 +102,14 @@
           <button class="btn btn-ghost" onclick="loadQuotaOverview(true)">↻ 重新載入</button>
         </div>
         <div class="table-wrap">
-          <div class="l-row head" style="grid-template-columns:160px 110px 110px 1fr 1fr">
+          <div class="l-row head" style="grid-template-columns:160px 110px 110px 1fr 1fr 1fr 1fr">
             <div>員工</div>
             <div>特休剩餘</div>
             <div>補休剩餘</div>
             <div>病假 (已用/上限/次數)</div>
             <div>事假 (已用/上限/次數)</div>
+            <div>生理假 (已用/上限/次數)</div>
+            <div>家庭照顧假 (已用/上限/次數)</div>
           </div>
           <div id="quota-overview-list"></div>
         </div>
@@ -858,12 +860,14 @@ function renderQuotaOverview() {
       return `<span style="${colorStyle}">${used} / ${max} 天 · ${cnt} 次${warn}</span>`;
     };
 
-    return `<div class="l-row" style="grid-template-columns:160px 110px 110px 1fr 1fr">
+    return `<div class="l-row" style="grid-template-columns:160px 110px 110px 1fr 1fr 1fr 1fr">
       ${empCell}
       <div>${annual}</div>
       <div>${comp}</div>
       <div>${renderAccu('sick')}</div>
       <div>${renderAccu('personal')}</div>
+      <div>${renderAccu('menstrual')}</div>
+      <div>${renderAccu('family_care')}</div>
     </div>`;
   }).join('');
 }
