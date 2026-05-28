@@ -62,8 +62,9 @@
         <button type="button" data-tab="my_pending" class="active" onclick="onTabClick('my_pending')">待我處理</button>
         <button type="button" data-tab="done" onclick="onTabClick('done')">已完成</button>
         <button type="button" data-tab="all" onclick="onTabClick('all')">全部</button>
+        <button type="button" data-tab="quota_overview" onclick="onTabClick('quota_overview')">假期額度總覽</button>
       </div>
-      <div class="filter-bar">
+      <div class="filter-bar" id="list-filter-bar">
         <select class="form-select" id="f-status" onchange="render()" style="width:170px">
           <option value="my_pending" selected>待我審</option>
           <option value="all_pending">全部 pending</option>
@@ -83,11 +84,33 @@
         <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
       </div>
 
-      <div class="table-wrap">
+      <div class="table-wrap" id="list-table-wrap">
         <div class="l-row head">
           <div>申請人</div><div>類型</div><div>時間</div><div>申請時數</div><div>狀態</div><div>操作</div>
         </div>
         <div id="list"></div>
+      </div>
+
+      <!-- ── 假期額度總覽視圖(切到 quota_overview tab 才 show)───────── -->
+      <div id="quota-overview-wrap" style="display:none">
+        <div class="filter-bar">
+          <select class="form-select" id="qo-year" onchange="onQoYearChange()" style="width:120px">
+            <!-- 動態 populate 2024-2027、預設今年 -->
+          </select>
+          <input type="text" class="form-input" id="qo-search" placeholder="搜尋員工姓名 / ID"
+                 oninput="onQoSearchInput()" style="flex:1;max-width:240px">
+          <button class="btn btn-ghost" onclick="loadQuotaOverview(true)">↻ 重新載入</button>
+        </div>
+        <div class="table-wrap">
+          <div class="l-row head" style="grid-template-columns:160px 110px 110px 1fr 1fr">
+            <div>員工</div>
+            <div>特休剩餘</div>
+            <div>補休剩餘</div>
+            <div>病假 (已用/上限/次數)</div>
+            <div>事假 (已用/上限/次數)</div>
+          </div>
+          <div id="quota-overview-list"></div>
+        </div>
       </div>
     </div>
   </main>
@@ -212,6 +235,17 @@ function onTabClick(tab) {
   document.querySelectorAll('.approval-tabs button').forEach(b => {
     b.classList.toggle('active', b.dataset.tab === tab);
   });
+
+  // 視圖切換:quota_overview = 分析視圖(員工×假別)、其他三個 = 既有假單列表視圖
+  const isQuota = tab === 'quota_overview';
+  document.getElementById('list-filter-bar').style.display     = isQuota ? 'none' : '';
+  document.getElementById('list-table-wrap').style.display     = isQuota ? 'none' : '';
+  document.getElementById('quota-overview-wrap').style.display = isQuota ? ''     : 'none';
+
+  if (isQuota) {
+    loadQuotaOverview();   // lazy:有 cache 不重撈
+    return;
+  }
   applyTabToStatusSelect(tab);
   render();
 }
@@ -727,6 +761,115 @@ async function confirmReject() {
     await load();
   } catch(e) { toast('退回失敗:'+e.message, 'error'); }
 }
+
+// ════════════════════════════════════════════════════════════
+// 假期額度總覽(quota_summary endpoint × N 員工、第 4 個 tab)
+// 切到 quota_overview tab 才 lazy load、Promise.all 並行打、單筆失敗不擋整批。
+// 搜尋是純前端 cache 過濾,改年度才重撈。
+// ════════════════════════════════════════════════════════════
+let quotaCache = null;  // Array<{ emp, quota } | { emp, error }>
+
+async function loadQuotaOverview(force = false) {
+  // 第一次進入:populate 年度 select(2024-2027、預設今年)
+  const yearSel = document.getElementById('qo-year');
+  if (yearSel && !yearSel.options.length) {
+    const thisYear = new Date().getFullYear();
+    yearSel.innerHTML = [2024, 2025, 2026, 2027]
+      .map(y => `<option value="${y}"${y === thisYear ? ' selected' : ''}>${y}</option>`)
+      .join('');
+  }
+
+  if (quotaCache && !force) return renderQuotaOverview();
+
+  const listEl = document.getElementById('quota-overview-list');
+  if (listEl) listEl.innerHTML =
+    `<div style="padding:30px;text-align:center;color:var(--text-dim);font-size:13px">載入中…</div>`;
+
+  const year = Number(yearSel?.value) || new Date().getFullYear();
+
+  try {
+    // 1. 撈員工清單(後端 B1 scope:HR 看全公司、主管看本部門 + 自己)
+    const emps = await api('/api/employees?status=active');
+
+    // 2. 每人 fetch quota_summary、Promise.all 並行、單筆失敗包成 error
+    const results = await Promise.all(
+      (emps || []).map(e =>
+        api(`/api/leaves?_resource=quota_summary&employee_id=${encodeURIComponent(e.id)}&year=${year}`)
+          .then(quota => ({ emp: e, quota }))
+          .catch(err => ({ emp: e, error: err.message || String(err) })),
+      ),
+    );
+    quotaCache = results;
+    renderQuotaOverview();
+  } catch (e) {
+    if (listEl) listEl.innerHTML =
+      `<div style="padding:30px;text-align:center;color:#F87171;font-size:13px">載入失敗:${escHtml(e.message || String(e))}</div>`;
+  }
+}
+
+function renderQuotaOverview() {
+  const listEl = document.getElementById('quota-overview-list');
+  if (!listEl) return;
+  if (!quotaCache) { listEl.innerHTML = ''; return; }
+
+  const search = (document.getElementById('qo-search')?.value || '').trim().toLowerCase();
+  const rows = quotaCache.filter(r => {
+    if (!search) return true;
+    const name = (r.emp?.name || '').toLowerCase();
+    const id   = (r.emp?.id   || '').toLowerCase();
+    return name.includes(search) || id.includes(search);
+  });
+
+  if (!rows.length) {
+    listEl.innerHTML =
+      `<div style="padding:30px;text-align:center;color:var(--text-dim);font-size:13px">無符合員工</div>`;
+    return;
+  }
+
+  listEl.innerHTML = rows.map(r => {
+    const emp = r.emp || {};
+    const empCell =
+      `<div>${escHtml(emp.name || emp.id || '—')}` +
+      `<div style="font-size:11px;color:var(--text-dim)">${escHtml(emp.dept_name || emp.dept || '')}</div></div>`;
+
+    if (r.error) {
+      return `<div class="l-row" style="grid-template-columns:160px 1fr">
+        ${empCell}
+        <div style="color:#F87171">載入失敗:${escHtml(r.error)}</div>
+      </div>`;
+    }
+
+    const q = r.quota || {};
+    const annual = q.annual?.has_record
+      ? `${q.annual.remaining_days} / ${q.annual.granted_days} 天`
+      : '—';
+    const comp = Number(q.comp?.total_remaining_hours || 0).toFixed(1) + ' h';
+
+    const accuMap = Object.fromEntries((q.accumulating || []).map(a => [a.code, a]));
+    const renderAccu = (code) => {
+      const a = accuMap[code];
+      if (!a) return '—';
+      const used = a.used_days ?? 0;
+      const max  = a.legal_max_days ?? '—';
+      const cnt  = a.used_count ?? 0;
+      const over = a.is_over_limit === true;
+      const colorStyle = over ? 'color:#FB923C' : '';
+      const warn = over ? ' ⚠' : '';
+      return `<span style="${colorStyle}">${used} / ${max} 天 · ${cnt} 次${warn}</span>`;
+    };
+
+    return `<div class="l-row" style="grid-template-columns:160px 110px 110px 1fr 1fr">
+      ${empCell}
+      <div>${annual}</div>
+      <div>${comp}</div>
+      <div>${renderAccu('sick')}</div>
+      <div>${renderAccu('personal')}</div>
+    </div>`;
+  }).join('');
+}
+
+function onQoYearChange() { loadQuotaOverview(true); }    // 改年度重撈
+function onQoSearchInput() { renderQuotaOverview(); }     // 搜尋純前端過濾、不重撈
 
 load();
 </script>
