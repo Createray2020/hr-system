@@ -45,17 +45,7 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
 .logout-btn:active{background:rgba(248,113,113,.15)}
 
 /* ── 修改密碼 Modal ── */
-.pw-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);align-items:flex-end;justify-content:center;z-index:200;padding:0}
-.pw-modal-bg.open{display:flex}
-.pw-modal{background:#181C27;border-top:0.5px solid rgba(255,255,255,.1);border-radius:20px 20px 0 0;padding:24px 20px 48px;width:100%;max-width:430px}
-.pw-modal-title{font-size:17px;font-weight:700;margin-bottom:20px}
-.pw-label{font-size:12px;color:rgba(255,255,255,.4);display:block;margin-bottom:6px}
-.pw-input{width:100%;background:rgba(255,255,255,.06);border:0.5px solid rgba(255,255,255,.1);border-radius:10px;padding:12px 14px;font-size:15px;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;outline:none;-webkit-appearance:none;margin-bottom:12px;transition:border-color .2s}
-.pw-input:focus{border-color:rgba(91,141,239,.5)}
-.pw-err{font-size:12px;color:#F87171;margin-bottom:10px;display:none;padding-left:2px}
-.pw-submit{width:100%;padding:14px;background:#5B8DEF;border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;font-family:'Noto Sans TC',sans-serif;cursor:pointer;margin-top:4px}
-.pw-submit:disabled{opacity:.5;cursor:not-allowed}
-.pw-cancel{width:100%;padding:12px;background:transparent;border:none;color:rgba(255,255,255,.4);font-size:14px;font-family:'Noto Sans TC',sans-serif;cursor:pointer;margin-top:6px}
+/* 改密碼 modal CSS 已抽到 public/js/change-password-modal.js(cp-* class、bottom-sheet RWD) */
 
 /* ── 版本資訊 ── */
 .version-badge{text-align:center;padding:16px;font-size:11px;color:rgba(255,255,255,.2);font-family:'DM Mono',monospace}
@@ -141,7 +131,7 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
     </div>
 
     <!-- 修改密碼 -->
-    <button class="switch-version-btn" style="display:block;background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1);color:rgba(255,255,255,.6)" onclick="openPwModal()">
+    <button class="switch-version-btn" style="display:block;background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1);color:rgba(255,255,255,.6)" onclick="ChangePassword.open()">
       🔑 修改密碼
     </button>
 
@@ -176,21 +166,7 @@ body{background:#0F1117;color:#E8EAF0;font-family:'Noto Sans TC',sans-serif;font
   </nav>
 </div>
 
-<!-- 修改密碼 Modal -->
-<div class="pw-modal-bg" id="pw-modal-bg" onclick="if(event.target===this)closePwModal()">
-  <div class="pw-modal">
-    <div class="pw-modal-title">🔑 修改密碼</div>
-    <label class="pw-label">目前密碼</label>
-    <input class="pw-input" id="pw-old" type="password" placeholder="目前使用的密碼">
-    <label class="pw-label">新密碼</label>
-    <input class="pw-input" id="pw-new" type="password" placeholder="至少 6 個字元">
-    <label class="pw-label">確認新密碼</label>
-    <input class="pw-input" id="pw-confirm" type="password" placeholder="再輸入一次新密碼">
-    <div class="pw-err" id="pw-err"></div>
-    <button class="pw-submit" id="pw-submit-btn" onclick="submitChangePw()">確認修改</button>
-    <button class="pw-cancel" onclick="closePwModal()">取消</button>
-  </div>
-</div>
+<!-- 修改密碼 modal 由 /js/change-password-modal.js component 動態注入(見頁尾 <script type="module">)-->
 
 <script>
 const SUPABASE_URL      = 'https://scsgqxixmbompnoypuuw.supabase.co';
@@ -217,45 +193,8 @@ function calcSeniority(hireDate) {
   return y > 0 ? `${y} 年 ${m} 個月` : `${m} 個月`;
 }
 
-function openPwModal() {
-  ['pw-old','pw-new','pw-confirm'].forEach(id => document.getElementById(id).value = '');
-  const errEl = document.getElementById('pw-err'); errEl.style.display='none'; errEl.textContent='';
-  document.getElementById('pw-modal-bg').classList.add('open');
-}
-function closePwModal() { document.getElementById('pw-modal-bg').classList.remove('open'); }
-
-async function submitChangePw() {
-  const empNo  = window._empNo;
-  const oldPw  = document.getElementById('pw-old').value;
-  const newPw  = document.getElementById('pw-new').value;
-  const confirm= document.getElementById('pw-confirm').value;
-  const errEl  = document.getElementById('pw-err');
-  const btn    = document.getElementById('pw-submit-btn');
-
-  errEl.style.display = 'none';
-  if (!oldPw || !newPw || !confirm) { errEl.textContent='請填寫所有欄位'; errEl.style.display='block'; return; }
-  if (newPw !== confirm) { errEl.textContent='新密碼與確認密碼不一致'; errEl.style.display='block'; return; }
-  if (newPw.length < 6)  { errEl.textContent='新密碼至少需要 6 個字元'; errEl.style.display='block'; return; }
-
-  btn.disabled = true; btn.textContent = '更新中…';
-  try {
-    await apiFetch('/api/auth?action=change-password', {
-      method: 'POST',
-      body: JSON.stringify({ emp_no: empNo, old_password: oldPw, new_password: newPw })
-    });
-    closePwModal();
-    // Show success toast
-    const wrap = document.createElement('div');
-    wrap.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1E2333;border:1px solid rgba(74,222,128,.3);border-left:3px solid #4ADE80;border-radius:20px;padding:10px 20px;font-size:13px;color:#4ADE80;z-index:999;white-space:nowrap';
-    wrap.textContent='✅ 密碼已更新，下次登入生效';
-    document.body.appendChild(wrap);
-    setTimeout(()=>wrap.remove(), 3500);
-  } catch(e) {
-    errEl.textContent = e.message || '更新失敗';
-    errEl.style.display = 'block';
-  }
-  btn.disabled = false; btn.textContent = '確認修改';
-}
+// 改密碼:openPwModal / closePwModal / submitChangePw 已抽到 /js/change-password-modal.js
+// 按鈕 onclick="ChangePassword.open()"、emp_no 由 component 從 window._empNo / window.currentUser 取
 
 function switchToDesktop() {
   if (confirm('確定切換至電腦版管理後台？')) {
@@ -318,5 +257,7 @@ async function doLogout() {
 
 <script src="/js/pwa.js"></script>
 <script>PWA.init();</script>
+<!-- 改密碼 component(ESM、lazy init:open() 觸發注入)-->
+<script type="module" src="/js/change-password-modal.js"></script>
 </body>
 </html>
