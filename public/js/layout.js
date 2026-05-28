@@ -59,6 +59,27 @@
     window.currentUser = data;
   } catch(e) { console.warn('無法取得使用者資料', e); }
 
+  // 暴露 waitForCurrentUser 給共用 component 用(對齊各 desktop 頁既有 local helper 行為)。
+  // 此處 layout.js 已 await /api/employees/me、window.currentUser 已寫入,因此呼叫立即回值;
+  // fetch 失敗時輪詢 5 秒、仍無 → return null。
+  // public/js/change-password-modal.js::resolveEmpNo() 第 1 順位會 await 它。
+  window.waitForCurrentUser = async (maxMs = 5000) => {
+    const step = 100;
+    for (let i = 0; i < maxMs / step; i++) {
+      if (window.currentUser) return window.currentUser;
+      await new Promise(r => setTimeout(r, step));
+    }
+    return null;
+  };
+
+  // 載入改密碼 component(dynamic import,對齊既有 sidebar builder L77 pattern)。
+  // 載入完成後 window.ChangePassword = { init, open, close } ready、
+  // sidebar 注入按鈕時 onclick="ChangePassword.open()" 即可使用、無 race。
+  // 失敗不擋 layout(改密碼不能用是 graceful degradation、不該擋整個 sidebar)。
+  try {
+    await import('/js/change-password-modal.js');
+  } catch(e) { console.warn('改密碼 component 載入失敗', e); }
+
   // 角色 gate(對齊 lib/roles.js + public/js/roles.js)
   const isHRish     = u => !!u && ['hr','admin','ceo','chairman'].includes(u.role);
   const isMgrOrHR   = u => !!u && (u.is_manager === true || ['hr','admin','ceo','chairman'].includes(u.role));
@@ -105,9 +126,11 @@
         <div class="name">${userName}</div>
         <div class="role">${userRole}</div>
       </div>
+      <button class="change-pw-btn" onclick="ChangePassword.open()" title="修改密碼"
+        style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-dim);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0">🔑</button>
       ${isMgrOrHR(currentUser) ? `
       <button class="switch-mobile-btn" onclick="switchToMobile()" title="切換到手機版"
-        style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-dim);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0">📱</button>` : ''}
+        style="margin-left:6px;background:transparent;border:1px solid var(--border);color:var(--text-dim);width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0">📱</button>` : ''}
     </div>`;
 
   // 階段 4.5.2:mobile drawer 模式 — 注入 header / mask
