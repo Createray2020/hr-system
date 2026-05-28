@@ -81,8 +81,8 @@ describe('export 常數正確', () => {
   it('states 5 個（C12-2 加 published）', () => {
     expect(SCHEDULE_PERIOD_STATES).toEqual(['draft', 'submitted', 'approved', 'published', 'locked']);
   });
-  it('actions 5 個（C12-2 加 publish）', () => {
-    expect(SCHEDULE_PERIOD_ACTIONS).toEqual(['submit', 'approve', 'publish', 'adjust', 'lock']);
+  it('actions 6 個（C12-2 加 publish + F3 加 unpublish）', () => {
+    expect(SCHEDULE_PERIOD_ACTIONS).toEqual(['submit', 'approve', 'publish', 'adjust', 'lock', 'unpublish']);
   });
 });
 
@@ -104,6 +104,50 @@ describe('canTransition: C12-2 publish flow', () => {
   });
   it('submitted + publish 是非法（必須先 approve）', () => {
     const r = canTransition('submitted', 'publish', manager);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ILLEGAL_TRANSITION');
+  });
+});
+
+describe('canTransition: F3 unpublish flow', () => {
+  it('published + unpublish (manager) → approved', () => {
+    const r = canTransition('published', 'unpublish', manager);
+    expect(r.ok).toBe(true);
+    expect(r.nextState).toBe('approved');
+  });
+
+  it('published + unpublish 但 actor 不是 manager → FORBIDDEN_ACTOR', () => {
+    const r = canTransition('published', 'unpublish', employee);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/FORBIDDEN_ACTOR/);
+  });
+
+  it('published + unpublish 但 actor 是 system → FORBIDDEN_ACTOR(只給 is_manager,不給 cron)', () => {
+    const r = canTransition('published', 'unpublish', sysActor);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/FORBIDDEN_ACTOR/);
+  });
+
+  it('draft + unpublish → ILLEGAL_TRANSITION', () => {
+    const r = canTransition('draft', 'unpublish', manager);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ILLEGAL_TRANSITION');
+  });
+
+  it('submitted + unpublish → ILLEGAL_TRANSITION', () => {
+    const r = canTransition('submitted', 'unpublish', manager);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ILLEGAL_TRANSITION');
+  });
+
+  it('approved + unpublish → ILLEGAL_TRANSITION(approved 還沒公告、無從撤回)', () => {
+    const r = canTransition('approved', 'unpublish', manager);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ILLEGAL_TRANSITION');
+  });
+
+  it('locked + unpublish → ILLEGAL_TRANSITION(已鎖月、不可撤回)', () => {
+    const r = canTransition('locked', 'unpublish', manager);
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('ILLEGAL_TRANSITION');
   });
