@@ -80,6 +80,15 @@ export default async function handler(req, res) {
     .from('shift_types').select('*');
   const shiftMap = Object.fromEntries((shiftTypesArr || []).map(s => [s.id, s]));
 
+  // 4b. 撈本 period 已有的員工 __OFF__ 日 → 套範本要跳過、不覆蓋員工心意
+  const { data: existingOff } = await supabaseAdmin
+    .from('schedules')
+    .select('work_date')
+    .eq('period_id', period_id)
+    .eq('shift_type_id', 'ST003')
+    .eq('note', '__OFF__');
+  const offDates = new Set((existingOff || []).map(s => s.work_date));
+
   // 5. 計算 period 範圍每天 dayOfWeek、組裝 rows
   const { period_start, period_end } = period;
   if (!period_start || !period_end) {
@@ -95,6 +104,7 @@ export default async function handler(req, res) {
   let appliedCount = 0;
   let skippedPast = 0;
   let offCount = 0;
+  let skippedExistingOff = 0;
 
   const start = new Date(period_start);
   const end = new Date(period_end);
@@ -106,6 +116,12 @@ export default async function handler(req, res) {
     // C5：過去日期跳過
     if (skipPastDays && dateStr <= today) {
       skippedPast++;
+      continue;
+    }
+
+    // 員工已標 __OFF__ 的日 → 跳過、不覆蓋員工心意
+    if (offDates.has(dateStr)) {
+      skippedExistingOff++;
       continue;
     }
 
@@ -155,7 +171,8 @@ export default async function handler(req, res) {
 
   if (rows.length === 0) {
     return res.status(200).json({
-      applied: 0, skipped_past: skippedPast, off_count: offCount, total: 0,
+      applied: 0, skipped_past: skippedPast, off_count: offCount,
+      skipped_existing_off: skippedExistingOff, total: 0,
       message: '無有效日期可套用',
     });
   }
@@ -189,7 +206,8 @@ export default async function handler(req, res) {
     applied: appliedCount,
     skipped_past: skippedPast,
     off_count: offCount,
-    total: appliedCount + skippedPast,
+    skipped_existing_off: skippedExistingOff,
+    total: appliedCount + skippedPast + skippedExistingOff,
     template_name: template.name,
   });
 }

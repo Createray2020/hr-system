@@ -7,9 +7,13 @@ vi.mock('../lib/supabase.js', () => ({
 vi.mock('../lib/auth.js', () => ({
   requireAuth: vi.fn(),
 }));
+const { mockSendPushToEmployees, mockCreateNotifications } = vi.hoisted(() => ({
+  mockSendPushToEmployees: vi.fn(),
+  mockCreateNotifications: vi.fn(),
+}));
 vi.mock('../lib/push.js', () => ({
-  sendPushToEmployees: vi.fn(),
-  createNotifications: vi.fn(),
+  sendPushToEmployees: mockSendPushToEmployees,
+  createNotifications: mockCreateNotifications,
 }));
 
 import handler from '../api/schedule-templates/[id]/apply.js';
@@ -29,7 +33,7 @@ function makeReq({ method = 'POST', id, body = {} } = {}) {
   return { method, query: { id }, body };
 }
 
-function setupMocks({ template, period, shiftTypes }) {
+function setupMocks({ template, period, shiftTypes, existingOffDates = [] }) {
   const fromMock = vi.fn();
   supabaseAdmin.from.mockImplementation(fromMock);
 
@@ -52,7 +56,18 @@ function setupMocks({ template, period, shiftTypes }) {
     select: vi.fn().mockResolvedValue({ data: shiftTypes || [], error: null }),
   });
 
-  // 4. upsert schedules
+  // 4. 撈本 period 已有的員工 __OFF__ 日（default []、永遠 queue 以對應
+  //     apply.js 無條件 fetch；早早 bail 的 test 此 mock 不會被消費）
+  fromMock.mockReturnValueOnce({
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    then: (onF, onR) => Promise.resolve({
+      data: existingOffDates.map(d => ({ work_date: d })),
+      error: null,
+    }).then(onF, onR),
+  });
+
+  // 5. upsert schedules
   fromMock.mockReturnValueOnce({
     upsert: vi.fn().mockResolvedValue({ error: null }),
   });
@@ -152,5 +167,76 @@ describe('POST /api/schedule-templates/:id/apply', () => {
     const res = makeRes();
     await handler(req, res);
     expect(res.statusCode).toBe(405);
+  });
+
+  // ── 員工已標 OFF 的日要跳過、不被範本覆蓋 ──────────────
+  it('員工自套 + 無 existing OFF → applied=7, skipped_existing_off=0', async () => {
+    requireAuth.mockResolvedValue({ id: 'E001', role: 'employee', is_manager: false });
+    setupMocks({
+      template: validTemplate,
+      period: validPeriod,
+      shiftTypes: validShiftTypes,
+      existingOffDates: [],
+    });
+    const req = makeReq({ id: 'TPL_x', body: { period_id: 'P_E001_2026_05' } });
+    const res = makeRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.applied).toBe(7);
+    expect(res.body.skipped_existing_off).toBe(0);
+  });
+
+  it('員工自套 + 1 個 existing OFF 日 → 跳過該日', async () => {
+    requireAuth.mockResolvedValue({ id: 'E001', role: 'employee', is_manager: false });
+    setupMocks({
+      template: validTemplate,
+      period: validPeriod,
+      shiftTypes: validShiftTypes,
+      existingOffDates: ['2099-01-03'],
+    });
+    const req = makeReq({ id: 'TPL_x', body: { period_id: 'P_E001_2026_05' } });
+    const res = makeRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.applied).toBe(6);
+    expect(res.body.skipped_existing_off).toBe(1);
+  });
+
+  it('員工自套 + 多個 existing OFF 日 → 全跳過', async () => {
+    requireAuth.mockResolvedValue({ id: 'E001', role: 'employee', is_manager: false });
+    setupMocks({
+      template: validTemplate,
+      period: validPeriod,
+      shiftTypes: validShiftTypes,
+      existingOffDates: ['2099-01-02', '2099-01-05'],
+    });
+    const req = makeReq({ id: 'TPL_x', body: { period_id: 'P_E001_2026_05' } });
+    const res = makeRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.applied).toBe(5);
+    expect(res.body.skipped_existing_off).toBe(2);
+  });
+
+  it('HR 套全 OFF → applied=0、total=0、不發通知（早回值前置）', async () => {
+    requireAuth.mockResolvedValue({ id: 'HR001', role: 'hr', is_manager: false });
+    setupMocks({
+      template: validTemplate,
+      period: validPeriod,
+      shiftTypes: validShiftTypes,
+      existingOffDates: [
+        '2099-01-01', '2099-01-02', '2099-01-03', '2099-01-04',
+        '2099-01-05', '2099-01-06', '2099-01-07',
+      ],
+    });
+    const req = makeReq({ id: 'TPL_x', body: { period_id: 'P_E001_2026_05' } });
+    const res = makeRes();
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.applied).toBe(0);
+    expect(res.body.skipped_existing_off).toBe(7);
+    expect(res.body.total).toBe(0);
+    expect(mockSendPushToEmployees).not.toHaveBeenCalled();
+    expect(mockCreateNotifications).not.toHaveBeenCalled();
   });
 });
