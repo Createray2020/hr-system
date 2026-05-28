@@ -211,11 +211,12 @@ describe('分流：新路徑（Batch 3+）', () => {
   });
 });
 
-// ─── 員工自助 shift（v2.5 全面開放）─────────────────────────────────
-// v2.5 移除 Phase C 限制：員工 INSERT 任何 shift_type_id 都通過。
-// 員工填什麼都是 wish（靠 period.status='draft' 區分）、主管公告才是正式班表。
+// ─── G1:員工自助 shift 只能標「希望休假」(ST003 + __OFF__) ───────────
+// 規則:isSelf=true 員工 POST 任何非「ST003+__OFF__/null」shift_type → 403
+//      EMPLOYEE_SHIFT_RESTRICTED;主管/HR 代操作(isSelf=false)不受限。
+// 員工 wish 認定仍靠 period.status='draft';本規則只擋「員工能送什麼 shift_type」。
 
-describe('員工自助：v2.5 開放所有班別 INSERT', () => {
+describe('員工自助:G1 EMPLOYEE_SHIFT_RESTRICTED (POST 路徑)', () => {
   beforeEach(() => {
     overrides.caller = { id: 'E001', role: 'employee', is_manager: false };
     overrides.schedulePeriodsResponse = {
@@ -235,7 +236,7 @@ describe('員工自助：v2.5 開放所有班別 INSERT', () => {
     overrides.schedulePeriodsResponse = null;
   });
 
-  it('員工 INSERT shift_type_id="ST001"(早班) → 通過 (201)', async () => {
+  it('員工 POST ST001 (希望早班) → 403 EMPLOYEE_SHIFT_RESTRICTED', async () => {
     const [req, res] = makeReqRes({
       method: 'POST',
       body: {
@@ -245,23 +246,11 @@ describe('員工自助：v2.5 開放所有班別 INSERT', () => {
       },
     });
     await handler(req, res);
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
   });
 
-  it('員工 INSERT shift_type_id="ST003"(員工希望班) → 通過 (201)', async () => {
-    const [req, res] = makeReqRes({
-      method: 'POST',
-      body: {
-        period_id: 'p1', employee_id: 'E001', work_date: '2099-01-15',
-        shift_type_id: 'ST003', segment_no: 1,
-        start_time: '09:00', end_time: '18:00',
-      },
-    });
-    await handler(req, res);
-    expect(res.statusCode).toBe(201);
-  });
-
-  it('員工 INSERT shift_type_id="ST002"(晚班) → 通過 (201)', async () => {
+  it('員工 POST ST002 (希望晚班) → 403 EMPLOYEE_SHIFT_RESTRICTED', async () => {
     const [req, res] = makeReqRes({
       method: 'POST',
       body: {
@@ -271,10 +260,11 @@ describe('員工自助：v2.5 開放所有班別 INSERT', () => {
       },
     });
     await handler(req, res);
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
   });
 
-  it('員工 INSERT shift_type_id="ST004"(例假日) → 通過 (201)', async () => {
+  it('員工 POST ST004 (例假) → 403 EMPLOYEE_SHIFT_RESTRICTED', async () => {
     const [req, res] = makeReqRes({
       method: 'POST',
       body: {
@@ -283,10 +273,25 @@ describe('員工自助：v2.5 開放所有班別 INSERT', () => {
       },
     });
     await handler(req, res);
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
   });
 
-  it('員工 INSERT note="__OFF__" → 通過 (201)', async () => {
+  it('員工 POST ST003 缺 __OFF__ note → 403 (光 ST003 不夠、要 note=__OFF__)', async () => {
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E001', work_date: '2099-01-15',
+        shift_type_id: 'ST003', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+
+  it('員工 POST ST003 + note=__OFF__ → 201 (休假能標、唯一合法選項)', async () => {
     const [req, res] = makeReqRes({
       method: 'POST',
       body: {
@@ -297,5 +302,64 @@ describe('員工自助：v2.5 開放所有班別 INSERT', () => {
     });
     await handler(req, res);
     expect(res.statusCode).toBe(201);
+  });
+
+  it('員工 POST shift_type_id=null (清除/空 cell) → 201 (留空合法)', async () => {
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E001', work_date: '2099-01-15',
+        shift_type_id: null, segment_no: 1,
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+  });
+});
+
+// ─── G1:代操作不誤擋 — 主管/HR 排員工早晚班正常通過 ─────────────────
+describe('代操作:G1 不誤擋主管/HR 代員工排早晚班 (POST)', () => {
+  beforeEach(() => {
+    // HR 代員工 E001 排班(caller != employee_id → isSelf=false)
+    overrides.caller = { id: 'HR1', role: 'hr', is_manager: false };
+    overrides.schedulePeriodsResponse = {
+      id: 'p1', employee_id: 'E001', status: 'draft',
+      period_year: 2099, period_month: 1,
+      period_start: '2099-01-01', period_end: '2099-01-31',
+      dept: 'kitchen',
+    };
+  });
+
+  afterEach(() => {
+    overrides.caller = null;
+    overrides.schedulePeriodsResponse = null;
+  });
+
+  it('HR 代員工 POST ST001 (早班) → 201、G1 不擋', async () => {
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E001', work_date: '2099-01-15',
+        shift_type_id: 'ST001', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+
+  it('HR 代員工 POST ST002 (晚班) → 201、G1 不擋', async () => {
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E001', work_date: '2099-01-15',
+        shift_type_id: 'ST002', segment_no: 1,
+        start_time: '14:00', end_time: '22:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
   });
 });

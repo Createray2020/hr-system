@@ -8,7 +8,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
-import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
+import { canEmployeeEditSchedule, canManagerEditSchedule, checkEmployeeShiftRestricted } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
 import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
@@ -45,6 +45,13 @@ export default async function handler(req, res) {
   if (isSelf) {
     const r = canEmployeeEditSchedule(period, existing.employee_id, today);
     if (!r.ok) return res.status(403).json({ error: r.reason });
+
+    // G1:員工只能標「希望休假」(ST003 + __OFF__) 或留空(對應 PUT 改 shift_type)
+    // DELETE 不過此檢查(req.body 通常空、checkEmployeeShiftRestricted 回 ok)
+    if (req.method === 'PUT') {
+      const r2 = checkEmployeeShiftRestricted(req.body);
+      if (!r2.ok) return res.status(403).json({ error: r2.reason });
+    }
   } else {
     let inSameDept = false;
     if (caller.is_manager === true && caller.dept_id) {

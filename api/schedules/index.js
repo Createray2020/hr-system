@@ -15,7 +15,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
 import { canAccessBackoffice, isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
-import { canEmployeeEditSchedule, canManagerEditSchedule } from '../../lib/schedule/permissions.js';
+import { canEmployeeEditSchedule, canManagerEditSchedule, checkEmployeeShiftRestricted } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
 import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
@@ -289,9 +289,9 @@ async function handleNewPost(req, res) {
     allowed = r.ok;
     if (!r.ok) return res.status(403).json({ error: r.reason });
 
-    // Phase C 員工自助限制已移除（v2.5 改造）：
-    // 員工填什麼班別都是 wish（靠 period.status='draft' 區分）、不再擋班別。
-    // 主管在 schedule.html 公告才是正式班表。
+    // G1:員工只能標「希望休假」(ST003 + __OFF__) 或留空
+    const r2 = checkEmployeeShiftRestricted(req.body);
+    if (!r2.ok) return res.status(403).json({ error: r2.reason });
   } else {
     const isHR = isBackofficeRole(caller);
     let inSameDept = false;

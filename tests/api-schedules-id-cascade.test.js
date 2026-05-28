@@ -66,6 +66,13 @@ vi.mock('../lib/roles.js', () => ({
 vi.mock('../lib/schedule/permissions.js', () => ({
   canEmployeeEditSchedule: vi.fn(() => ({ ...overrides.employeePerm })),
   canManagerEditSchedule: vi.fn(() => ({ ...overrides.managerPerm })),
+  // G1:測試實際邏輯、不 stub(讓 PUT 員工 ST001 真的被擋)
+  checkEmployeeShiftRestricted: (body) => {
+    const stid = body?.shift_type_id;
+    if (!stid) return { ok: true };
+    if (stid === 'ST003' && body.note === '__OFF__') return { ok: true };
+    return { ok: false, reason: 'EMPLOYEE_SHIFT_RESTRICTED' };
+  },
 }));
 
 vi.mock('../lib/schedule/change-logger.js', () => ({
@@ -229,5 +236,94 @@ describe('PUT /api/schedules/:id — P8.1 cascade attendance recompute', () => {
     // cascade 也跑(attendance UPDATE)
     expect(calls.updates.find(u => u.table === 'attendance')).toBeDefined();
     expect(res.body.attendance_cascade).toBeDefined();
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// G1:員工自助 shift 只能標「希望休假」(ST003 + __OFF__) — PUT 路徑
+// 對應 POST 路徑的 EMPLOYEE_SHIFT_RESTRICTED、防員工繞過 UI 用 PUT
+// 改自己 segment 的 shift_type_id 從 ST003 → ST001。主管/HR 代操作不擋。
+// ════════════════════════════════════════════════════════════
+describe('G1 EMPLOYEE_SHIFT_RESTRICTED (PUT 路徑)', () => {
+  it('員工 PUT 自己 segment shift_type=ST001 → 403 EMPLOYEE_SHIFT_RESTRICTED', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false };
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST001', start_time: '09:00', end_time: '18:00' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
+    // 沒實際 update DB
+    expect(calls.updates.find(u => u.table === 'schedules')).toBeUndefined();
+  });
+
+  it('員工 PUT 自己 segment shift_type=ST002 → 403', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false };
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+
+    const [req, res] = makeReqRes({ body: { shift_type_id: 'ST002' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+
+  it('員工 PUT 自己 segment shift_type=ST003 + note=__OFF__ → 200 (休假合法)', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false };
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST003', note: '__OFF__' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('員工 PUT 只改 start_time、未動 shift_type_id → 200 (沒帶 shift_type 視同不動)', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false };
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+
+    const [req, res] = makeReqRes({ body: { start_time: '09:00' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('員工 PUT shift_type=null (清除) → 200 (合法)', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false };
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+
+    const [req, res] = makeReqRes({ body: { shift_type_id: null } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('HR 代員工 PUT segment shift_type=ST001 → 200 (代操作不擋)', async () => {
+    // overrides.caller default = HR1(from beforeEach)
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST001', start_time: '09:00', end_time: '18:00' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+
+  it('HR 代員工 PUT segment shift_type=ST002 → 200', async () => {
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST002', start_time: '14:00', end_time: '22:00' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
   });
 });

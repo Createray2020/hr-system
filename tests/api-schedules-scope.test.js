@@ -115,6 +115,13 @@ vi.mock('../lib/schedule/change-logger.js', () => ({
 vi.mock('../lib/schedule/permissions.js', () => ({
   canEmployeeEditSchedule: vi.fn(() => overrides.employeePermResult),
   canManagerEditSchedule: vi.fn(() => overrides.managerPermResult),
+  // G1:測 inline 邏輯、本檔 scope 測試的 body 沒帶 shift_type_id → 一律 ok
+  checkEmployeeShiftRestricted: (body) => {
+    const stid = body?.shift_type_id;
+    if (!stid) return { ok: true };
+    if (stid === 'ST003' && body.note === '__OFF__') return { ok: true };
+    return { ok: false, reason: 'EMPLOYEE_SHIFT_RESTRICTED' };
+  },
 }));
 
 vi.mock('../lib/shift-types/handler.js', () => ({
