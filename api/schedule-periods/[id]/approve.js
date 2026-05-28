@@ -13,6 +13,7 @@
 import { supabaseAdmin } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
 import { canTransition } from '../../../lib/schedule/period-state.js';
+import { isPeriodFullyScheduled } from '../../../lib/schedule/period-coverage.js';
 import { logScheduleChange } from '../../../lib/schedule/change-logger.js';
 import { sendPushToEmployees, createNotifications } from '../../../lib/push.js';
 
@@ -53,6 +54,21 @@ export default async function handler(req, res) {
 
   const tr = canTransition(period.status, 'approve', { is_manager: true });
   if (!tr.ok) return res.status(409).json({ error: 'illegal transition', detail: tr.reason });
+
+  // F2 守門:該 period 每一天必須有 ≥1 筆 schedules row(任意 shift_type、含休/例假)。
+  // 撈法 .eq('period_id', id):直接 FK 對齊(同 publish.js + api/schedule-periods/index.js
+  // 既有 pattern)。員工同月跨 period 是反常(schedule_periods UNIQUE),擋下逼清資料。
+  const { data: scheds, error: schErr } = await supabaseAdmin
+    .from('schedules').select('work_date').eq('period_id', id);
+  if (schErr) return res.status(500).json({ error: schErr.message });
+  const cov = isPeriodFullyScheduled(period, scheds || []);
+  if (!cov.ok) {
+    return res.status(422).json({
+      error: 'APPROVE_EMPTY_PERIOD',
+      detail: `缺少排班的日期:${cov.missingDates.join(', ')}`,
+      missingDates: cov.missingDates,
+    });
+  }
 
   const now = new Date().toISOString();
   const { data: updated, error: uErr } = await supabaseAdmin
