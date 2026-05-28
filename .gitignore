@@ -4,3 +4,6 @@ node_modules/
 .vercel
 *.log
 .DS_Store
+
+# Prod data dump 文件含真實薪資/個資、永遠不進版控
+docs/*-prod-dump.md
