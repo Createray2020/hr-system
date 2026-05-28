@@ -104,34 +104,25 @@
     <div class="modal-title" id="modal-title">編輯排班</div>
     <input type="hidden" id="f-date">
 
-    <div style="margin-bottom:18px;color:var(--text-dim);font-size:13px;line-height:1.5">
-      標記你的排班期望、最終班別由主管確認。
+    <div style="margin-bottom:14px;color:var(--text-dim);font-size:13px;line-height:1.5">
+      你可以標記「希望休假」表達當日不希望排班。其他日子的班別由主管統一安排。
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:18px">
-      <label style="display:flex;gap:10px;align-items:center;cursor:pointer">
-        <input type="radio" name="mode" value="ST001" id="mode-st001">
-        <span>希望早班</span>
-      </label>
-      <label style="display:flex;gap:10px;align-items:center;cursor:pointer">
-        <input type="radio" name="mode" value="ST002" id="mode-st002">
-        <span>希望晚班</span>
-      </label>
-      <label style="display:flex;gap:10px;align-items:center;cursor:pointer">
-        <input type="radio" name="mode" value="ST003" id="mode-st003">
-        <span>希望休假</span>
-      </label>
+    <!-- G1:已標休假狀態 hint(openDayModal 切換顯隱) -->
+    <div id="off-status-row" style="display:none;margin-bottom:14px;padding:10px 14px;background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);border-radius:8px;color:#4ADE80;font-size:13px">
+      ✓ 已標記為「希望休假」
     </div>
 
-    <div id="clear-wish-row" style="display:none;margin-bottom:18px">
-      <button type="button" onclick="clearDay()" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer;width:100%">
-        清除我的選擇（讓主管自由排）
+    <!-- G1:單一操作按鈕 — 標休假 / 清除(依狀態切換)-->
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+      <button type="button" class="btn btn-primary" id="btn-mark-off" onclick="markDayOff()">標記休假</button>
+      <button type="button" id="btn-clear-day" onclick="clearDay()" style="display:none;background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:8px 14px;border-radius:6px;font-size:13px;cursor:pointer">
+        清除（讓主管自由排）
       </button>
     </div>
 
     <div class="modal-actions" style="justify-content:flex-end;gap:8px">
-      <button class="btn btn-ghost" onclick="closeDayModal()">取消</button>
-      <button class="btn btn-primary" onclick="saveDay()">儲存</button>
+      <button class="btn btn-ghost" onclick="closeDayModal()">關閉</button>
     </div>
   </div>
 </div>
@@ -141,7 +132,7 @@
   <div class="modal" style="max-width:520px;width:95vw">
     <div class="modal-title">選擇要套用的範本</div>
     <div style="margin-bottom:14px;color:var(--text-dim);font-size:13px;line-height:1.5">
-      套用後會覆蓋本月所有日子的排班、確定再點。
+      套用後會填入你尚未標休假的日子（已標休假的日子會保留）、確定再點。
     </div>
     <div id="tpl-list" style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:18px"></div>
     <div class="modal-actions" style="justify-content:flex-end;gap:8px">
@@ -162,7 +153,7 @@ function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt
 let currentYear, currentMonth;
 let period = null;       // schedule_periods row（null = 該月還沒建）
 let schedules = [];      // schedules rows
-let editing  = { date: null, mode: null };  // null = 沒選、'ST001'/'ST002'/'ST003' = 對應 shift_type
+let editing  = { date: null };  // G1:員工只能標休假、不再分 mode
 
 // Default：下個月
 {
@@ -347,51 +338,47 @@ function openDayModal(date) {
     return;
   }
 
-  // pre-select：按 segment_no=1 的 shift_type_id 對應 radio
+  // G1:該日是否已標休假(ST003 + __OFF__)
   const seg = segs.find(s => s.segment_no === 1) || segs[0];
-  const currentMode = seg?.shift_type_id || null;
-  editing = { date, mode: currentMode };
+  const isMarkedOff = seg?.shift_type_id === 'ST003' && seg?.note === '__OFF__';
+  const hasAnySeg  = segs.length > 0;
+  editing = { date };
 
   document.getElementById('modal-title').textContent = `編輯 ${date}`;
   document.getElementById('f-date').value = date;
-  document.getElementById('mode-st001').checked = (currentMode === 'ST001');
-  document.getElementById('mode-st002').checked = (currentMode === 'ST002');
-  document.getElementById('mode-st003').checked = (currentMode === 'ST003');
-
-  // 有 wish → 顯示「清除」按鈕；沒 wish → 隱藏
-  document.getElementById('clear-wish-row').style.display = currentMode ? 'block' : 'none';
+  // 已標休假 → 顯示綠色 hint、隱藏「標記休假」、顯示「清除」
+  // 未標     → 隱藏 hint、顯示「標記休假」
+  // 有舊資料(非休假 wish) → 隱藏 hint、仍給「清除」當救援(防 v2.5 前 ST001/ST002 殘留)
+  document.getElementById('off-status-row').style.display = isMarkedOff ? 'block' : 'none';
+  document.getElementById('btn-mark-off').style.display   = isMarkedOff ? 'none'  : '';
+  document.getElementById('btn-clear-day').style.display  = hasAnySeg   ? ''     : 'none';
 
   document.getElementById('day-modal').classList.add('open');
 }
 
 function closeDayModal(){ document.getElementById('day-modal').classList.remove('open'); }
 
-async function saveDay() {
+// G1:員工只能標休假、固定送 ST003 + note='__OFF__'(對齊後端 EMPLOYEE_SHIFT_RESTRICTED)
+async function markDayOff() {
   const date = editing.date;
-  const mode = document.querySelector('input[name="mode"]:checked')?.value;
+  if (!date) return;
 
-  // C9：必須選一個 radio（ST001/ST002/ST003）；想清除請按下方「清除」按鈕
-  if (!mode) {
-    toast('請選擇一個選項、或點「清除」讓主管自由排', 'warn');
-    return;
-  }
-
-  // 1. DELETE 既有 segments
+  // 1. 先 DELETE 既有 segments(防 conflict、含舊資料 ST001/ST002 殘留)
   const existing = schedules.filter(s => s.work_date === date);
   for (const s of existing) {
     try { await api(`/api/schedules/${encodeURIComponent(s.id)}`, { method:'DELETE' }); } catch(_){}
   }
 
-  // 2. POST 對應 shift_type；ST003 自動帶 note='__OFF__'
+  // 2. POST ST003 + __OFF__(後端唯一合法的員工自助 shift)
   const body = {
     period_id: period.id,
     employee_id: currentUser.id,
     work_date: date,
-    shift_type_id: mode,
+    shift_type_id: 'ST003',
     segment_no: 1,
     crosses_midnight: false,
+    note: '__OFF__',
   };
-  if (mode === 'ST003') body.note = '__OFF__';
 
   try {
     await api('/api/schedules', { method:'POST', body: JSON.stringify(body) });
@@ -400,8 +387,7 @@ async function saveDay() {
     return;
   }
 
-  const lbl = document.querySelector(`input[name="mode"][value="${mode}"]`)?.nextElementSibling?.textContent || mode;
-  toast(`已標記${lbl}`);
+  toast('已標記休假');
   closeDayModal();
   await load();
 }
