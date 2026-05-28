@@ -48,8 +48,8 @@ beforeEach(() => {
 
 // ═══════════════════════════════════════════════════════════
 describe('lib/leave/quota.js — 匯出常數與小 helper', () => {
-  it('ACCUMULATING_LEAVE_CODES 只含 sick + personal', () => {
-    expect(ACCUMULATING_LEAVE_CODES).toEqual(['sick', 'personal']);
+  it('ACCUMULATING_LEAVE_CODES 含 sick + personal + menstrual + family_care', () => {
+    expect(ACCUMULATING_LEAVE_CODES).toEqual(['sick', 'personal', 'menstrual', 'family_care']);
   });
 
   it('getCurrentYearInTaipei 回 4 位數 number', () => {
