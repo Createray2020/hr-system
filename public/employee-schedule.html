@@ -456,7 +456,7 @@ function closeTemplatePicker() {
 }
 
 async function applyTemplate(templateId, templateName) {
-  if (!confirm(`套用範本「${templateName}」會覆蓋本月所有日子的排班、確定？`)) return;
+  if (!confirm(`套用範本「${templateName}」會填入你尚未標休假的日子（已標休假的日子會保留），確定？`)) return;
   try {
     const r = await api(`/api/schedule-templates/${encodeURIComponent(templateId)}/apply`, {
       method: 'POST',

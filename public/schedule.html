@@ -67,6 +67,7 @@
         <button class="btn btn-ghost" onclick="openExportModal()" title="匯出排班（選範圍）">📤 匯出</button>
         <button class="btn btn-ghost" onclick="document.getElementById('import-file').click()" title="從 Excel 匯入排班">📥 匯入</button>
         <input type="file" id="import-file" accept=".xlsx,.xls" style="display:none" onchange="handleImportFile(event)">
+        <button class="btn btn-ghost" id="btn-batch-tpl" onclick="openBatchTemplatePicker()" title="整批套範本到可管轄員工" style="display:none">📋 整批套範本</button>
       </div>
     </div>
 
@@ -285,6 +286,18 @@
         <button class="btn btn-ghost" onclick="closeDayModal()">取消</button>
         <button class="btn btn-primary" id="btn-save-day" onclick="saveDay()">儲存</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- C8-3：套範本選擇 Modal（單人 / 整批共用） -->
+<div class="modal-bg" id="tpl-modal">
+  <div class="modal" style="max-width:480px;width:95vw;max-height:80vh;overflow:auto">
+    <div class="modal-title" id="tpl-modal-title">選擇範本</div>
+    <div id="tpl-modal-sub" style="font-size:12px;color:var(--text-dim);margin-bottom:12px"></div>
+    <div id="tpl-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
+    <div class="modal-actions" style="justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeTemplatePicker()">取消</button>
     </div>
   </div>
 </div>
@@ -550,7 +563,7 @@ function render() {
       <th style="text-align:left;padding:10px 12px;width:140px;border-bottom:1px solid var(--border);font-weight:500;font-size:12px">員工</th>
       ${dates.map((d,i) => `<th style="padding:10px 4px;border-bottom:1px solid var(--border);font-weight:500;font-size:12px;color:${i===0||i===6?'var(--text-dim)':''}">${dayLabels[i]}<div style="font-family:'DM Mono',monospace;font-size:11px;font-weight:400;margin-top:2px;opacity:.7">${d.getMonth()+1}/${d.getDate()}</div></th>`).join('')}
       <th style="padding:10px 8px;width:90px;border-bottom:1px solid var(--border);font-weight:500;text-align:center;font-size:12px">工時<div style="font-size:10px;color:var(--text-dim);font-weight:400;margin-top:2px">本週 / 月</div></th>
-      <th style="padding:10px 8px;width:100px;border-bottom:1px solid var(--border);font-weight:500;text-align:center;font-size:12px">操作</th>
+      <th style="padding:10px 8px;width:110px;border-bottom:1px solid var(--border);font-weight:500;text-align:center;font-size:12px">操作</th>
     </tr>
     ${gcalEvents.length ? `
     <tr style="background:rgba(59,130,246,.04)">
@@ -692,6 +705,15 @@ function render() {
       opHtml = `<span style="font-size:11px;color:var(--text-dim)">無排班</span>`;
     }
 
+    // C8-3:逐人套範本按鈕(canManagePeriod=true 且 status ∈ draft/submitted/approved 顯示;
+    //       published/locked 已過階段不顯示;period=null 仍顯示、點了 toast 提示)
+    const tplApplicableStatus =
+      !periodStatus || periodStatus === 'draft' ||
+      periodStatus === 'submitted' || periodStatus === 'approved';
+    const tplHtml = (canManagePeriod && tplApplicableStatus)
+      ? `<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="applyTplToOne('${escHtml(emp.id)}', ${period ? `'${escHtml(period.id)}'` : 'null'}, '${escHtml(emp.name || emp.id)}')">📋 套範本</button>`
+      : '';
+
     return `
       <tr>
         <td class="week-emp-name">${escHtml(emp.name || emp.id)}${emp.is_manager?'<div class="role-hint">主管</div>':''}</td>
@@ -700,7 +722,12 @@ function render() {
           <div style="color:${weekColor};font-weight:600">${weekHours}h</div>
           <div style="color:${monthColor};font-size:11px;margin-top:2px;opacity:.85">月 ${monthHours}/${monthMax}h</div>
         </td>
-        <td style="padding:10px 8px;border-bottom:1px solid var(--border);text-align:center">${opHtml}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid var(--border);text-align:center">
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:center">
+            ${opHtml}
+            ${tplHtml}
+          </div>
+        </td>
       </tr>`;
   }).join('');
 
@@ -718,6 +745,9 @@ function render() {
     });
     return { on, off };
   });
+  // C8-3:依 visibleEmps + currentUser show/hide「整批套範本」toolbar button
+  updateBatchTplButton();
+
   const totalOn = dailyCounts.reduce((s, c) => s + c.on, 0);
   const totalOff = dailyCounts.reduce((s, c) => s + c.off, 0);
   const sumRowBg = 'background:rgba(255,255,255,0.03)';
@@ -1430,6 +1460,239 @@ async function unpublishPeriod(periodId) {
     toast('已撤回公告');
     await load();
   } catch(e) { toast('撤回失敗：' + e.message,'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// C8-3：套排班範本（逐人 + 整批）— 後端 api/schedule-templates/[id]/apply
+// 跳過員工已標 __OFF__ 邏輯在後端、前端只負責入口 + 結果分類
+// ═══════════════════════════════════════════════════════════
+
+let _tplCache = null;
+async function fetchTemplates(force = false) {
+  if (_tplCache && !force) return _tplCache;
+  _tplCache = await api('/api/schedule-templates') || [];
+  return _tplCache;
+}
+
+async function applyTemplateToPeriod(tplId, periodId) {
+  return api(`/api/schedule-templates/${encodeURIComponent(tplId)}/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ period_id: periodId }),
+  });
+}
+
+// HR=全部排自己 / 主管=同部門排自己 / 員工=空 (對齊 canManagePeriod 邏輯)
+function computeBatchTargets(emps, u) {
+  if (!u) return [];
+  if (['hr', 'admin', 'ceo', 'chairman'].includes(u.role)) {
+    return (emps || []).filter(e => e.id !== u.id);
+  }
+  if (u.is_manager === true && u.dept_id) {
+    return (emps || []).filter(e => e.dept_id === u.dept_id && e.id !== u.id);
+  }
+  return [];
+}
+
+function updateBatchTplButton() {
+  const btn = document.getElementById('btn-batch-tpl');
+  if (!btn) return;
+  const targets = computeBatchTargets(visibleEmps, window.currentUser);
+  btn.style.display = targets.length > 0 ? '' : 'none';
+}
+
+// 後端 error code → 中文人話 (raw code console.log 給 debug)
+const TPL_ERR_MAP = {
+  NO_PERIOD_ID: '未指定排班期間',
+  NO_TEMPLATE_ID: '未指定範本',
+  TEMPLATE_NOT_FOUND: '找不到範本',
+  PATTERN_INVALID: '範本格式無效',
+  NOT_OWNER: '非範本所有者',
+  PERIOD_NOT_FOUND: '找不到排班期間',
+  PERIOD_RANGE_INVALID: '排班期間日期無效',
+  NO_PERIOD: '找不到排班期間',
+  NOT_OWN_PERIOD: '非本人排班',
+  NOT_DRAFT: '已送出/已公告、無法套用',
+  WISH_DEADLINE_PASSED: '員工心願截止已過',
+  PERIOD_STARTED: '排班月已開始、無法套用',
+  NOT_MANAGER_OR_HR: '非你管轄範圍',
+  MANAGER_LATE_DENIED: '過去日不可套',
+};
+function formatTplError(err) {
+  const raw = (err && (err.error || err.message)) || '';
+  console.warn('[tpl-apply] raw error:', raw, err);
+  // err.message 可能是 "EMPLOYEE_PERIOD_NOT_FOUND" 或 "Internal Server Error";
+  // 抓最後一段大寫底線片段比對 map
+  const code = String(raw).match(/[A-Z_]+/g)?.find(s => TPL_ERR_MAP[s]);
+  if (code) return TPL_ERR_MAP[code];
+  return '套用失敗';
+}
+
+// ── 逐人入口 ──────────────────────────────────────────
+async function applyTplToOne(empId, periodIdOrNull, empName) {
+  const periodId = periodIdOrNull === 'null' ? null : periodIdOrNull;
+  if (!periodId) {
+    return toast(`「${empName}」此月尚未建立 period、請員工先建立或 HR 代建`, 'error');
+  }
+  let tpls;
+  try { tpls = await fetchTemplates(); }
+  catch (e) { return toast('載入範本失敗：' + e.message, 'error'); }
+  if (!tpls.length) return toast('尚無範本可套用', 'error');
+  openTemplatePicker('single', {
+    empName, empId, periodId, tpls,
+  });
+}
+
+// ── 整批入口 ──────────────────────────────────────────
+async function openBatchTemplatePicker() {
+  const u = window.currentUser;
+  const targets = computeBatchTargets(visibleEmps, u);
+  if (!targets.length) return toast('無可套用對象', 'error');
+
+  // 分三類:可套 / 沒 period / 已公告
+  const ym = primaryMonthOf(currentWeekStart);
+  const applicable = [];      // { emp, period }
+  const skipNoPeriod = [];    // emp
+  const skipPublished = [];   // { emp, status }
+  targets.forEach(emp => {
+    const p = getPeriodFor(emp.id, ym);
+    if (!p) return skipNoPeriod.push(emp);
+    const st = p.status;
+    if (st === 'published' || st === 'locked') {
+      skipPublished.push({ emp, status: st });
+    } else {
+      applicable.push({ emp, period: p });
+    }
+  });
+
+  if (!applicable.length) {
+    const noP = skipNoPeriod.length;
+    const pub = skipPublished.length;
+    return alert(
+      `本月無可套用對象:\n` +
+      (noP ? `  • ${noP} 位尚未建立 period\n` : '') +
+      (pub ? `  • ${pub} 位已公告/鎖月\n` : '') +
+      `\n請員工先建立 period、或主管「撤回公告」後再套。`,
+    );
+  }
+
+  let tpls;
+  try { tpls = await fetchTemplates(); }
+  catch (e) { return toast('載入範本失敗：' + e.message, 'error'); }
+  if (!tpls.length) return toast('尚無範本可套用', 'error');
+
+  openTemplatePicker('batch', { applicable, skipNoPeriod, skipPublished, tpls, ym });
+}
+
+// ── 範本選擇 modal (single / batch 共用) ────────────
+function openTemplatePicker(mode, ctx) {
+  const modal = document.getElementById('tpl-modal');
+  const titleEl = document.getElementById('tpl-modal-title');
+  const subEl = document.getElementById('tpl-modal-sub');
+  const listEl = document.getElementById('tpl-list');
+  if (!modal) return;
+
+  if (mode === 'single') {
+    titleEl.textContent = `為「${ctx.empName}」選擇範本`;
+    subEl.textContent = '選擇範本後、員工已標休假的日子會保留、其餘填入範本對應班別。';
+  } else {
+    const n = ctx.applicable.length;
+    const noP = ctx.skipNoPeriod.length;
+    const pub = ctx.skipPublished.length;
+    titleEl.textContent = `整批套範本 (可套 ${n} 位)`;
+    let sub = `可套 ${n} 位`;
+    if (noP) sub += `、跳過 ${noP} 位 (沒 period)`;
+    if (pub) sub += `、跳過 ${pub} 位 (已公告/鎖月)`;
+    subEl.textContent = sub;
+  }
+
+  listEl.innerHTML = ctx.tpls.map((t, i) => `
+    <button class="btn btn-ghost" style="justify-content:space-between;text-align:left;padding:10px 12px;font-size:13px;display:flex;align-items:center" data-idx="${i}">
+      <span>${escHtml(t.name || t.id)}</span>
+      <span style="font-size:11px;color:var(--text-dim)">套用 →</span>
+    </button>
+  `).join('');
+  Array.from(listEl.querySelectorAll('button[data-idx]')).forEach(btn => {
+    btn.onclick = () => {
+      const tpl = ctx.tpls[Number(btn.dataset.idx)];
+      if (!tpl) return;
+      if (mode === 'single') confirmAndApplyTplSingle(tpl, ctx);
+      else confirmAndApplyTplBatch(tpl, ctx);
+    };
+  });
+  modal.classList.add('open');
+}
+function closeTemplatePicker() {
+  document.getElementById('tpl-modal').classList.remove('open');
+}
+
+// 逐人 confirm + 執行
+async function confirmAndApplyTplSingle(tpl, ctx) {
+  const msg =
+    `套用範本「${tpl.name}」會填入「${ctx.empName}」尚未標休假的日子` +
+    `（已標休假的日子會保留），確定？`;
+  if (!confirm(msg)) return;
+  try {
+    const r = await applyTemplateToPeriod(tpl.id, ctx.periodId);
+    const applied = r.applied || 0;
+    const skipOff = r.skipped_existing_off || 0;
+    toast(`已套用「${tpl.name}」到 ${ctx.empName}：填入 ${applied} 天` +
+          (skipOff ? `、保留 ${skipOff} 天休假` : ''));
+    closeTemplatePicker();
+    await load();
+  } catch (e) {
+    alert(`套用失敗(${ctx.empName})：${formatTplError(e)}`);
+  }
+}
+
+// 整批 confirm + 並行執行
+async function confirmAndApplyTplBatch(tpl, ctx) {
+  const SHOW_MAX = 8;
+  const namesOf = arr => {
+    const head = arr.slice(0, SHOW_MAX).map(x => `  • ${x.emp?.name || x.name || x.emp?.id || x.id}`).join('\n');
+    const more = arr.length > SHOW_MAX ? `\n  …等 ${arr.length} 位` : '';
+    return head + more;
+  };
+  let msg = `將套用範本「${tpl.name}」到以下 ${ctx.applicable.length} 位員工：\n`;
+  msg += namesOf(ctx.applicable) + '\n';
+  if (ctx.skipPublished.length) {
+    msg += `\n⚠ 另 ${ctx.skipPublished.length} 位已公告/鎖月將被跳過：\n` + namesOf(ctx.skipPublished) + '\n';
+  }
+  if (ctx.skipNoPeriod.length) {
+    msg += `\n⚠ 另 ${ctx.skipNoPeriod.length} 位尚未建立 period 將被跳過：\n` + namesOf(ctx.skipNoPeriod) + '\n';
+  }
+  msg += `\n會填入每位員工尚未標休假的日子（已標休假的日子會保留）。\n確定執行？`;
+  if (!confirm(msg)) return;
+  closeTemplatePicker();
+  toast(`套用中… (${ctx.applicable.length} 位)`);
+
+  const tasks = ctx.applicable.map(async ({ emp, period }) => {
+    try {
+      const r = await applyTemplateToPeriod(tpl.id, period.id);
+      return { ok: true, emp, applied: r.applied || 0, skipOff: r.skipped_existing_off || 0 };
+    } catch (e) {
+      return { ok: false, emp, err: e };
+    }
+  });
+  const results = await Promise.all(tasks);
+  const ok = results.filter(r => r.ok);
+  const fail = results.filter(r => !r.ok);
+
+  if (!fail.length) {
+    let t = `已套用「${tpl.name}」到 ${ok.length} 位員工`;
+    const extras = [];
+    if (ctx.skipNoPeriod.length) extras.push(`跳過 ${ctx.skipNoPeriod.length} 位 (沒 period)`);
+    if (ctx.skipPublished.length) extras.push(`跳過 ${ctx.skipPublished.length} 位 (已公告/鎖月)`);
+    if (extras.length) t += `；${extras.join('、')}`;
+    toast(t);
+  } else {
+    const lines = fail.map(r => `  • ${r.emp.name || r.emp.id}：${formatTplError(r.err)}`).join('\n');
+    alert(
+      `部分套用失敗:\n` +
+      `成功 ${ok.length} 位、失敗 ${fail.length} 位\n\n` +
+      `失敗明細:\n${lines}`,
+    );
+  }
+  await load();
 }
 
 // Init
