@@ -662,6 +662,13 @@ function render() {
                             && !!u.dept_id
                             && u.dept_id === emp.dept_id
                             && u.id !== emp.id;
+    // F3:撤回公告權限(對齊後端 unpublish.js):admin / chairman / 同部門主管 三選一、
+    // 且非自己 period(對齊 self-approval guard);HR / CEO 不在 allowlist、後端也擋
+    const canUnpublish = u.id !== emp.id
+      && (
+        ['admin', 'chairman'].includes(u.role)
+        || (u.is_manager === true && !!u.dept_id && u.dept_id === emp.dept_id)
+      );
     let opHtml = '';
     if (periodStatus === 'submitted') {
       opHtml = canManagePeriod
@@ -671,7 +678,13 @@ function render() {
       opHtml = canManagePeriod
         ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="publishPeriod('${escHtml(period.id)}')">公告</button>`
         : `<span style="font-size:11px;padding:2px 8px;background:rgba(122,133,160,.12);color:var(--text-dim);border-radius:6px" title="只有同部門主管可公告">待主管公告</span>`;
-    } else if (periodStatus === 'published' || periodStatus === 'locked') {
+    } else if (periodStatus === 'published') {
+      // F3:有撤回權限 → 顯示「↩ 撤回公告」紅 ghost 按鈕;無權限 → 維持綠「已公告」span
+      opHtml = canUnpublish
+        ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;border:1px solid rgba(248,113,113,.4);color:#F87171" onclick="unpublishPeriod('${escHtml(period.id)}')">↩ 撤回公告</button>`
+        : `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已公告</span>`;
+    } else if (periodStatus === 'locked') {
+      // 鎖月後不可撤回(後端 RULES 也擋),維持綠 span 不分權限
       opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已公告</span>`;
     } else if (periodStatus === 'draft') {
       opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(91,141,239,.15);color:#7FBBFF;border-radius:6px">員工標中</span>`;
@@ -1406,6 +1419,17 @@ async function publishPeriod(periodId) {
     toast('已公告');
     await load();
   } catch(e) { toast('公告失敗：' + e.message,'error'); }
+}
+
+// F3:撤回公告(published → approved)、限 admin/chairman/同部門主管
+async function unpublishPeriod(periodId) {
+  if (!periodId) return;
+  if (!confirm('撤回後班表會回到「待公告」狀態、員工會收到通知,確定撤回?')) return;
+  try {
+    await api(`/api/schedule-periods/${encodeURIComponent(periodId)}/unpublish`, { method:'POST' });
+    toast('已撤回公告');
+    await load();
+  } catch(e) { toast('撤回失敗：' + e.message,'error'); }
 }
 
 // Init
