@@ -30,6 +30,7 @@ import { sendPushToEmployees, createNotifications } from '../../lib/push.js';
 import { submitLeaveRequest } from '../../lib/leave/request-flow.js';
 import { getAnnualBalance } from '../../lib/leave/balance.js';
 import { makeLeaveRepo } from './_repo.js';
+import { calculateAccumulatingUsage, getCurrentYearInTaipei, ACCUMULATING_LEAVE_CODES } from '../../lib/leave/quota.js';
 import { addDeptName, addDeptNameSingle } from '../../lib/dept-name-mapper.js';
 import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../../lib/auth-scope.js';
@@ -62,6 +63,11 @@ export default async function handler(req, res) {
   // ── 新路徑:annual_balance ────────────────────────────────
   if (req.method === 'GET' && req.query.annual_balance === 'true') {
     return handleGetAnnualBalance(req, res);
+  }
+
+  // ── 新路徑:quota_summary(假期額度總覽 — 特休 / 補休 / 累積型病事假)──
+  if (req.method === 'GET' && req.query._resource === 'quota_summary') {
+    return handleQuotaSummary(req, res);
   }
 
   // ── 新路徑:GET 列表(employee_id + year [+ month])──────
@@ -202,6 +208,101 @@ async function handleGetAnnualBalance(req, res) {
   try {
     const balance = await getAnnualBalance(makeLeaveRepo(), employee_id);
     return res.status(200).json({ balance });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
+// ── 假期額度總覽 ────────────────────────────────────────────
+// 三條獨立路徑:特休(annual_leave_records 單欄位)/ 補休(comp_time_balance SUM)/
+// 累積型病事假(leave_requests SUM)。auth + scope 形狀對齊 handleGetAnnualBalance。
+async function handleQuotaSummary(req, res) {
+  const caller = await requireAuth(req, res);
+  if (!caller) return;
+  const { employee_id } = req.query;
+  if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+
+  const scope = await resolveAuthScopeWithDeptIds(caller, 'selfOrDept', makeDeptEmpIdsRepo(supabaseAdmin));
+  if (!canSeeEmployee(scope, employee_id)) {
+    return res.status(403).json({ error: 'Forbidden: 無權看此員工假期額度' });
+  }
+
+  const year = req.query.year ? Number(req.query.year) : getCurrentYearInTaipei();
+  if (!Number.isInteger(year)) return res.status(400).json({ error: 'year must be integer' });
+
+  try {
+    const repo = makeLeaveRepo();
+    const as_of_date = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+
+    // 1. 特休 — 走既有 getAnnualBalance(讀 annual_leave_records.used_days 單欄位)
+    const annualFull = await getAnnualBalance(repo, employee_id);
+    const annual = {
+      has_record:     annualFull.has_record,
+      legal_days:     annualFull.legal_days,
+      granted_days:   annualFull.granted_days,
+      used_days:      annualFull.used_days,
+      remaining_days: annualFull.remaining_days,
+      period_start:   annualFull.period_start,
+      period_end:     annualFull.period_end,
+    };
+
+    // 2. 補休 — findActiveCompBalances 已按 expires_at ASC 排、第一筆就是 earliest
+    const compBalances = await repo.findActiveCompBalances(employee_id);
+    const total_earned_hours = (compBalances || []).reduce(
+      (s, b) => s + (Number(b.earned_hours) || 0), 0,
+    );
+    const total_used_hours = (compBalances || []).reduce(
+      (s, b) => s + (Number(b.used_hours) || 0), 0,
+    );
+    const comp = {
+      active_balances_count: (compBalances || []).length,
+      total_earned_hours,
+      total_used_hours,
+      total_remaining_hours: total_earned_hours - total_used_hours,
+      earliest_expires_at:   compBalances?.[0]?.expires_at || null,
+    };
+
+    // 3. 累積型(病/事假)— 走 calculateAccumulatingUsage + 接 leave_types meta
+    const usage = await calculateAccumulatingUsage(repo, {
+      employee_id, year, codes: ACCUMULATING_LEAVE_CODES,
+    });
+    const { data: typesInfo, error: typesErr } = await supabaseAdmin
+      .from('leave_types')
+      .select('code, name_zh, legal_max_days_per_year')
+      .in('code', ACCUMULATING_LEAVE_CODES);
+    if (typesErr) throw typesErr;
+    const typeMap = Object.fromEntries((typesInfo || []).map(t => [t.code, t]));
+
+    const accumulating = usage.map((u) => {
+      const t = typeMap[u.code] || {};
+      const legal_max_days = t.legal_max_days_per_year != null
+        ? Number(t.legal_max_days_per_year)
+        : null;
+      const remaining_days = legal_max_days != null
+        ? legal_max_days - u.used_days   // 負值不 clamp、暴露 over-limit
+        : null;
+      const is_over_limit = legal_max_days != null
+        ? u.used_days > legal_max_days
+        : false;
+      return {
+        code:           u.code,
+        name_zh:        t.name_zh || null,
+        legal_max_days,
+        used_days:      u.used_days,
+        used_count:     u.used_count,
+        remaining_days,
+        is_over_limit,
+      };
+    });
+
+    return res.status(200).json({
+      employee_id,
+      year,
+      as_of_date,
+      annual,
+      comp,
+      accumulating,
+    });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
