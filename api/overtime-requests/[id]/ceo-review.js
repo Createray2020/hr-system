@@ -17,7 +17,9 @@ import { canTransition } from '../../../lib/overtime/request-state.js';
 import { convertOvertimeToCompTime } from '../../../lib/overtime/comp-conversion.js';
 import { makeOvertimeRepo } from '../_repo.js';
 
-const COMP_TYPES = new Set(['comp_leave', 'overtime_pay', 'undecided']);
+// 04.5 §四:補償方式於申請時即須選定,審核者不得改寫
+// body 帶的 compensation_type 僅在 row 為 legacy 'undecided' 時作為補指定使用
+const COMP_TYPES = new Set(['comp_leave', 'overtime_pay']);
 
 async function isCallerCEO(caller) {
   // CEO 認定:role='ceo' 或 'chairman'(視同)、或 approvals_v2_role_assignments 配 'ceo'
@@ -80,7 +82,9 @@ export default async function handler(req, res) {
   });
   if (!tr.ok) return res.status(409).json({ error: 'illegal transition', detail: tr.reason });
 
-  // CEO 也可改 compensation_type(若仍 undecided 必須在此指定)
+  // 決定最終 compensation_type
+  // 04.5 §四:已選定者一律維持 row 上值、忽略 body(不得事後變更)
+  // 安全網:legacy 'undecided' row 仍允許 CEO 核准時補指定
   let finalCompType = reqRow.compensation_type;
   if (decision === 'approved' && reqRow.compensation_type === 'undecided') {
     if (!compensation_type || compensation_type === 'undecided') {
@@ -89,8 +93,6 @@ export default async function handler(req, res) {
         detail: 'compensation_type=undecided 時 CEO 核准必須指定 comp_leave 或 overtime_pay',
       });
     }
-    finalCompType = compensation_type;
-  } else if (compensation_type && compensation_type !== reqRow.compensation_type) {
     finalCompType = compensation_type;
   }
 

@@ -51,7 +51,8 @@ async function attachEmployeeAndManager(rows) {
   return attachManagerNames(enriched, supabaseAdmin, r => r.dept_id);
 }
 
-const COMP_TYPES = new Set(['comp_leave', 'overtime_pay', 'undecided']);
+// 04.5 §四:申請時必選 comp_leave / overtime_pay,POST 不再接受 undecided
+const COMP_TYPES = new Set(['comp_leave', 'overtime_pay']);
 const REQUEST_KINDS = new Set(['pre_approval', 'post_approval']);
 
 export default async function handler(req, res) {
@@ -109,7 +110,7 @@ async function handlePost(req, res, caller) {
     return res.status(400).json({ error: 'request_kind must be pre_approval / post_approval' });
   }
   if (!COMP_TYPES.has(compensation_type)) {
-    return res.status(400).json({ error: 'compensation_type must be comp_leave / overtime_pay / undecided' });
+    return res.status(400).json({ error: 'compensation_type must be comp_leave / overtime_pay' });
   }
   if (!reason || !String(reason).trim()) {
     return res.status(400).json({ error: 'reason required' });

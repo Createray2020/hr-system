@@ -213,4 +213,53 @@ describe('/api/overtime-requests/:id/manager-review — Phase 2.x.2 嚴格 spec'
     await handler(req, res);
     expect(res.statusCode).toBe(404);
   });
+
+  // 04.5 §四:已選定者鎖死、審核者不得改寫
+  it('已選定 compensation_type → body 帶不同值被忽略、維持 row 上值', async () => {
+    overrides.caller = MGR;
+    setupPending({ request: { compensation_type: 'comp_leave' } });
+    const [req, res] = makeReqRes({
+      query: { id: 'OT1' },
+      body: { decision: 'approved', compensation_type: 'overtime_pay' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const upd = calls.updates[0];
+    expect(upd.patch.compensation_type).toBe('comp_leave');
+  });
+
+  // 安全網:legacy undecided row 仍允許主管核准時補指定
+  it('legacy undecided row + approved + body 補指定 → 採用 body 的補償方式', async () => {
+    overrides.caller = MGR;
+    setupPending({ request: { compensation_type: 'undecided' } });
+    const [req, res] = makeReqRes({
+      query: { id: 'OT1' },
+      body: { decision: 'approved', compensation_type: 'overtime_pay' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    const upd = calls.updates[0];
+    expect(upd.patch.compensation_type).toBe('overtime_pay');
+  });
+
+  it('legacy undecided row + approved + body 未指定 → 400 COMPENSATION_TYPE_REQUIRED', async () => {
+    overrides.caller = MGR;
+    setupPending({ request: { compensation_type: 'undecided' } });
+    const [req, res] = makeReqRes({ query: { id: 'OT1' }, body: { decision: 'approved' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body?.error).toBe('COMPENSATION_TYPE_REQUIRED');
+  });
+
+  it('body 傳 undecided → 400(白名單僅 comp_leave / overtime_pay)', async () => {
+    overrides.caller = MGR;
+    setupPending();
+    const [req, res] = makeReqRes({
+      query: { id: 'OT1' },
+      body: { decision: 'approved', compensation_type: 'undecided' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body?.error).toBe('invalid compensation_type');
+  });
 });

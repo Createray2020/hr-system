@@ -58,7 +58,7 @@
         <div class="form-row">
           <label class="form-label">補償方式</label>
           <select class="form-select" id="f-comp">
-            <option value="undecided">待決定(由公司審核時指定)</option>
+            <option value="" disabled selected>請選擇：加班費 或 補休</option>
             <option value="comp_leave">補休</option>
             <option value="overtime_pay">加班費</option>
           </select>
@@ -68,7 +68,7 @@
         <label class="form-label">理由 *</label>
         <input type="text" class="form-input" id="f-reason" placeholder="例:處理急件 / 月底結算">
       </div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:6px">提示:最終補償方式由公司審核時決定。</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:6px">提示:補償方式於申請時即須選定，送出後不可變更。</div>
       <div id="check-hint" class="check-info" style="display:none"></div>
 
       <div style="display:flex;justify-content:flex-end;margin-top:12px">
@@ -179,6 +179,7 @@ async function submitRequest(){
 
   if (!date||!start||!end||!Number.isFinite(hours)||hours<=0){toast('時間不對','error');return;}
   if (!reason){toast('請填理由','error');return;}
+  if (comp !== 'comp_leave' && comp !== 'overtime_pay') { toast('請選擇補償方式（加班費或補休）','error'); return; }
 
   const startIso = `${date}T${start}:00+08:00`;
   const endIso   = `${date}T${end}:00+08:00`;
