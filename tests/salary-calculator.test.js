@@ -15,14 +15,18 @@ import {
 // ⚠ 任何一邊改了沒同步,以下兩個 case 會 fail。
 
 function refGrossSalary(row) {
-  // batch_c L106-116:
+  // 對齊 migrations/2026_05_30_add_salary_grade_manager_allowance.sql:
   //   base_salary
-  //   + COALESCE(attendance_bonus_actual, 0) + COALESCE(allowance, 0) + COALESCE(extra_allowance, 0)
+  //   + COALESCE(attendance_bonus_actual, 0)
+  //   + COALESCE(grade_allowance, 0) + COALESCE(manager_allowance, 0)   ← 2026-05-30 加
+  //   + COALESCE(allowance, 0) + COALESCE(extra_allowance, 0)
   //   + COALESCE(overtime_pay_auto + overtime_pay_manual, 0)
   //   + COALESCE(comp_expiry_payout, 0) + COALESCE(holiday_work_pay, 0) + COALESCE(settlement_amount, 0)
   return r2(
     n(row.base_salary)
     + n(row.attendance_bonus_actual)
+    + n(row.grade_allowance)
+    + n(row.manager_allowance)
     + n(row.allowance)
     + n(row.extra_allowance)
     + (n(row.overtime_pay_auto) + n(row.overtime_pay_manual))
@@ -37,10 +41,12 @@ function refGrossSalary(row) {
 }
 
 function refNetSalary(row) {
-  // batch_c L117-132(展開全式,不用 gross_salary 變數,完全照抄 SQL):
+  // 對齊 migrations/2026_05_30_add_salary_grade_manager_allowance.sql net 段:
   return r2(
     n(row.base_salary)
     + n(row.attendance_bonus_actual)
+    + n(row.grade_allowance)
+    + n(row.manager_allowance)
     + n(row.allowance)
     + n(row.extra_allowance)
     + (n(row.overtime_pay_auto) + n(row.overtime_pay_manual))
@@ -145,6 +151,27 @@ describe('GENERATED column 雙向綁定 — null / undefined 行為(COALESCE)', 
     const row = { base_salary: 50000, attendance_bonus_actual: null, allowance: 1000 };
     expect(computeGrossSalary(row)).toBe(refGrossSalary(row));
     expect(computeGrossSalary(row)).toBe(51000);
+  });
+});
+
+describe('GENERATED column 雙向綁定 — grade_allowance / manager_allowance(2026-05-30)', () => {
+  it('row 帶 grade=3000 + manager=2000 → 都進 gross 與 net', () => {
+    const row = {
+      base_salary: 30000, attendance_bonus_actual: 2000,
+      grade_allowance: 3000, manager_allowance: 2000,
+      deduct_labor_ins: 500,
+    };
+    // gross = 30000 + 2000 + 3000 + 2000 = 37000
+    expect(computeGrossSalary(row)).toBe(refGrossSalary(row));
+    expect(computeGrossSalary(row)).toBe(37000);
+    // net = 37000 - 500 = 36500
+    expect(computeNetSalary(row)).toBe(refNetSalary(row));
+    expect(computeNetSalary(row)).toBe(36500);
+  });
+  it('grade / manager 為 null/undefined → 視為 0', () => {
+    const row = { base_salary: 30000, grade_allowance: null };
+    expect(computeGrossSalary(row)).toBe(refGrossSalary(row));
+    expect(computeGrossSalary(row)).toBe(30000);
   });
 });
 
@@ -284,6 +311,70 @@ describe('calculateMonthlySalary — 主流程順序', () => {
     expect(upserted.overtime_pay_manual).toBe(0);
     expect(upserted.allowance).toBe(0);
     expect(upserted.extra_allowance).toBe(0);
+  });
+
+  it('emp 沒 grade_allowance / manager_allowance(舊資料)→ 寫 0', async () => {
+    const repo = makeFullRepo();
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(upserted.grade_allowance).toBe(0);
+    expect(upserted.manager_allowance).toBe(0);
+  });
+
+  it('一般月:emp.grade=3000、manager=2000 → 全額寫入 salary_records', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 30000, attendance_bonus: 2000, employment_type: 'full_time',
+        grade_allowance: 3000, manager_allowance: 2000,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(upserted.grade_allowance).toBe(3000);
+    expect(upserted.manager_allowance).toBe(2000);
+    // 一般月 proRataRatio=1、prorata_base 為 null(沒 final-month flag)
+    expect(upserted.prorata_base).toBeNull();
+  });
+
+  it('離職月:emp.grade=3000 + ratio=10/30 → 1000(跟 base_salary 同比例)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 30000, attendance_bonus: 0, employment_type: 'full_time',
+        grade_allowance: 3000, manager_allowance: 6000,
+      })),
+      findSalaryRecord: vi.fn(async () => ({
+        id: 'S_E001_2026_05', status: 'draft',
+        is_final_month: true, worked_days: 10, total_days_in_month: 30,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // ratio = 10/30 → 3000 × ratio = 1000;6000 × ratio = 2000
+    expect(upserted.grade_allowance).toBe(1000);
+    expect(upserted.manager_allowance).toBe(2000);
+    // prorata_base = base × ratio = 30000 × 10/30 = 10000(同 ratio 證明對齊)
+    expect(upserted.prorata_base).toBe(10000);
+  });
+
+  it('一般月:重算每次都覆寫 grade/manager(不像 allowance 是 _manual 保留)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 30000, attendance_bonus: 0, employment_type: 'full_time',
+        grade_allowance: 5000, manager_allowance: 0,
+      })),
+      findSalaryRecord: vi.fn(async () => ({
+        id: 'S_E001_2026_05', status: 'draft',
+        grade_allowance: 9999, manager_allowance: 9999, // 舊值,要被覆寫
+        allowance: 800,                                   // _manual 保留
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const upserted = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // 從 emp 同步、不看 existing 9999
+    expect(upserted.grade_allowance).toBe(5000);
+    expect(upserted.manager_allowance).toBe(0);
+    // 對照組:allowance 仍保留 existing
+    expect(upserted.allowance).toBe(800);
   });
 
   it('既有 status=confirmed → 重算後 status 仍 confirmed(不退回 draft)', async () => {
