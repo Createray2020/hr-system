@@ -14,7 +14,7 @@
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
-import { checkOverLimit, isCrossMonth } from '../../lib/overtime/limits.js';
+import { checkOverLimit, checkOvertimeDateWindow } from '../../lib/overtime/limits.js';
 import {
   calculateOvertimePay, getHourlyRate, pickFrozenPayMultiplier,
 } from '../../lib/overtime/pay-calc.js';
@@ -119,15 +119,18 @@ async function handlePost(req, res, caller) {
   const employee_id = caller.id;
   if (!employee_id) return res.status(401).json({ error: 'caller has no employee id' });
 
-  // 不能跨月(規範 §9.6):applies_to_year/month 必須等於 today 的年月
+  // 補申請時效(04.5 §5.1/5.2 事前、§5.3 事後當日內)
   // 用 Asia/Taipei 當地日期;toISOString() 是 UTC、台灣每日 00:00–08:00
-  // 會落在前一天,月份邊界(如 6/1 早上)會把當天合法日期誤判成跨月。
+  // 會落在前一天,月份邊界會把當天合法日期誤判成過去。
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
-  if (isCrossMonth(overtime_date, today)) {
-    return res.status(400).json({
-      error: 'CROSS_MONTH_NOT_ALLOWED',
-      detail: `overtime_date(${overtime_date}) must be in current month (${today.slice(0,7)})`,
-    });
+  const dateCheck = checkOvertimeDateWindow(request_kind, overtime_date, today);
+  if (!dateCheck.ok) {
+    const detail = {
+      POST_APPROVAL_SAME_DAY_ONLY: `事後補申請僅限當日(overtime_date 必須為今天 ${today})`,
+      PRE_APPROVAL_NO_PAST: `事前申請的加班日期不可早於今天(${today})`,
+      MISSING_DATE: 'overtime_date required',
+    }[dateCheck.reason];
+    return res.status(400).json({ error: dateCheck.reason, detail });
   }
   const otY = parseInt(overtime_date.slice(0, 4));
   const otM = parseInt(overtime_date.slice(5, 7));

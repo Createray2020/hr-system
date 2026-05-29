@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  getEffectiveLimits, checkOverLimit, computeDateRanges, isCrossMonth,
+  getEffectiveLimits, checkOverLimit, computeDateRanges, checkOvertimeDateWindow,
 } from '../lib/overtime/limits.js';
 
 function makeRepo(over = {}) {
@@ -179,39 +179,54 @@ describe('computeDateRanges — 日 / 週 / 月 / 年區間', () => {
   });
 });
 
-describe('isCrossMonth — 規範 §9.6 不能跨月申請', () => {
-  it('同年同月 → false', () => {
-    expect(isCrossMonth('2026-04-26', '2026-04-15')).toBe(false);
-    expect(isCrossMonth('2026-04-01', '2026-04-30')).toBe(false);
+describe('checkOvertimeDateWindow — 04.5 §5.1/5.3 補申請時效', () => {
+  const TODAY = '2026-05-29';
+
+  describe('pre_approval(§5.1/5.2 事前)', () => {
+    it('今天 → ok', () => {
+      expect(checkOvertimeDateWindow('pre_approval', '2026-05-29', TODAY)).toEqual({ ok: true });
+    });
+    it('未來日(含跨月)→ ok', () => {
+      expect(checkOvertimeDateWindow('pre_approval', '2026-05-30', TODAY)).toEqual({ ok: true });
+      expect(checkOvertimeDateWindow('pre_approval', '2026-07-15', TODAY)).toEqual({ ok: true });
+    });
+    it('過去日 → reason PRE_APPROVAL_NO_PAST', () => {
+      expect(checkOvertimeDateWindow('pre_approval', '2026-05-28', TODAY))
+        .toEqual({ ok: false, reason: 'PRE_APPROVAL_NO_PAST' });
+      expect(checkOvertimeDateWindow('pre_approval', '2025-12-31', TODAY))
+        .toEqual({ ok: false, reason: 'PRE_APPROVAL_NO_PAST' });
+    });
   });
 
-  it('跨月(同年)→ true', () => {
-    expect(isCrossMonth('2026-05-01', '2026-04-30')).toBe(true);
-    expect(isCrossMonth('2026-03-31', '2026-04-01')).toBe(true);
+  describe('post_approval(§5.3 事後當日)', () => {
+    it('今天 → ok', () => {
+      expect(checkOvertimeDateWindow('post_approval', '2026-05-29', TODAY)).toEqual({ ok: true });
+    });
+    it('過去日 → reason POST_APPROVAL_SAME_DAY_ONLY', () => {
+      expect(checkOvertimeDateWindow('post_approval', '2026-05-28', TODAY))
+        .toEqual({ ok: false, reason: 'POST_APPROVAL_SAME_DAY_ONLY' });
+    });
+    it('未來日 → reason POST_APPROVAL_SAME_DAY_ONLY', () => {
+      expect(checkOvertimeDateWindow('post_approval', '2026-05-30', TODAY))
+        .toEqual({ ok: false, reason: 'POST_APPROVAL_SAME_DAY_ONLY' });
+    });
   });
 
-  it('跨年 → true', () => {
-    expect(isCrossMonth('2027-01-01', '2026-12-31')).toBe(true);
-    expect(isCrossMonth('2025-12-31', '2026-01-01')).toBe(true);
+  describe('缺資料', () => {
+    it('overtimeDate 缺 → MISSING_DATE', () => {
+      expect(checkOvertimeDateWindow('pre_approval', null, TODAY))
+        .toEqual({ ok: false, reason: 'MISSING_DATE' });
+      expect(checkOvertimeDateWindow('post_approval', '', TODAY))
+        .toEqual({ ok: false, reason: 'MISSING_DATE' });
+    });
+    it('today 缺 → MISSING_DATE', () => {
+      expect(checkOvertimeDateWindow('pre_approval', '2026-05-29', null))
+        .toEqual({ ok: false, reason: 'MISSING_DATE' });
+    });
   });
 
-  it('overtimeDate 缺 → true(保守視為跨月)', () => {
-    expect(isCrossMonth(null, '2026-04-26')).toBe(true);
-    expect(isCrossMonth(undefined, '2026-04-26')).toBe(true);
-    expect(isCrossMonth('', '2026-04-26')).toBe(true);
-  });
-
-  it('today 缺 → true(保守視為跨月)', () => {
-    expect(isCrossMonth('2026-04-26', null)).toBe(true);
-    expect(isCrossMonth('2026-04-26', undefined)).toBe(true);
-    expect(isCrossMonth('2026-04-26', '')).toBe(true);
-  });
-
-  it('兩者都缺 → true', () => {
-    expect(isCrossMonth(null, null)).toBe(true);
-  });
-
-  it('YYYY-MM-DD 後面附 timestamp 也接受(只看前 7 字)', () => {
-    expect(isCrossMonth('2026-04-26T18:00:00+08:00', '2026-04-15')).toBe(false);
+  it('YYYY-MM-DD 後面附 timestamp 也接受(只看前 10 字)', () => {
+    expect(checkOvertimeDateWindow('pre_approval', '2026-05-29T18:00:00+08:00', TODAY))
+      .toEqual({ ok: true });
   });
 });

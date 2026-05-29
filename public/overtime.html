@@ -50,7 +50,7 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
         <div class="form-row">
           <label class="form-label">申請類別</label>
-          <select class="form-select" id="f-kind">
+          <select class="form-select" id="f-kind" onchange="applyDateConstraints()">
             <option value="pre_approval">事前申請 (pre_approval)</option>
             <option value="post_approval">事後補申請 (post_approval)</option>
           </select>
@@ -101,10 +101,9 @@ function todayStr(){
 
 async function load(retries=0){
   if(!window.api||!window.currentUser){if(retries<25)return setTimeout(()=>load(retries+1),200);return;}
-  // 預填日期
+  // 預填日期、min/max 依類別動態設(applyDateConstraints)
   document.getElementById('f-date').value = todayStr();
-  document.getElementById('f-date').setAttribute('min', todayStr().slice(0,7) + '-01');
-  document.getElementById('f-date').setAttribute('max', new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).toISOString().slice(0,10));
+  applyDateConstraints();
   await loadList();
 }
 
@@ -138,6 +137,21 @@ function render(){
   }).join('');
 }
 
+function applyDateConstraints(){
+  const kind = document.getElementById('f-kind').value;
+  const today = todayStr();
+  const dateEl = document.getElementById('f-date');
+  if (kind === 'post_approval') {
+    dateEl.setAttribute('min', today);
+    dateEl.setAttribute('max', today);
+    if (dateEl.value !== today) dateEl.value = today;
+  } else {
+    dateEl.setAttribute('min', today);
+    dateEl.removeAttribute('max');
+  }
+  updateEstimate();
+}
+
 function updateEstimate(){
   const date = document.getElementById('f-date').value;
   const start = document.getElementById('f-start').value;
@@ -155,13 +169,18 @@ function updateEstimate(){
   const h = Math.round(((em - sm) / 60) * 2) / 2;
   document.getElementById('f-hours').value = h.toFixed(1);
 
-  // 跨月檢查
+  // 補申請時效(04.5 §5.1/5.3)
+  const kind = document.getElementById('f-kind').value;
   const today = todayStr();
-  if (date.slice(0,7) !== today.slice(0,7)) {
+  if (kind === 'post_approval' && date !== today) {
     hint.className = 'check-info check-error';
-    hint.textContent = '不能跨月申請(本批次規則)。日期必須在當月。';
-    hint.style.display = '';
-    return;
+    hint.textContent = '事後補申請僅限當日（超過當日不算加班）。';
+    hint.style.display = ''; return;
+  }
+  if (kind === 'pre_approval' && date < today) {
+    hint.className = 'check-info check-error';
+    hint.textContent = '事前申請的加班日期不可早於今天。';
+    hint.style.display = ''; return;
   }
   hint.style.display = 'none';
 }
@@ -180,6 +199,8 @@ async function submitRequest(){
   if (!date||!start||!end||!Number.isFinite(hours)||hours<=0){toast('時間不對','error');return;}
   if (!reason){toast('請填理由','error');return;}
   if (comp !== 'comp_leave' && comp !== 'overtime_pay') { toast('請選擇補償方式（加班費或補休）','error'); return; }
+  if (kind === 'post_approval' && date !== todayStr()) { toast('事後補申請僅限當日','error'); return; }
+  if (kind === 'pre_approval' && date < todayStr())     { toast('事前申請日期不可早於今天','error'); return; }
 
   const startIso = `${date}T${start}:00+08:00`;
   const endIso   = `${date}T${end}:00+08:00`;
@@ -197,7 +218,8 @@ async function submitRequest(){
     await loadList();
   }catch(e){
     if(e.message?.includes('EXCEEDS_HARD_CAP')) toast('超出最高上限,無法申請','error');
-    else if(e.message?.includes('CROSS_MONTH'))  toast('不能跨月申請','error');
+    else if(e.message?.includes('SAME_DAY_ONLY')) toast('事後補申請僅限當日','error');
+    else if(e.message?.includes('NO_PAST'))       toast('事前申請日期不可早於今天','error');
     else toast('申請失敗:'+e.message,'error');
   }
 }
