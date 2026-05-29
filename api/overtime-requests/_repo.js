@@ -148,13 +148,15 @@ export function makeOvertimeRepo() {
 
     // ─── 員工資料(時薪計算用)─────
     async findEmployeeMonthlySalary(employee_id) {
+      // salary_records 的月基薪欄位名是 base_salary(2026-05-10 schema v2 後;
+      // 不存在 monthly_salary 欄位,曾誤用導致加班 POST 全員 500)
       const { data, error } = await supabaseAdmin
-        .from('salary_records').select('monthly_salary, year, month')
+        .from('salary_records').select('base_salary, year, month')
         .eq('employee_id', employee_id)
         .order('year', { ascending: false }).order('month', { ascending: false })
         .limit(1).maybeSingle();
       if (error) throw error;
-      return data?.monthly_salary != null ? Number(data.monthly_salary) : 0;
+      return data?.base_salary != null ? Number(data.base_salary) : 0;
     },
 
     async findEmployeeManager(employee_id) {
