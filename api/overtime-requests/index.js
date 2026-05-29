@@ -119,7 +119,9 @@ async function handlePost(req, res, caller) {
   if (!employee_id) return res.status(401).json({ error: 'caller has no employee id' });
 
   // 不能跨月(規範 §9.6):applies_to_year/month 必須等於 today 的年月
-  const today = new Date().toISOString().slice(0, 10);
+  // 用 Asia/Taipei 當地日期;toISOString() 是 UTC、台灣每日 00:00–08:00
+  // 會落在前一天,月份邊界(如 6/1 早上)會把當天合法日期誤判成跨月。
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
   if (isCrossMonth(overtime_date, today)) {
     return res.status(400).json({
       error: 'CROSS_MONTH_NOT_ALLOWED',
