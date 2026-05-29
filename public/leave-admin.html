@@ -175,6 +175,21 @@
   </div>
 </div>
 
+<!-- 假期額度總覽 → 員工點「📋 詳細」開的明細 modal -->
+<div class="modal-bg" id="quota-detail-modal">
+  <div class="modal" style="max-width:720px;width:95vw">
+    <div class="modal-title" id="qd-title">假期明細</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 12px">
+      <div id="qd-emp-meta" style="font-size:13px;color:var(--text-dim)"></div>
+      <select id="qd-year" onchange="reloadQuotaDetail()" style="font-size:13px;padding:4px 8px;width:auto"></select>
+    </div>
+    <div id="qd-body"></div>
+    <div class="modal-actions" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeQuotaDetail()">關閉</button>
+    </div>
+  </div>
+</div>
+
 <script>
 function toast(msg, type='success') {
   let wrap = document.getElementById('toast-wrap');
@@ -832,7 +847,9 @@ function renderQuotaOverview() {
     const emp = r.emp || {};
     const empCell =
       `<div>${escHtml(emp.name || emp.id || '—')}` +
-      `<div style="font-size:11px;color:var(--text-dim)">${escHtml(emp.dept_name || emp.dept || '')}</div></div>`;
+      `<div style="font-size:11px;color:var(--text-dim)">${escHtml(emp.dept_name || emp.dept || '')}</div>` +
+      `<button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;margin-top:4px" onclick="openQuotaDetail('${escHtml(emp.id)}', '${escHtml(emp.name || emp.id || '')}')">📋 詳細</button>` +
+      `</div>`;
 
     if (r.error) {
       return `<div class="l-row" style="grid-template-columns:160px 1fr">
@@ -874,6 +891,164 @@ function renderQuotaOverview() {
 
 function onQoYearChange() { loadQuotaOverview(true); }    // 改年度重撈
 function onQoSearchInput() { renderQuotaOverview(); }     // 搜尋純前端過濾、不重撈
+
+// ════════════════════════════════════════════════════════════
+// 假期額度總覽 → 員工點「📋 詳細」開明細 modal
+// 餘額型卡片(特休/補休)+ 累積型摺疊明細(group by leave_type)+ 年度切換
+// 點明細任一筆 → fetch 該 leave row、push 進 allLeaves、複用既有 openDetail 審核 modal
+// ════════════════════════════════════════════════════════════
+let qdCurrentEmpId = null;
+let qdCurrentName  = null;
+
+async function openQuotaDetail(empId, name) {
+  qdCurrentEmpId = empId;
+  qdCurrentName  = name;
+  // 年度下拉:當前年 + 前 2 年
+  const thisYear = new Date().getFullYear();
+  const sel = document.getElementById('qd-year');
+  sel.innerHTML = [thisYear, thisYear - 1, thisYear - 2]
+    .map(y => `<option value="${y}">${y} 年</option>`).join('');
+  sel.value = thisYear;
+  document.getElementById('qd-title').textContent = `${name} · 假期明細`;
+  document.getElementById('qd-emp-meta').textContent = empId;
+  document.getElementById('qd-body').innerHTML =
+    '<div style="padding:40px;text-align:center;color:var(--text-dim)">載入中…</div>';
+  document.getElementById('quota-detail-modal').classList.add('open');
+  await reloadQuotaDetail();
+}
+
+function closeQuotaDetail() {
+  document.getElementById('quota-detail-modal').classList.remove('open');
+  qdCurrentEmpId = null;
+}
+
+async function reloadQuotaDetail() {
+  if (!qdCurrentEmpId) return;
+  const year = document.getElementById('qd-year').value;
+  document.getElementById('qd-body').innerHTML =
+    '<div style="padding:40px;text-align:center;color:var(--text-dim)">載入中…</div>';
+  try {
+    const [summary, detail] = await Promise.all([
+      api(`/api/leaves?_resource=quota_summary&employee_id=${encodeURIComponent(qdCurrentEmpId)}&year=${year}`),
+      api(`/api/leaves?employee_id=${encodeURIComponent(qdCurrentEmpId)}&year=${year}`),
+    ]);
+    document.getElementById('qd-body').innerHTML =
+      renderQuotaDetailBody(summary, detail.requests || [], year);
+  } catch (e) {
+    document.getElementById('qd-body').innerHTML =
+      `<div style="padding:20px;color:var(--red)">載入失敗:${escHtml(e.message)}</div>`;
+  }
+}
+
+// status 徽章對齊既有 .badge-* 顏色分流(對齊 detail-modal L408 既有用法)
+function qdStatusBadge(status) {
+  const SU = window.HR_Utils || {};
+  const cls  = (SU.stageBadgeClass && SU.stageBadgeClass(status)) || 'badge-pending';
+  const text = (SU.stageLabel       && SU.stageLabel(status))      || status || '';
+  return `<span class="pill ${cls}">${escHtml(text)}</span>`;
+}
+
+function renderQuotaDetailBody(summary, requests, year) {
+  // 區塊 1:餘額型卡片(特休 + 補休)— 對齊頁面深色主題、用 CSS vars
+  const annual = summary.annual || {};
+  const comp   = summary.comp   || {};
+  const annualCard = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px">特休剩餘</div>
+      <div style="font-size:20px;font-weight:500">${annual.has_record ? `${annual.remaining_days} / ${annual.granted_days} 天` : '無記錄'}</div>
+      ${annual.has_record ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px">週期 ${escHtml(annual.period_start)} ~ ${escHtml(annual.period_end)}</div>` : ''}
+    </div>`;
+  const compCard = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px">補休剩餘</div>
+      <div style="font-size:20px;font-weight:500">${comp.total_remaining_hours ?? 0} 小時</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:2px">已用 ${comp.total_used_hours ?? 0} / 累積 ${comp.total_earned_hours ?? 0}</div>
+    </div>`;
+  const balanceRow = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">${annualCard}${compCard}</div>`;
+
+  // 區塊 2:累積型摺疊(group by leave_type、跳過 annual/comp 避免跟餘額型重複)
+  const grouped = {};
+  for (const r of requests) {
+    if (r.leave_type === 'annual' || r.leave_type === 'comp') continue;
+    (grouped[r.leave_type] = grouped[r.leave_type] || []).push(r);
+  }
+  // 假別中文對照 + meta
+  const nameMap = {};
+  (summary.accumulating || []).forEach(a => {
+    nameMap[a.code] = {
+      name:  a.name_zh, max: a.legal_max_days,
+      used:  a.used_days, count: a.used_count,
+      over:  a.is_over_limit,
+    };
+  });
+
+  const codesWithData = Object.keys(grouped).sort();
+  const codesNoData = (summary.accumulating || [])
+    .filter(a => !grouped[a.code]).map(a => a.name_zh);
+
+  let detailHtml = codesWithData.map(code => {
+    const info = nameMap[code] || { name: code, max: null, used: null, count: grouped[code].length, over: false };
+    const headerRight = info.max != null
+      ? `已用 ${info.used} / ${info.max} 天 · ${info.count} 次${info.over ? ' ⚠超標' : ''}`
+      : `${grouped[code].length} 筆`;
+    const headerColor = info.over ? 'var(--red)' : 'var(--text-dim)';
+    const rows = grouped[code].map(r => {
+      const startDate = r.start_at ? r.start_at.substring(5, 10) : (r.start_date || '').substring(5);
+      const startTime = r.start_at ? r.start_at.substring(11, 16) : '';
+      const endTime   = r.end_at   ? r.end_at.substring(11, 16)   : '';
+      const period    = startTime ? `${startDate} ${startTime}-${endTime}` : startDate;
+      const reasonShort = (r.reason || '').slice(0, 20) + ((r.reason || '').length > 20 ? '…' : '');
+      // hover 加底色提示可點、末尾 → 加跳轉視覺暗示
+      return `<tr style="border-bottom:0.5px solid var(--border);cursor:pointer" onclick="jumpToLeaveDetail('${escHtml(r.id)}')" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+        <td style="padding:6px 4px">${escHtml(period)}</td>
+        <td style="text-align:right;padding:6px 4px">${r.hours ?? r.finalized_hours ?? '-'}</td>
+        <td style="text-align:right;padding:6px 4px">${r.days ?? '-'}</td>
+        <td style="padding:6px 4px">${qdStatusBadge(r.status)}</td>
+        <td style="padding:6px 4px;color:var(--text-dim)">${escHtml(reasonShort)}</td>
+        <td style="text-align:center;padding:6px 4px;color:var(--text-dim);font-size:14px">→</td>
+      </tr>`;
+    }).join('');
+    return `<details open style="margin-bottom:10px">
+      <summary style="background:var(--surface);border:1px solid var(--border);padding:10px 12px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:500">${escHtml(info.name)} (${escHtml(code)})</span>
+        <span style="font-size:12px;color:${headerColor}">${headerRight}</span>
+      </summary>
+      <table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px">
+        <thead><tr style="color:var(--text-dim);border-bottom:0.5px solid var(--border)">
+          <th style="text-align:left;padding:6px 4px;font-weight:400">起訖</th>
+          <th style="text-align:right;padding:6px 4px;font-weight:400">時數</th>
+          <th style="text-align:right;padding:6px 4px;font-weight:400">天數</th>
+          <th style="text-align:left;padding:6px 4px;font-weight:400">狀態</th>
+          <th style="text-align:left;padding:6px 4px;font-weight:400">事由</th>
+          <th style="text-align:center;padding:6px 4px;font-weight:400;width:24px"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </details>`;
+  }).join('');
+
+  if (codesNoData.length > 0) {
+    detailHtml += `<div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;opacity:0.6;font-size:13px;color:var(--text-dim)">
+      ${codesNoData.map(escHtml).join(' / ')}(本年度無紀錄)
+    </div>`;
+  }
+
+  return balanceRow + detailHtml;
+}
+
+async function jumpToLeaveDetail(leaveId) {
+  try {
+    // 切 tab 過來 allLeaves 可能 stale、補 fetch 該 row 進 allLeaves 再開既有 openDetail
+    if (!allLeaves.find(l => l.id === leaveId)) {
+      const row = await api(`/api/leaves?id=${encodeURIComponent(leaveId)}`);
+      allLeaves.push(row);
+    }
+    closeQuotaDetail();
+    openDetail(leaveId);
+  } catch (e) {
+    alert('載入假單失敗:' + e.message);
+  }
+}
 
 load();
 </script>
