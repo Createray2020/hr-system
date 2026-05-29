@@ -8,5 +8,10 @@ node_modules/
 # Prod data dump 文件含真實薪資/個資、永遠不進版控
 docs/*-prod-dump.md
 
-# 歷史出勤 Excel 含員工姓名 / 打卡時間、不該進版控
+# 含真實個資的 Excel(出勤/保險/薪資/員工資料)、永不進版控
 *_出勤_*.xlsx
+*保險*.xlsx
+*投保*.xlsx
+*薪資*.xlsx
+*勞健保*.xlsx
+*員工*.xlsx
