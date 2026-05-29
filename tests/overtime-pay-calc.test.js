@@ -8,6 +8,7 @@ const config = {
   weekday_overtime_after_2h_rate:  1.67,
   rest_day_overtime_first_2h_rate: 1.34,
   rest_day_overtime_after_2h_rate: 1.67,
+  rest_day_overtime_after_8h_rate: 2.67,
 };
 
 describe('calculateOvertimePay — weekday', () => {
@@ -37,11 +38,58 @@ describe('calculateOvertimePay — weekday', () => {
   });
 });
 
-describe('calculateOvertimePay — rest_day', () => {
+describe('calculateOvertimePay — rest_day (§24 II 三段)', () => {
   it('1h 用 rest_day first_2h_rate', () => {
     const cfg = { ...config, rest_day_overtime_first_2h_rate: 1.34 };
     const r = calculateOvertimePay(1, 100, cfg, 'rest_day');
     expect(r.amount).toBe(134);
+  });
+
+  it('3h 回歸:2×r1 + 1×r2 = 2×200×1.34 + 1×200×1.67 = 870', () => {
+    const r = calculateOvertimePay(3, 200, config, 'rest_day');
+    expect(r.amount).toBe(870);
+    expect(r.breakdown.hours_first_2h).toBe(2);
+    expect(r.breakdown.hours_after_2h).toBe(1);
+    expect(r.breakdown.hours_after_8h).toBe(0);
+  });
+
+  it('8h:第三段 0,= 2×200×1.34 + 6×200×1.67 = 536 + 2004 = 2540', () => {
+    const r = calculateOvertimePay(8, 200, config, 'rest_day');
+    expect(r.amount).toBe(2540);
+    expect(r.breakdown.hours_first_2h).toBe(2);
+    expect(r.breakdown.hours_after_2h).toBe(6);
+    expect(r.breakdown.hours_after_8h).toBe(0);
+    expect(r.breakdown.rate_after_8h).toBe(2.67);
+  });
+
+  it('9h(§24 II 8-12h ×2.67):2×200×1.34 + 6×200×1.67 + 1×200×2.67 = 536 + 2004 + 534 = 3074', () => {
+    const r = calculateOvertimePay(9, 200, config, 'rest_day');
+    expect(r.amount).toBe(3074);
+    expect(r.breakdown.hours_first_2h).toBe(2);
+    expect(r.breakdown.hours_after_2h).toBe(6);
+    expect(r.breakdown.hours_after_8h).toBe(1);
+    expect(r.breakdown.rate_after_8h).toBe(2.67);
+  });
+
+  it('12h 上限:第三段拿滿 4h、= 536 + 2004 + 4×200×2.67 = 4676', () => {
+    const r = calculateOvertimePay(12, 200, config, 'rest_day');
+    expect(r.amount).toBe(4676);
+    expect(r.breakdown.hours_after_8h).toBe(4);
+  });
+});
+
+describe('calculateOvertimePay — statutory_rest (§40 例假加倍)', () => {
+  it('5h × 200 × 2.0 = 2000(無 holiday row、fallback 2.0)', () => {
+    const r = calculateOvertimePay(5, 200, config, 'statutory_rest');
+    expect(r.amount).toBe(2000);
+    expect(r.breakdown.holiday_hours).toBe(5);
+    expect(r.breakdown.holiday_rate).toBe(2.0);
+  });
+
+  it('明確傳 holidayMultiplier 也能蓋過 fallback', () => {
+    const r = calculateOvertimePay(3, 100, config, 'statutory_rest', 2.5);
+    expect(r.amount).toBe(750);
+    expect(r.breakdown.holiday_rate).toBe(2.5);
   });
 });
 
@@ -101,6 +149,10 @@ describe('pickFrozenPayMultiplier — 申請當下凍結', () => {
   });
   it('rest_day 用 rest_day_first_2h_rate', () => {
     expect(pickFrozenPayMultiplier('rest_day', config)).toBe(1.34);
+  });
+  it('statutory_rest 用 holidayMultiplier、缺值 fallback 2.0', () => {
+    expect(pickFrozenPayMultiplier('statutory_rest', config)).toBe(2.0);
+    expect(pickFrozenPayMultiplier('statutory_rest', config, 2.5)).toBe(2.5);
   });
 });
 
