@@ -72,6 +72,7 @@
         <input type="file" id="import-file" accept=".xlsx,.xls" style="display:none" onchange="handleImportFile(event)">
         <button class="btn btn-ghost" id="btn-batch-tpl" onclick="openBatchTemplatePicker()" title="整批套範本到可管轄員工" style="display:none">📋 整批套範本</button>
         <button class="btn btn-ghost" id="btn-batch-period" onclick="openBatchCreatePeriod()" title="批次建立尚未開立的本月排班期間" style="display:none">📅 建立本月排班</button>
+        <button class="btn btn-ghost" id="btn-batch-force" onclick="openBatchForceDialog()" title="把時間閘門已到的 draft/submitted/approved 一次全部公告" style="display:none">⏰ 一鍵強制公告</button>
       </div>
     </div>
 
@@ -771,6 +772,8 @@ function render() {
   });
   // C8-3:依 visibleEmps + currentUser show/hide「整批套範本」toolbar button
   updateBatchTplButton();
+  // F4 批次:同處 show/hide「⏰ 一鍵強制公告」toolbar button(依目前週的 period 推 eligible)
+  updateBatchForceButton();
 
   const totalOn = dailyCounts.reduce((s, c) => s + c.on, 0);
   const totalOff = dailyCounts.reduce((s, c) => s + c.off, 0);
@@ -1499,6 +1502,113 @@ async function forceFinalizePeriod(periodId) {
   } catch(e) { toast('強制公告失敗：' + e.message,'error'); }
 }
 
+// F4 批次:遍歷 visibleEmps(已套角色 + dept-filter)、依該週 primaryMonth 抓 period、
+// 分類成 eligible / skipDone / skipNoPeriod / skipTimeWindow。
+// 範圍跟著現有 selectedDeptId 走、不另加 scope 選擇。
+// 不排除自己(後端 forceFinalizeAuth 無 self 擋、主管自審用)。
+function taipeiNow() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function computeBatchForceTargets() {
+  const u = window.currentUser;
+  const now = taipeiNow();
+  const ym = primaryMonthOf(currentWeekStart);
+  const eligible = [], skipDone = [], skipNoPeriod = [], skipTimeWindow = [];
+  if (!u || !window.ScheduleFinalizeAuth) {
+    return { eligible, skipDone, skipNoPeriod, skipTimeWindow };
+  }
+  for (const emp of (visibleEmps || [])) {
+    const period = getPeriodFor(emp.id, ym);
+    if (!period) { skipNoPeriod.push({ emp }); continue; }
+    if (period.status === 'published' || period.status === 'locked') {
+      skipDone.push({ emp, period }); continue;
+    }
+    if (period.status !== 'draft' && period.status !== 'submitted' && period.status !== 'approved') {
+      // 防衛:未知 status 一律視為跳過(不在批次內動)
+      skipDone.push({ emp, period }); continue;
+    }
+    const fw = window.ScheduleFinalizeAuth.forceFinalizeAuth({
+      caller: u, period, employeeDeptId: emp.dept_id, now,
+    });
+    if (fw.ok) eligible.push({ emp, period });
+    else skipTimeWindow.push({ emp, period, reason: fw.reason });
+  }
+  return { eligible, skipDone, skipNoPeriod, skipTimeWindow };
+}
+
+function updateBatchForceButton() {
+  const btn = document.getElementById('btn-batch-force');
+  if (!btn) return;
+  const t = computeBatchForceTargets();
+  btn.style.display = t.eligible.length > 0 ? '' : 'none';
+}
+
+async function openBatchForceDialog() {
+  const t = computeBatchForceTargets();
+  if (!t.eligible.length) {
+    alert('沒有可強制公告的對象(可能都已公告 / 無 period / 時間閘門未到)');
+    return;
+  }
+  // 範圍標籤:eligible 的 distinct dept 數量決定
+  const distinctDepts = [...new Set(t.eligible.map(x => x.emp.dept_id || ''))];
+  let scopeLabel;
+  if (distinctDepts.length === 1) {
+    const deptName = t.eligible[0].emp.dept_name || distinctDepts[0] || '(未指派)';
+    scopeLabel = `本部門:${deptName}`;
+  } else {
+    scopeLabel = `全部門(${distinctDepts.length} 個部門)`;
+  }
+  const SHOW_MAX = 8;
+  const namesOf = arr => {
+    const head = arr.slice(0, SHOW_MAX).map(x => `  • ${x.emp?.name || x.emp?.id}`).join('\n');
+    const more = arr.length > SHOW_MAX ? `\n  …等 ${arr.length} 位` : '';
+    return head + more;
+  };
+  let msg = `將強制定案並公告【${scopeLabel}】的 ${t.eligible.length} 位:\n`;
+  msg += namesOf(t.eligible);
+  if (t.skipDone.length) {
+    msg += `\n\n⚠ 另 ${t.skipDone.length} 位已公告 / 鎖月將被跳過:\n` + namesOf(t.skipDone);
+  }
+  if (t.skipNoPeriod.length) {
+    msg += `\n\n⚠ 另 ${t.skipNoPeriod.length} 位尚未建立 period 將被跳過:\n` + namesOf(t.skipNoPeriod);
+  }
+  if (t.skipTimeWindow.length) {
+    msg += `\n\n⚠ 另 ${t.skipTimeWindow.length} 位時間閘門未到 / 角色不符將被跳過:\n` + namesOf(t.skipTimeWindow);
+  }
+  msg += '\n\n會通知員工、寫稽核紀錄;不可撤回到 draft。\n確定執行?';
+  if (!confirm(msg)) return;
+  await applyForceFinalizeBatch(t.eligible);
+}
+
+async function applyForceFinalizeBatch(targets) {
+  toast(`強制公告中…(${targets.length} 位)`);
+  const settled = await Promise.allSettled(targets.map(async ({ emp, period }) => {
+    const r = await window.apiRaw(
+      `/api/schedule-periods/${encodeURIComponent(period.id)}/force-finalize`,
+      { method: 'POST' },
+    );
+    if (!r.ok) throw { emp, body: r.body };
+    return { emp };
+  }));
+  const ok = [];
+  const fail = [];
+  for (const s of settled) {
+    if (s.status === 'fulfilled') ok.push(s.value);
+    else {
+      const r = s.reason;
+      if (r && r.emp) fail.push({ emp: r.emp, body: r.body || {} });
+      else fail.push({ emp: { name: '?' }, body: { error: String(r?.message || r || 'UNKNOWN') } });
+    }
+  }
+  if (!fail.length) {
+    toast(`已強制公告 ${ok.length} 位`);
+  } else {
+    const lines = fail.map(f => `  • ${f.emp.name || f.emp.id}:${formatForceError(f.body)}`).join('\n');
+    alert(`部分失敗:\n成功 ${ok.length} 位、失敗 ${fail.length} 位\n\n明細:\n${lines}`);
+  }
+  await load();
+}
+
 // ═══════════════════════════════════════════════════════════
 // C8-3：套排班範本（逐人 + 整批）— 後端 api/schedule-templates/[id]/apply
 // 跳過員工已標 __OFF__ 邏輯在後端、前端只負責入口 + 結果分類
@@ -1612,6 +1722,26 @@ function formatTplError(err) {
   const code = String(raw).match(/[A-Z_]+/g)?.find(s => TPL_ERR_MAP[s]);
   if (code) return TPL_ERR_MAP[code];
   return '套用失敗';
+}
+
+// F4 批次:force-finalize 後端 error code → 中文人話。
+// 對齊 api/schedule-periods/[id]/force-finalize.js 實際回傳的 error 字串。
+const FORCE_ERR_MAP = {
+  BEFORE_WINDOW:       '時間閘門未到',
+  NOT_AUTHORIZED:      '無強制權限',
+  FORCE_EMPTY_PERIOD:  '尚有未排班的日期',
+  PERIOD_NOT_FOUND:    '找不到排班期間',
+  NO_PERIOD_ID:        '未指定排班期間',
+  STATE_RACED:         '狀態已被更動、請重新整理',
+  INVALID_TRANSITION:  '狀態無法轉移',
+};
+function formatForceError(body) {
+  const code = body?.error || '';
+  let msg = FORCE_ERR_MAP[code] || code || '未知錯誤';
+  if (code === 'FORCE_EMPTY_PERIOD' && Array.isArray(body?.missingDates) && body.missingDates.length) {
+    msg += `(缺 ${body.missingDates.join('、')})`;
+  }
+  return msg;
 }
 
 // ── 逐人入口 ──────────────────────────────────────────

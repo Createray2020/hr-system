@@ -32,6 +32,17 @@
     return res.json();
   };
 
+  // 同 api() 帶 auth、但不丟錯 / 回完整 body(批次場景要拿 missingDates / detail 等結構化欄位)
+  window.apiRaw = async (path, opts = {}) => {
+    const { data: { session: s } } = await _sb.auth.getSession();
+    const res = await fetch(window.API + path, {
+      headers: { 'Content-Type':'application/json', ...(s ? {'Authorization':`Bearer ${s.access_token}`} : {}) },
+      ...opts
+    });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, body };
+  };
+
   window.logout = async () => {
     await _sb.auth.signOut();
     localStorage.removeItem('preferred_version');
