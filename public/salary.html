@@ -278,6 +278,10 @@ function toggleDetailRow(event, rowId) {
   tr.after(detailTr);
   tr.dataset.detailOpen = '1';
   if (caret) caret.textContent = '▾';
+
+  // 若該員工 comp_expiry_payout > 0、會渲染出 .comp-expiry-detail 容器、觸發 lazy fetch
+  const expEl = detailTr.querySelector('.comp-expiry-detail');
+  if (expEl) loadCompExpiryRow(expEl);
 }
 
 function renderDetailContent(r) {
@@ -294,6 +298,19 @@ function renderDetailContent(r) {
       <div>${escHtml(label)}</div>
       <div class="num" style="text-align:right;color:${color}">${fmt$(value)}</div>
     </div>`;
+  // 補休失效逐筆區塊(comp_expiry_payout > 0 才出);lazy fetch /api/comp-time?view=expiry
+  const compExpiryBlock = n0(r.comp_expiry_payout) > 0 ? `
+    <div style="margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);max-width:900px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">補休失效逐筆 (來自 /api/comp-time?view=expiry)</div>
+      <div class="comp-expiry-detail"
+           data-emp="${escHtml(r.employee_id)}"
+           data-year="${r.year}"
+           data-month="${r.month}"
+           data-expected="${r.comp_expiry_payout}">
+        <div style="color:var(--text-dim);font-size:12px">載入中…</div>
+      </div>
+    </div>` : '';
+
   return `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:900px">
       <div>
@@ -308,10 +325,47 @@ function renderDetailContent(r) {
         ${subtotalRow('實發', net, '#4ADE80')}
       </div>
     </div>
+    ${compExpiryBlock}
     <div style="margin-top:10px;font-size:11px;color:var(--text-dim);text-align:right">
       共用 helper: SalaryBreakdown.buildSalaryBreakdown() | 對齊 net_salary GENERATED 公式 | 純顯示,如要編輯請按「編輯」鈕
     </div>
   `;
+}
+
+// 補休失效逐筆 lazy fetch(detail row 展開時呼;HR 可看任一員工)
+async function loadCompExpiryRow(el) {
+  const empId   = el.dataset.emp;
+  const year    = Number(el.dataset.year);
+  const month   = Number(el.dataset.month);
+  const expected = Number(el.dataset.expected || 0);
+  try {
+    const resp = await api(`/api/comp-time?employee_id=${encodeURIComponent(empId)}&year=${year}&month=${month}&view=expiry`);
+    const SB = window.SalaryBreakdown;
+    const { lines, total } = SB.buildCompExpiryLines(resp.records || []);
+    if (!lines.length) {
+      el.innerHTML = '<div style="color:var(--text-dim);font-size:12px">本月無失效轉現紀錄</div>';
+      return;
+    }
+    const mismatch = Math.abs(total - expected) > 0.01;
+    el.innerHTML = lines.map(l => `
+      <div style="padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,.06);font-size:12px">
+        <div style="display:flex;justify-content:space-between">
+          <span>${escHtml(l.label)}</span>
+          <span class="num" style="color:#7FBBFF">+ ${fmt$(l.payout)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escHtml(l.sub)}</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${escHtml(l.meta)}</div>
+      </div>
+    `).join('') + `
+      <div style="padding:6px 0 0;display:flex;justify-content:space-between;font-size:13px;font-weight:600">
+        <span>合計 ${lines.length} 筆</span>
+        <span class="num" style="color:#7FBBFF">${fmt$(total)}</span>
+      </div>
+      ${mismatch ? `<div style="margin-top:4px;font-size:11px;color:#FB923C">⚠ 與薪資單上的補休失效合計 ${fmt$(expected)} 不符（差 ${fmt$(Math.abs(total - expected))}）</div>` : ''}
+    `;
+  } catch (e) {
+    el.innerHTML = `<div style="color:#F87171;font-size:12px">載入失敗：${escHtml(e.message)}</div>`;
+  }
 }
 
 // 表格底部 SUM 合計列、欄位順序對齊 thead 18 欄。

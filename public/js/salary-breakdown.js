@@ -95,7 +95,32 @@
     };
   }
 
-  const api = { GROSS_FIELDS, DEDUCT_FIELDS, buildSalaryBreakdown };
+  // ── 補休失效轉現逐筆算式 helper ───────────────────────────
+  // 對齊 lib/comp-time/expiry-sweep.js + approvals.js cascade #5 的
+  // 寫入公式:expiry_payout_amount = remaining_hours × hourly × 1.34
+  // (hourly 來自 base_salary / 240、或 employees.hourly_rate fallback)
+  // 給 employee-salary.html / salary.html 補休失效逐筆展開用。
+  function buildCompExpiryLines(records) {
+    const lines = (records || []).map(rec => {
+      const payout = n(rec.expiry_payout_amount);
+      const remain = n(rec.remaining_hours);
+      // 反推時薪(payout / remain / 1.34);三人實測都剛好 125 整、無精度問題
+      const hourly = remain > 0 ? r2(payout / (remain * 1.34)) : 0;
+      const expiresDate   = String(rec.expires_at || '').slice(0, 10);
+      const processedDate = String(rec.expiry_processed_at || '').slice(0, 10);
+      const srcOt = rec.source_overtime_request_id;
+      const label = srcOt
+        ? `補休 #${rec.id}（來自加班單 #${srcOt}）`
+        : `補休 #${rec.id}`;
+      const sub  = `剩餘 ${remain}h × 時薪 ${hourly}（本薪÷240）× 1.34 倍`;
+      const meta = `${expiresDate} 到期 · ${processedDate} 處理`;
+      return { id: rec.id, label, payout, sub, meta };
+    });
+    const total = lines.reduce((s, l) => s + l.payout, 0);
+    return { lines, total: r2(total) };
+  }
+
+  const api = { GROSS_FIELDS, DEDUCT_FIELDS, buildSalaryBreakdown, buildCompExpiryLines };
 
   // 掛到 globalThis(瀏覽器 = window;Node ESM = globalThis)
   if (global) global.SalaryBreakdown = api;

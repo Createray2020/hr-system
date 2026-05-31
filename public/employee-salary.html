@@ -151,6 +151,47 @@ async function load(){
   }
 }
 
+// 補休失效逐筆 lazy fetch:展開時打 /api/comp-time?view=expiry 取該員工該月明細,
+// 用 SalaryBreakdown.buildCompExpiryLines() 渲染逐筆算式 + 合計;對齊不符顯示 ⚠
+// empId 由 caller(render r.employee_id)注入、不依賴可能未 ready 的 currentUser 全域,
+// 後端 /api/comp-time?view=expiry 內權限會自動擋(只能查自己 or HR)、員工自己等同 safe。
+async function loadCompExpirySelf(detailsEl, empId, year, month, expected) {
+  if (!detailsEl.open) return;
+  if (detailsEl.dataset.loaded === '1') return;
+  detailsEl.dataset.loaded = '1';
+  const container = detailsEl.querySelector('.comp-expiry-lines');
+  container.innerHTML = '<div style="color:rgba(255,255,255,.45);font-size:12px;padding:6px 0">載入中…</div>';
+  try {
+    const resp = await apiFetch(`/api/comp-time?employee_id=${encodeURIComponent(empId)}&year=${year}&month=${month}&view=expiry`);
+    const SB = window.SalaryBreakdown;
+    const { lines, total } = SB.buildCompExpiryLines(resp.records || []);
+    if (!lines.length) {
+      container.innerHTML = '<div style="color:rgba(255,255,255,.45);font-size:12px;padding:6px 0">本月無失效轉現紀錄</div>';
+      return;
+    }
+    const mismatch = Math.abs(total - Number(expected || 0)) > 0.01;
+    container.innerHTML = lines.map(l => `
+      <div style="padding:8px 0;border-bottom:0.5px solid rgba(255,255,255,.06)">
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span>${escHtml(l.label)}</span>
+          <span class="num" style="color:#7FBBFF">+ ${fmt$(l.payout)}</span>
+        </div>
+        <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px">${escHtml(l.sub)}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:2px">${escHtml(l.meta)}</div>
+      </div>
+    `).join('') + `
+      <div style="padding:8px 0 0;display:flex;justify-content:space-between;font-size:13px;font-weight:600">
+        <span>合計 ${lines.length} 筆</span>
+        <span class="num" style="color:#7FBBFF">${fmt$(total)}</span>
+      </div>
+      ${mismatch ? `<div style="margin-top:6px;font-size:11px;color:#FB923C">⚠ 與薪資單上的補休失效合計 ${fmt$(expected)} 不符（差 ${fmt$(Math.abs(total - expected))}），可能 calculator 之後又重算過</div>` : ''}
+    `;
+  } catch (e) {
+    container.innerHTML = `<div style="color:#F87171;font-size:12px;padding:6px 0">載入失敗：${escHtml(e.message)}</div>`;
+    detailsEl.dataset.loaded = '0'; // 失敗後允許關閉再展開重試
+  }
+}
+
 function render(r){
   const wrap = document.getElementById('content');
   if (!r) {
@@ -219,9 +260,10 @@ function render(r){
         </details>` : ''}
 
       ${n0(r.comp_expiry_payout) > 0 ? `
-        <details>
+        <details ontoggle="loadCompExpirySelf(this, '${r.employee_id}', ${r.year}, ${r.month}, ${n0(r.comp_expiry_payout)})">
           <summary>補休失效轉錢明細(${fmt$(r.comp_expiry_payout)})</summary>
-          <div>補休額度過期未用的部分自動轉為加班費（時薪 × 剩餘時數 × 1.34 倍）。本欄為本月所有失效轉換的合計。</div>
+          <div class="comp-expiry-lines"><div style="color:rgba(255,255,255,.45);font-size:12px;padding:6px 0">點上方標題展開查看逐筆…</div></div>
+          <div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,.4)">說明：補休額度過期未用的部分自動轉為加班費（時薪 × 剩餘時數 × 1.34 倍）。</div>
         </details>` : ''}
 
       ${n0(r.settlement_amount) > 0 ? `

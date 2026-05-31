@@ -148,6 +148,93 @@ describe('SalaryBreakdown.buildSalaryBreakdown', () => {
     expect(SB.DEDUCT_FIELDS[DEDUCT_LAST_IDX()].key).toBe('deduct_other');
   });
 
+  // ── buildCompExpiryLines ─────────────────────────────
+  // 對齊 /api/comp-time?view=expiry 回傳的 records shape;確認 Σ payout 等於
+  // 該員工該月 salary_records.comp_expiry_payout、hourly 反推正確。
+
+  function makeCompRecord({ id, remain, payout, expires_at, processed_at, src_ot }) {
+    return {
+      id,
+      earned_hours: remain,
+      used_hours:   0,
+      remaining_hours: remain,
+      expires_at,
+      expiry_processed_at: processed_at,
+      expiry_payout_amount: payout,
+      status: 'expired_paid',
+      source_overtime_request_id: src_ot,
+    };
+  }
+
+  it('buildCompExpiryLines:洪千雅 5月真實案例 — 1 筆 58.5h × 125 × 1.34 = 9798.75', () => {
+    const records = [
+      makeCompRecord({ id: 36, remain: 58.5, payout: 9798.75,
+        expires_at: '2026-04-30', processed_at: '2026-04-30T17:00:40+00', src_ot: null }),
+    ];
+    const r = SB.buildCompExpiryLines(records);
+    expect(r.lines.length).toBe(1);
+    expect(r.lines[0].payout).toBe(9798.75);
+    // hourly 反推 = 9798.75 / (58.5 × 1.34) = 125 整
+    expect(r.lines[0].sub).toContain('剩餘 58.5h');
+    expect(r.lines[0].sub).toContain('時薪 125');
+    expect(r.lines[0].sub).toContain('1.34 倍');
+    expect(r.lines[0].label).toBe('補休 #36');  // src_ot=null → 不附加班單號
+    expect(Math.abs(r.total - 9798.75)).toBeLessThan(0.01);
+  });
+
+  it('buildCompExpiryLines:邱子于 5月案例 — Σ payout === comp_expiry_payout', () => {
+    const records = [
+      makeCompRecord({ id: 45, remain: 67, payout: 11222.50,
+        expires_at: '2026-04-30', processed_at: '2026-04-30T17:00:40+00', src_ot: null }),
+    ];
+    const r = SB.buildCompExpiryLines(records);
+    expect(Math.abs(r.total - 11222.50)).toBeLessThan(0.01);
+    expect(r.lines[0].sub).toContain('時薪 125');
+  });
+
+  it('buildCompExpiryLines:多筆對應同月、Σ 對得上總額', () => {
+    const records = [
+      makeCompRecord({ id: 1, remain: 10, payout: 1675,
+        expires_at: '2026-05-10', processed_at: '2026-05-11T01:00:00+08', src_ot: 100 }),
+      makeCompRecord({ id: 2, remain: 5, payout: 837.5,
+        expires_at: '2026-05-20', processed_at: '2026-05-21T01:00:00+08', src_ot: 101 }),
+    ];
+    const r = SB.buildCompExpiryLines(records);
+    expect(r.lines.length).toBe(2);
+    expect(Math.abs(r.total - 2512.5)).toBeLessThan(0.01);
+    // src_ot 有值 → label 附加班單號
+    expect(r.lines[0].label).toContain('來自加班單 #100');
+    expect(r.lines[1].label).toContain('來自加班單 #101');
+  });
+
+  it('buildCompExpiryLines:remaining_hours=0 → hourly=0 不爆 / payout 視為 0', () => {
+    const records = [
+      makeCompRecord({ id: 99, remain: 0, payout: 0,
+        expires_at: '2026-05-30', processed_at: '2026-05-31T01:00:00+08', src_ot: null }),
+    ];
+    const r = SB.buildCompExpiryLines(records);
+    expect(r.total).toBe(0);
+    expect(r.lines[0].sub).toContain('時薪 0');
+  });
+
+  it('buildCompExpiryLines:null/undefined records 不爆、回空陣列', () => {
+    const r1 = SB.buildCompExpiryLines(null);
+    expect(r1.lines).toEqual([]);
+    expect(r1.total).toBe(0);
+    const r2 = SB.buildCompExpiryLines(undefined);
+    expect(r2.lines).toEqual([]);
+  });
+
+  it('buildCompExpiryLines:meta 顯示「expires_at 到期 · processed 處理」', () => {
+    const records = [
+      makeCompRecord({ id: 54, remain: 8, payout: 1340,
+        expires_at: '2026-05-13', processed_at: '2026-05-26T00:38:32+08', src_ot: null }),
+    ];
+    const r = SB.buildCompExpiryLines(records);
+    expect(r.lines[0].meta).toContain('2026-05-13 到期');
+    expect(r.lines[0].meta).toContain('2026-05-26 處理');
+  });
+
   it('不納入 audit/狀態/snapshot 欄位', () => {
     const f = makeNormal();
     f.admin_audit_note = '不該出現';
