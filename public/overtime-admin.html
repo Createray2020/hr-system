@@ -285,7 +285,9 @@ function renderRequests(){
 }
 
 function openLimit(id){
-  const cur = id ? allLimits.find(l => l.id === id) : null;
+  // L288 type-mismatch fix:overtime_limits.id 是 BIGSERIAL(number)、onclick 串進來會被字串化,
+  // 用 String()===String() 防 strict equality 靜默失敗。沒 silent return 在後、不加 toast。
+  const cur = id ? allLimits.find(l => String(l.id) === String(id)) : null;
   document.getElementById('lim-title').textContent = cur ? '編輯上限' : '新增上限';
   document.getElementById('l-id').value = cur?.id || '';
   document.getElementById('l-scope').value = cur?.scope || 'company';
@@ -354,8 +356,10 @@ async function deleteLimit(){
 // ───── P5.2 Admin Edit overtime request ─────
 
 function openRequestEdit(id) {
-  const r = allRequests.find(x => x.id === id);
-  if (!r) return;
+  // L357 type-mismatch fix:overtime_requests.id 是 BIGSERIAL(number)、onclick 串進來會被字串化,
+  // 用 String()===String() 防 strict equality 靜默失敗;找不到時補 toast 提示(原本是靜默 return)。
+  const r = allRequests.find(x => String(x.id) === String(id));
+  if (!r) { toast('找不到加班單', 'error'); return; }
   const emp = empMap[r.employee_id] || {};
   document.getElementById('r-id').value = r.id;
   document.getElementById('r-meta').textContent = `${emp.name||r.employee_id} · ${r.overtime_date} · 目前 estimated_pay=$${r.estimated_pay ?? '—'}`;
@@ -374,8 +378,10 @@ function closeRequestEdit() {
 async function saveRequestEdit() {
   const id = document.getElementById('r-id').value;
   if (!id) return;
-  const existing = allRequests.find(x => x.id === id);
-  if (!existing) return;
+  // L377 type-mismatch fix:r-id input value 一定是 string、allRequests[i].id 是 number,
+  // 同款 String()===String() 修法;找不到時補 toast(原本靜默 return → 編輯儲存無回饋)。
+  const existing = allRequests.find(x => String(x.id) === String(id));
+  if (!existing) { toast('找不到加班單', 'error'); return; }
 
   const newHours = parseFloat(document.getElementById('r-hours').value);
   const newCompType = document.getElementById('r-comp-type').value;
