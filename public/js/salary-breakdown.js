@@ -80,6 +80,13 @@
         item.note = String(sal.deduct_other_note);
         item.label = `${f.label}（${item.note}）`;
       }
+      // 勞健保 label 後附投保薪資 snapshot(salary_records.insured_salary_*_snapshot)
+      if (f.key === 'deduct_labor_ins' && n(sal.insured_salary_labor_snapshot) > 0) {
+        item.label = `${item.label}（投保 ${n(sal.insured_salary_labor_snapshot).toLocaleString('zh-TW')}）`;
+      }
+      if (f.key === 'deduct_health_ins' && n(sal.insured_salary_health_snapshot) > 0) {
+        item.label = `${item.label}（投保 ${n(sal.insured_salary_health_snapshot).toLocaleString('zh-TW')}）`;
+      }
       return item;
     });
 

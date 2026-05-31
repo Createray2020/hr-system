@@ -128,6 +128,36 @@ describe('SalaryBreakdown.buildSalaryBreakdown', () => {
     expect(item.note).toBe('5月借支');
   });
 
+  it('勞健保 label 附投保薪資 snapshot(洪千雅實際:42,000)', () => {
+    const f = makeNormal();
+    f.insured_salary_labor_snapshot  = 42000;
+    f.insured_salary_health_snapshot = 42000;
+    f.deduct_labor_ins  = 756;
+    f.deduct_health_ins = 590;
+    const r = SB.buildSalaryBreakdown(f);
+    const labor  = r.deductItems.find(it => it.key === 'deduct_labor_ins');
+    const health = r.deductItems.find(it => it.key === 'deduct_health_ins');
+    expect(labor).toBeTruthy();
+    expect(labor.label).toContain('投保');
+    expect(labor.label).toContain('42,000');
+    expect(labor.value).toBe(756);
+    expect(health).toBeTruthy();
+    expect(health.label).toContain('投保');
+    expect(health.label).toContain('42,000');
+    expect(health.value).toBe(590);
+  });
+
+  it('未投保(snapshot=0 / 扣項=0):勞健保整行被 filter,不出現「投保 0」', () => {
+    const f = makeNormal();
+    f.insured_salary_labor_snapshot  = 0;
+    f.insured_salary_health_snapshot = 0;
+    f.deduct_labor_ins  = 0;
+    f.deduct_health_ins = 0;
+    const r = SB.buildSalaryBreakdown(f);
+    expect(r.deductItems.find(it => it.key === 'deduct_labor_ins')).toBeUndefined();
+    expect(r.deductItems.find(it => it.key === 'deduct_health_ins')).toBeUndefined();
+  });
+
   it('null / undefined sal 不炸、回 0 結果', () => {
     const r1 = SB.buildSalaryBreakdown(null);
     expect(r1.grossSubtotal).toBe(0);
