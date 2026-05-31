@@ -12,6 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/salary-breakdown.js"></script>
 <style>
   /* ── Mobile shell（沿用 employee-leave.html pattern）── */
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -158,8 +159,29 @@ function render(r){
   }
 
   const month = `${r.year}/${String(r.month).padStart(2,'0')}`;
-  const allowanceTotal = n0(r.allowance) + n0(r.extra_allowance);
   const overtimeTotal  = n0(r.overtime_pay_auto) + n0(r.overtime_pay_manual);
+
+  // 共用 helper:回 grossItems / deductItems(已濾 0)+ 各 subtotal + net
+  // 含 grade/manager 加給、4 bonus、7 擴充扣除等原本前端漏顯示的欄位
+  const SB = window.SalaryBreakdown;
+  const { grossItems, grossSubtotal, deductItems, deductSubtotal, net } = SB.buildSalaryBreakdown(r);
+
+  // 全勤獎金加 deduction_rate 後綴(employee-salary 專屬細節、不進共用 helper)
+  const grossItemsAug = grossItems.map(it => {
+    if (it.key === 'attendance_bonus_actual') {
+      const pct = (n0(r.attendance_bonus_deduction_rate) * 100).toFixed(1);
+      return { ...it, label: `${it.label}（扣 ${pct}% 後）` };
+    }
+    return it;
+  });
+
+  // 曠職扣款附明細(天數 × 日薪、HR 客觀資訊)
+  const deductItemsAug = deductItems.map(it => {
+    if (it.key === 'deduct_absence' && n0(r.absence_days) > 0) {
+      return { ...it, label: `${it.label}（${r.absence_days} 天 × 日薪 ${fmt$(r.daily_wage_snapshot)}）` };
+    }
+    return it;
+  });
 
   wrap.innerHTML = `
     <div class="slip">
@@ -177,24 +199,18 @@ function render(r){
       </div>
 
       <div class="slip-row head"><div>收入項目</div><div class="v">金額</div></div>
-      <div class="slip-row"><div>底薪</div><div class="v pos">+ ${fmt$(r.base_salary)}</div></div>
-      <div class="slip-row"><div>全勤獎金 (扣 ${(n0(r.attendance_bonus_deduction_rate)*100).toFixed(1)}% 後)</div><div class="v pos">+ ${fmt$(r.attendance_bonus_actual)}</div></div>
-      <div class="slip-row"><div>津貼 + 額外津貼</div><div class="v pos">+ ${fmt$(allowanceTotal)}</div></div>
-      <div class="slip-row"><div>加班費</div><div class="v pos">+ ${fmt$(overtimeTotal)}</div></div>
-      <div class="slip-row"><div>補休失效轉錢</div><div class="v pos">+ ${fmt$(r.comp_expiry_payout)}</div></div>
-      <div class="slip-row"><div>假日工作加給</div><div class="v pos">+ ${fmt$(r.holiday_work_pay)}</div></div>
-      <div class="slip-row"><div>結算金額</div><div class="v pos">+ ${fmt$(r.settlement_amount)}</div></div>
+      ${grossItemsAug.length
+        ? grossItemsAug.map(it => `<div class="slip-row"><div>${escHtml(it.label)}</div><div class="v pos">+ ${fmt$(it.value)}</div></div>`).join('')
+        : '<div class="slip-row"><div style="color:rgba(255,255,255,.45)">無</div><div class="v">—</div></div>'}
 
-      <div class="slip-row total"><div>應發合計</div><div class="v">${fmt$(r.gross_salary)}</div></div>
+      <div class="slip-row total"><div>應發合計</div><div class="v">${fmt$(grossSubtotal)}</div></div>
 
       <div class="slip-row head" style="margin-top:14px"><div>扣除項目</div><div class="v">金額</div></div>
-      <div class="slip-row"><div>曠職扣款 (${r.absence_days || 0} 天 × 日薪 ${fmt$(r.daily_wage_snapshot)})</div><div class="v neg">- ${fmt$(r.deduct_absence)}</div></div>
-      <div class="slip-row"><div>勞保自付</div><div class="v neg">- ${fmt$(r.deduct_labor_ins)}</div></div>
-      <div class="slip-row"><div>健保自付</div><div class="v neg">- ${fmt$(r.deduct_health_ins)}</div></div>
-      <div class="slip-row"><div>所得稅</div><div class="v neg">- ${fmt$(r.deduct_tax)}</div></div>
-      <div class="slip-row"><div>出勤懲處</div><div class="v neg">- ${fmt$(r.attendance_penalty_total)}</div></div>
+      ${deductItemsAug.length
+        ? deductItemsAug.map(it => `<div class="slip-row"><div>${escHtml(it.label)}</div><div class="v neg">- ${fmt$(it.value)}</div></div>`).join('')
+        : '<div class="slip-row"><div style="color:rgba(255,255,255,.45)">本月無扣項</div><div class="v">—</div></div>'}
 
-      <div class="slip-row total" style="color:#4ADE80"><div>實發合計</div><div class="v">${fmt$(r.net_salary)}</div></div>
+      <div class="slip-row total" style="color:#4ADE80"><div>實發合計</div><div class="v">${fmt$(net)}</div></div>
 
       ${overtimeTotal > 0 ? `
         <details>
