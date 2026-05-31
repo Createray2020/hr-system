@@ -637,7 +637,7 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
     expect(r.deduct_tax).toBe(0);
   });
 
-  it('有投保 + 月薪超過免稅額 → deduct_tax = (taxable - 88500) × 6%', async () => {
+  it('2025/有投保/月薪超過 88500 免稅額 → deduct_tax = (taxable - 88500) × 6%', async () => {
     const repo = makeFullRepo({
       findEmployeeForSalary: vi.fn(async () => ({
         id:'E001', base_salary: 100000, attendance_bonus: 0,
@@ -650,14 +650,15 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
         health_ins_dependents: 0,
       })),
     });
-    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    // 2025 年沿用 TW_2025_DEFAULTS:base=88500
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2025, month:4 });
     const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // taxable = 100000、(100000 - 88500) × 0.06 = 690
     expect(r.deduct_tax).toBe(690);
     expect(r.deduct_tax_manual_override).toBe(false);
   });
 
-  it('扶養 1 人 → 免稅額加倍、deduct_tax 降低', async () => {
+  it('2025/扶養 1 人 → 免稅額加倍、deduct_tax 降低', async () => {
     const repo = makeFullRepo({
       findEmployeeForSalary: vi.fn(async () => ({
         id:'E001', base_salary: 200000, attendance_bonus: 0,
@@ -670,10 +671,43 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
         health_ins_dependents: 1,
       })),
     });
-    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2025, month:4 });
     const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     // taxable = 200000、(200000 - 88500 - 88500) × 0.06 = 23000 × 0.06 = 1380
     expect(r.deduct_tax).toBe(1380);
+  });
+
+  it('2026/Ray case:無 insurance / gross 90,000 / 起扣 90501 → deduct_tax = 0', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id:'E_RAY', base_salary: 30000, attendance_bonus: 0,
+      })),
+      // 無 insurance row → calculator 視為 hasInsurance=false、勞健保 + dependentCount 全 0
+      findEmployeeInsuranceSettings: vi.fn(async () => null),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E_RAY', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // 2026 起 base=90501;taxable_income_snapshot 來自 base_salary 30000 → < 90501 → 0
+    expect(r.deduct_tax).toBe(0);
+    expect(r.deduct_tax_manual_override).toBe(false);
+  });
+
+  it('2026/有投保/taxable 100000 起扣 90501 →(100000-90501)×6% = 570(對照 2025=690)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id:'E001', base_salary: 100000, attendance_bonus: 0,
+      })),
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        pension_wage: 100000, pension_voluntary_rate: 0,
+        labor_ins_bracket: 50000, labor_ins_company: 0,
+        health_ins_bracket: 50000, health_ins_company: 0,
+        health_ins_dependents: 0,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(r.deduct_tax).toBe(570);
   });
 
   it('manual override = true → 保留 existing.deduct_tax、不被 calculator 覆蓋', async () => {

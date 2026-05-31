@@ -4,6 +4,9 @@ import {
   calculateTaxByTable,
   calculateWithholding,
   TW_2024_WITHHOLDING_DEFAULTS,
+  TW_2025_WITHHOLDING_DEFAULTS,
+  TW_2026_WITHHOLDING_DEFAULTS,
+  getWithholdingDefaults,
 } from '../lib/salary/tax-withholding.js';
 
 const W = TW_2024_WITHHOLDING_DEFAULTS;
@@ -175,5 +178,65 @@ describe('TW_2024_WITHHOLDING_DEFAULTS', () => {
     expect(W).toHaveProperty('taxFreeAllowanceBase', 88500);
     expect(W).toHaveProperty('taxFreeAllowancePerDep', 88500);
     expect(W).toHaveProperty('rate', 0.06);
+  });
+});
+
+describe('TW_2026_WITHHOLDING_DEFAULTS', () => {
+  it('凍結、base=90501、perDep=88500、rate=6%', () => {
+    expect(Object.isFrozen(TW_2026_WITHHOLDING_DEFAULTS)).toBe(true);
+    expect(TW_2026_WITHHOLDING_DEFAULTS).toEqual({
+      taxFreeAllowanceBase:    90501,
+      taxFreeAllowancePerDep:  88500,
+      rate:                    0.06,
+    });
+  });
+});
+
+describe('getWithholdingDefaults', () => {
+  it('2024 → TW_2024(base=88500)', () => {
+    expect(getWithholdingDefaults(2024)).toBe(TW_2024_WITHHOLDING_DEFAULTS);
+    expect(getWithholdingDefaults(2024).taxFreeAllowanceBase).toBe(88500);
+  });
+
+  it('2025 → TW_2025(base=88500)', () => {
+    expect(getWithholdingDefaults(2025)).toBe(TW_2025_WITHHOLDING_DEFAULTS);
+    expect(getWithholdingDefaults(2025).taxFreeAllowanceBase).toBe(88500);
+  });
+
+  it('2026 → TW_2026(base=90501)', () => {
+    expect(getWithholdingDefaults(2026)).toBe(TW_2026_WITHHOLDING_DEFAULTS);
+    expect(getWithholdingDefaults(2026).taxFreeAllowanceBase).toBe(90501);
+  });
+
+  it('2027(未定義)→ 沿用 2026 最新一筆(base=90501)', () => {
+    expect(getWithholdingDefaults(2027)).toBe(TW_2026_WITHHOLDING_DEFAULTS);
+    expect(getWithholdingDefaults(2030).taxFreeAllowanceBase).toBe(90501);
+  });
+
+  it('2023(早於所有定義年度)→ 回最早 2024', () => {
+    expect(getWithholdingDefaults(2023)).toBe(TW_2024_WITHHOLDING_DEFAULTS);
+    expect(getWithholdingDefaults(2023).taxFreeAllowanceBase).toBe(88500);
+  });
+
+  it('null / undefined / NaN → fallback 最新', () => {
+    expect(getWithholdingDefaults(null)).toBe(TW_2026_WITHHOLDING_DEFAULTS);
+    expect(getWithholdingDefaults(undefined)).toBe(TW_2026_WITHHOLDING_DEFAULTS);
+    expect(getWithholdingDefaults(NaN)).toBe(TW_2026_WITHHOLDING_DEFAULTS);
+  });
+});
+
+describe('公式法 + 2026 常數(0 扶養)', () => {
+  const W26 = TW_2026_WITHHOLDING_DEFAULTS;
+  it('稅基 90,000(≤ 90501)→ 0', () => {
+    expect(calculateTaxByFormula({ monthlyPayment: 90000, ...W26 })).toBe(0);
+  });
+  it('稅基 90,501(剛好 = 免稅額)→ 0', () => {
+    expect(calculateTaxByFormula({ monthlyPayment: 90501, ...W26 })).toBe(0);
+  });
+  it('稅基 91,000 →(91000−90501)×6% = round(29.94) = 30', () => {
+    expect(calculateTaxByFormula({ monthlyPayment: 91000, ...W26 })).toBe(30);
+  });
+  it('稅基 100,000 →(100000−90501)×6% = round(569.94) = 570', () => {
+    expect(calculateTaxByFormula({ monthlyPayment: 100000, ...W26 })).toBe(570);
   });
 });
