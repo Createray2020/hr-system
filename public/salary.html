@@ -12,6 +12,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="/js/salary-breakdown.js"></script>
 <style>
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:right;vertical-align:middle}
@@ -217,8 +218,8 @@ function render(){
     return;
   }
   tbody.innerHTML = rows.map(r => `
-    <tr>
-      <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div>${r.is_final_month ? '<span class="pill" style="margin-top:3px;display:inline-block;background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)">✦ 離職月</span>' : ''}</td>
+    <tr data-row-id="${escHtml(r.id)}" data-detail-open="0" style="cursor:pointer" onclick="toggleDetailRow(event, '${escHtml(r.id)}')" title="點任一格(除按鈕外)展開完整明細">
+      <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div>${r.is_final_month ? '<span class="pill" style="margin-top:3px;display:inline-block;background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)">✦ 離職月</span>' : ''}<span class="detail-caret" id="caret-${escHtml(r.id)}" style="margin-left:6px;color:var(--text-dim);font-size:11px">▸</span></td>
       <td class="num">${fmt$(r.base_salary)}${r.is_final_month && r.prorata_base != null ? `<div style="font-size:10px;color:#F87171;font-family:'DM Mono',monospace">→ ${fmt$(r.prorata_base)}</div>` : ''}</td>
       <td class="num auto-cell">${fmt$(r.attendance_bonus_actual)}</td>
       <td class="num auto-cell">${fmt$(r.overtime_pay_auto)}</td>
@@ -234,8 +235,8 @@ function render(){
       <td class="num auto-cell">${fmt$(r.attendance_penalty_total)}</td>
       <td class="num gen-cell">${fmt$(r.gross_salary)}</td>
       <td class="num gen-cell">${fmt$(r.net_salary)}</td>
-      <td><span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
-      <td style="white-space:nowrap">
+      <td onclick="event.stopPropagation()"><span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+      <td style="white-space:nowrap" onclick="event.stopPropagation()">
         <button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(r.id)}')">編輯</button>
         <a href="/payslip.html?employee_id=${encodeURIComponent(r.employee_id)}&year=${r.year}&month=${r.month}"
            target="_blank"
@@ -246,6 +247,71 @@ function render(){
     </tr>
   `).join('');
   renderSummary(rows);
+}
+
+// ── 展開明細列(共用 SalaryBreakdown helper、純讀 / 不動編輯 modal)──
+// 點任一筆 row(避開狀態 cell 與操作按鈕、已 stopPropagation)→ 在該列下方插一條
+// detail <tr> colspan 跨滿表格,內容是「應發明細表 → 應發小計 → 扣除明細表 →
+// 扣除小計 → 實發」,純顯示、不可編輯;再點一次收合。
+// 同時可多列展開、互不影響。
+function toggleDetailRow(event, rowId) {
+  const tr = event.currentTarget;
+  if (!tr || tr.tagName !== 'TR') return;
+  const caret = document.getElementById('caret-' + rowId);
+  const detailId = 'detail-' + rowId;
+  const existing = document.getElementById(detailId);
+  if (existing) {
+    existing.remove();
+    tr.dataset.detailOpen = '0';
+    if (caret) caret.textContent = '▸';
+    return;
+  }
+  const r = allRows.find(x => x.id === rowId);
+  if (!r) return;
+  const detailTr = document.createElement('tr');
+  detailTr.id = detailId;
+  detailTr.className = 'detail-row';
+  detailTr.innerHTML = `
+    <td colspan="18" style="padding:14px 18px;background:rgba(0,0,0,.18);border-bottom:1px solid rgba(255,255,255,.08);text-align:left">
+      ${renderDetailContent(r)}
+    </td>`;
+  tr.after(detailTr);
+  tr.dataset.detailOpen = '1';
+  if (caret) caret.textContent = '▾';
+}
+
+function renderDetailContent(r) {
+  const SB = window.SalaryBreakdown;
+  if (!SB) return '<div style="color:#F87171">SalaryBreakdown 未載入</div>';
+  const { grossItems, grossSubtotal, deductItems, deductSubtotal, net } = SB.buildSalaryBreakdown(r);
+  const cellRow = (label, value, neg) => `
+    <div style="display:grid;grid-template-columns:1fr 110px;padding:4px 0;border-bottom:0.5px solid rgba(255,255,255,.04);font-size:12px">
+      <div style="color:var(--text-dim)">${escHtml(label)}</div>
+      <div class="num" style="text-align:right;color:${neg ? '#F87171' : '#4ADE80'}">${neg ? '−' : '+'} ${fmt$(value)}</div>
+    </div>`;
+  const subtotalRow = (label, value, color) => `
+    <div style="display:grid;grid-template-columns:1fr 110px;padding:6px 0;margin-top:4px;border-top:1px solid rgba(255,255,255,.12);font-size:13px;font-weight:600">
+      <div>${escHtml(label)}</div>
+      <div class="num" style="text-align:right;color:${color}">${fmt$(value)}</div>
+    </div>`;
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:900px">
+      <div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">應發明細 (${grossItems.length} 項非 0)</div>
+        ${grossItems.length ? grossItems.map(it => cellRow(it.label, it.value, false)).join('') : '<div style="color:var(--text-dim);font-size:12px;padding:8px 0">無</div>'}
+        ${subtotalRow('應發小計', grossSubtotal, '#7FBBFF')}
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">扣除明細 (${deductItems.length} 項非 0)</div>
+        ${deductItems.length ? deductItems.map(it => cellRow(it.label, it.value, true)).join('') : '<div style="color:var(--text-dim);font-size:12px;padding:8px 0">本月無扣項</div>'}
+        ${subtotalRow('扣除小計', deductSubtotal, '#F87171')}
+        ${subtotalRow('實發', net, '#4ADE80')}
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--text-dim);text-align:right">
+      共用 helper: SalaryBreakdown.buildSalaryBreakdown() | 對齊 net_salary GENERATED 公式 | 純顯示,如要編輯請按「編輯」鈕
+    </div>
+  `;
 }
 
 // 表格底部 SUM 合計列、欄位順序對齊 thead 18 欄。
