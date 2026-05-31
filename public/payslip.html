@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>薪資單</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/js/salary-breakdown.js"></script>
   <style>
     /* 螢幕樣式:對齊既有 admin page、有 sidebar 影響 */
     body { font-family: -apple-system, "Noto Sans TC", sans-serif; margin: 0; background:#1F2937; color:#E5E7EB; }
@@ -68,36 +69,16 @@
   function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   function render(emp, sal) {
-    const grossItems = [
-      { label: '本薪', value: sal.base_salary },
-      { label: '全勤獎金', value: sal.attendance_bonus_actual },
-      { label: '加給(系統)', value: sal.allowance },
-      { label: '加給(額外)', value: sal.extra_allowance },
-      { label: '加班費(自動)', value: sal.overtime_pay_auto },
-      { label: '加班費(手動)', value: sal.overtime_pay_manual },
-      { label: '假日工資', value: sal.holiday_work_pay },
-      { label: '補休結算', value: sal.comp_expiry_payout },
-      { label: '特休結算', value: sal.settlement_amount },
-      { label: '年終獎金', value: sal.bonus_yearend },
-      { label: '三節獎金', value: sal.bonus_festival },
-      { label: '績效獎金', value: sal.bonus_performance },
-      { label: '其他獎金' + (sal.bonus_other_note ? `(${sal.bonus_other_note})` : ''), value: sal.bonus_other },
-    ].filter(item => n(item.value) !== 0);
+    // 改用共用 helper(public/js/salary-breakdown.js):欄位順序、label、prorata 邏輯、null 防呆都在 helper
+    const { grossItems, deductItems } = window.SalaryBreakdown.buildSalaryBreakdown(sal);
 
-    const deductItems = [
-      { label: '曠職扣薪', value: sal.deduct_absence },
-      { label: '出勤罰款', value: sal.attendance_penalty_total },
-      { label: '勞保', value: sal.deduct_labor_ins },
-      { label: '健保', value: sal.deduct_health_ins },
-      { label: '所得稅' + (sal.deduct_tax_manual_override ? '(HR 鎖定)' : ''), value: sal.deduct_tax },
-      { label: '勞退自願提繳', value: sal.deduct_pension_voluntary },
-      { label: '二代健保補充保費', value: sal.deduct_supplementary_health },
-      { label: '職工福利金', value: sal.deduct_welfare_fund },
-      { label: '工會會費', value: sal.deduct_union_fee },
-      { label: '法院扣押', value: sal.deduct_court_garnishment },
-      { label: '借支扣還', value: sal.deduct_loan_repayment },
-      { label: '其他扣款' + (sal.deduct_other_note ? `(${sal.deduct_other_note})` : ''), value: sal.deduct_other },
-    ].filter(item => n(item.value) !== 0);
+    // 局部 augment:所得稅鎖定圖示(payslip 專屬細節、不進共用 helper)
+    const deductItemsAugmented = deductItems.map(it => {
+      if (it.key === 'deduct_tax' && sal.deduct_tax_manual_override) {
+        return { ...it, label: it.label + '（HR 鎖定）' };
+      }
+      return it;
+    });
 
     document.getElementById('payslip-content').innerHTML = `
       <div class="payslip-header">
@@ -125,7 +106,7 @@
       <div class="payslip-section">
         <h3>扣除項目</h3>
         <table class="payslip-table">
-          ${deductItems.length > 0 ? deductItems.map(item => `
+          ${deductItemsAugmented.length > 0 ? deductItemsAugmented.map(item => `
             <tr><td class="label">${escapeHtml(item.label)}</td><td class="num">−${fmt(item.value)}</td></tr>
           `).join('') : '<tr><td class="muted" colspan="2">本月無扣項</td></tr>'}
         </table>
