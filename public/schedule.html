@@ -17,8 +17,10 @@
   // 把 lib pure functions 暴露給內聯 script 用（schedule.html 是 non-module、需要 window.X）
   import { buildScheduleAOA, daysInMonth } from '/js/schedule/excel-builder.js';
   import { parseScheduleAOA } from '/js/schedule/import-parser.js';
+  import { forceFinalizeAuth, computeForceWindows } from '/js/schedule/finalize-auth.js';
   window.__excelBuilder = { buildScheduleAOA, daysInMonth };
   window.__excelParser  = { parseScheduleAOA };
+  window.ScheduleFinalizeAuth = { forceFinalizeAuth, computeForceWindows };
 </script>
 <style>
   /* C11 week grid styles */
@@ -691,15 +693,28 @@ function render() {
         ['admin', 'chairman'].includes(u.role)
         || (u.is_manager === true && !!u.dept_id && u.dept_id === emp.dept_id)
       );
+    // F4:時間閘門「強制公告」視覺判定(真授權在後端 force-finalize.js)。
+    // client 時間僅視覺;前端拿台北今日字串比 period_start 推的 mgr/ceo 窗。
+    // 注意:force 路徑允許主管定案自己 period(後端 forceFinalizeAuth 無 self 擋),
+    // 否則部門主管自己的 draft 永無解。前端不該再多擋 u.id !== emp.id。
+    const taipeiNow = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+    const fw = (window.ScheduleFinalizeAuth && period)
+      ? window.ScheduleFinalizeAuth.forceFinalizeAuth({
+          caller: u, period, employeeDeptId: emp.dept_id, now: taipeiNow,
+        })
+      : { ok: false };
+    const forceBtn = (fw.ok && period)
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;border:1px solid rgba(248,113,113,.4);color:#F87171" onclick="forceFinalizePeriod('${escHtml(period.id)}')" title="時間閘門已到、強制定案+公告">⏰ 強制定案公告</button>`
+      : '';
     let opHtml = '';
     if (periodStatus === 'submitted') {
       opHtml = canManagePeriod
-        ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="approvePeriod('${escHtml(period.id)}')">定案</button>`
-        : `<span style="font-size:11px;padding:2px 8px;background:rgba(122,133,160,.12);color:var(--text-dim);border-radius:6px" title="只有同部門主管可定案">待主管定案</span>`;
+        ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="approvePeriod('${escHtml(period.id)}')">定案</button>${forceBtn}`
+        : `<span style="font-size:11px;padding:2px 8px;background:rgba(122,133,160,.12);color:var(--text-dim);border-radius:6px" title="只有同部門主管可定案">待主管定案</span>${forceBtn}`;
     } else if (periodStatus === 'approved') {
       opHtml = canManagePeriod
-        ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="publishPeriod('${escHtml(period.id)}')">公告</button>`
-        : `<span style="font-size:11px;padding:2px 8px;background:rgba(122,133,160,.12);color:var(--text-dim);border-radius:6px" title="只有同部門主管可公告">待主管公告</span>`;
+        ? `<button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="publishPeriod('${escHtml(period.id)}')">公告</button>${forceBtn}`
+        : `<span style="font-size:11px;padding:2px 8px;background:rgba(122,133,160,.12);color:var(--text-dim);border-radius:6px" title="只有同部門主管可公告">待主管公告</span>${forceBtn}`;
     } else if (periodStatus === 'published') {
       // F3:有撤回權限 → 顯示「↩ 撤回公告」紅 ghost 按鈕;無權限 → 維持綠「已公告」span
       opHtml = canUnpublish
@@ -709,7 +724,7 @@ function render() {
       // 鎖月後不可撤回(後端 RULES 也擋),維持綠 span 不分權限
       opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已公告</span>`;
     } else if (periodStatus === 'draft') {
-      opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(91,141,239,.15);color:#7FBBFF;border-radius:6px">員工標中</span>`;
+      opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(91,141,239,.15);color:#7FBBFF;border-radius:6px">員工標中</span>${forceBtn}`;
     } else {
       opHtml = `<span style="font-size:11px;color:var(--text-dim)">無排班</span>`;
     }
@@ -1469,6 +1484,19 @@ async function unpublishPeriod(periodId) {
     toast('已撤回公告');
     await load();
   } catch(e) { toast('撤回失敗：' + e.message,'error'); }
+}
+
+// F4:時間閘門「強制定案+公告」(draft/submitted/approved → published 一刀)。
+// 真授權在後端 force-finalize.js;前端按鈕只在 ScheduleFinalizeAuth.forceFinalizeAuth
+// 視覺通過時才顯示,點下去仍會被後端再驗一次(時間 + 角色 + 缺天守門)。
+async function forceFinalizePeriod(periodId) {
+  if (!periodId) return;
+  if (!confirm('強制定案並公告此員工的排班?\n會通知員工、寫入稽核紀錄;不可撤回到 draft。')) return;
+  try {
+    await api(`/api/schedule-periods/${encodeURIComponent(periodId)}/force-finalize`, { method:'POST' });
+    toast('已強制公告');
+    await load();
+  } catch(e) { toast('強制公告失敗：' + e.message,'error'); }
 }
 
 // ═══════════════════════════════════════════════════════════
