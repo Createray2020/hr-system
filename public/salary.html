@@ -220,7 +220,19 @@ function render(){
   tbody.innerHTML = rows.map(r => `
     <tr data-row-id="${escHtml(r.id)}" data-detail-open="0" style="cursor:pointer" onclick="toggleDetailRow(event, '${escHtml(r.id)}')" title="點任一格(除按鈕外)展開完整明細">
       <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div>${r.is_final_month ? '<span class="pill" style="margin-top:3px;display:inline-block;background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)">✦ 離職月</span>' : ''}<span class="detail-caret" id="caret-${escHtml(r.id)}" style="margin-left:6px;color:var(--text-dim);font-size:11px">▸</span></td>
-      <td class="num">${fmt$(r.base_salary)}${r.is_final_month && r.prorata_base != null ? `<div style="font-size:10px;color:#F87171;font-family:'DM Mono',monospace">→ ${fmt$(r.prorata_base)}</div>` : ''}</td>
+      <td class="num">${(() => {
+        // 兼職時薪制(hourly_rate>0 && work_hours>0)→ 主值 prorata_base(=時薪×工時)、下方小字拆解
+        const isHourlyMode = n0(r.hourly_rate) > 0 && n0(r.work_hours) > 0;
+        if (isHourlyMode) {
+          return `${fmt$(r.prorata_base)}<div style="font-size:10px;color:var(--text-dim);font-family:'DM Mono',monospace">時薪 ${fmt$(r.hourly_rate)} × 工時 ${r.work_hours}</div>`;
+        }
+        // 正職離職月(既有邏輯):base + caret → prorata_base
+        if (r.is_final_month && r.prorata_base != null) {
+          return `${fmt$(r.base_salary)}<div style="font-size:10px;color:#F87171;font-family:'DM Mono',monospace">→ ${fmt$(r.prorata_base)}</div>`;
+        }
+        // 正職一般:純 base_salary
+        return fmt$(r.base_salary);
+      })()}</td>
       <td class="num auto-cell">${fmt$(r.attendance_bonus_actual)}</td>
       <td class="num auto-cell">${fmt$(r.overtime_pay_auto)}</td>
       <td class="num manual-cell">${fmt$(r.overtime_pay_manual)}</td>
@@ -379,7 +391,7 @@ function renderSummary(rows){
   tfoot.innerHTML = `
     <tr class="sum-row">
       <td>合計 (${rows.length} 人)</td>
-      <td class="num">${fmt$(sum('base_salary'))}</td>
+      <td class="num">${fmt$(sumExpr(r => Number(r.prorata_base != null ? r.prorata_base : r.base_salary) || 0))}</td>
       <td class="num">${fmt$(sum('attendance_bonus_actual'))}</td>
       <td class="num">${fmt$(sum('overtime_pay_auto'))}</td>
       <td class="num">${fmt$(sum('overtime_pay_manual'))}</td>
@@ -437,8 +449,13 @@ function openEdit(id){
     `${currentRow.year}/${String(currentRow.month).padStart(2,'0')} · 狀態 ${currentRow.status}${finalMonthBadge}${proRataInfo}`;
 
   // Auto fields(唯讀)
+  // 兼職時薪制:底薪行改顯「時薪 × 工時 = prorata_base」拆解、不顯示 base=0
+  const _isHourly = n0(currentRow.hourly_rate) > 0 && n0(currentRow.work_hours) > 0;
+  const baseLine = _isHourly
+    ? `<div>底薪:<span class="num">時薪 ${fmt$(currentRow.hourly_rate)} × 工時 ${currentRow.work_hours} = <b>${fmt$(currentRow.prorata_base)}</b></span></div>`
+    : `<div>底薪:<span class="num">${fmt$(currentRow.base_salary)}</span></div>`;
   document.getElementById('auto-fields').innerHTML = `
-    <div>底薪:<span class="num">${fmt$(currentRow.base_salary)}</span></div>
+    ${baseLine}
     <div>日薪 snapshot:<span class="num">${fmt$(currentRow.daily_wage_snapshot)}</span></div>
     <div>全勤 base:<span class="num">${fmt$(currentRow.attendance_bonus_base)}</span></div>
     <div>全勤扣比:<span class="num">${(n0(currentRow.attendance_bonus_deduction_rate)*100).toFixed(1)}%</span></div>
