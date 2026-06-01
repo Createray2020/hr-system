@@ -293,6 +293,45 @@ const STATUS_LABELS = { pending:'待審核', in_progress:'審核中', completed:
 const STATUS_CLS    = { pending:'badge-pending', in_progress:'badge-in_progress', completed:'badge-completed', rejected:'badge-rejected', cancelled:'badge-cancelled', draft:'badge-cancelled' };
 const CAT_ICONS     = { 人事:'🧑‍💼', 出勤:'⏱️', 財務:'💰', 採購:'🛒', 行政:'📋' };
 
+// ── Feature A:附件功能(複用 leave-attachments bucket、對齊 employee-leave.html 上傳 pattern)──
+const ATTACHMENT_EXTS = ['pdf','xlsx','xls','docx','doc','png','jpg','jpeg','gif','webp'];
+const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+const ATTACHMENT_MAX_COUNT = 10;
+let pendingAttachments = [];  // 送單表單暫存:上傳完成的附件 metadata 陣列
+
+function _esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function _safeFilename(name) {
+  return String(name).replace(/[\/\\"']/g, '_').slice(0, 120);
+}
+async function uploadApprovalAttachment(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (!ATTACHMENT_EXTS.includes(ext)) {
+    throw new Error(`不支援的檔案類型:${file.name}(僅接受 PDF/Excel/Word/圖片)`);
+  }
+  if (file.size > ATTACHMENT_MAX_BYTES) {
+    throw new Error(`檔案過大:${file.name}(上限 10MB)`);
+  }
+  const uid = window.currentUser?.id;
+  if (!uid) throw new Error('使用者未載入、無法上傳');
+  const safeName = _safeFilename(file.name);
+  const path = `${uid}/${Date.now()}_${safeName}`;
+  const sb = window._supabase;
+  if (!sb) throw new Error('Storage client 未載入');
+  const { error: upErr } = await sb.storage
+    .from('leave-attachments').upload(path, file, { upsert: true });
+  if (upErr) throw new Error(`${file.name}:${upErr.message}`);
+  return {
+    path,
+    name: file.name,
+    mime: file.type || null,
+    size: file.size,
+    uploaded_at: new Date().toISOString(),
+    uploaded_by: uid,
+  };
+}
+
 // ── 「我的申請」三段摺疊分類 ──
 const MINE_PENDING_STATUSES = new Set(['pending', 'in_progress']);
 const MINE_DRAFT_STATUSES   = new Set(['draft']);
@@ -742,8 +781,63 @@ function selectType(requestType) {
 
   html += `<div class="form-row"><label class="form-label">備注（選填）</label><textarea class="form-input" id="ff-note" rows="2" placeholder="補充說明…"></textarea></div>`;
 
+  // Feature A:夾帶附件(可多檔、複用 leave-attachments bucket)
+  html += `<div class="form-row">
+    <label class="form-label">夾帶附件（PDF/Excel/Word/圖片，單檔≤10MB、最多 ${ATTACHMENT_MAX_COUNT} 檔）</label>
+    <input type="file" class="form-input" id="ff-attachments" multiple
+           accept=".pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg,.gif,.webp"
+           onchange="onAttachmentPick(this)">
+    <div id="ff-attachments-preview" style="font-size:11px;color:var(--text-dim);margin-top:6px"></div>
+  </div>`;
+
+  // 重置 pending(避免上次未送出的殘留)
+  pendingAttachments = [];
+
   document.getElementById('form-body').innerHTML = html;
   document.getElementById('new-form-modal').classList.add('open');
+}
+
+// Feature A:選檔 → 逐檔上傳 → 顯示已選清單;上傳期間 disable 送出鈕
+async function onAttachmentPick(input) {
+  const preview = document.getElementById('ff-attachments-preview');
+  const submitBtn = document.querySelector('#new-form-modal .btn-primary');
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  if (pendingAttachments.length + files.length > ATTACHMENT_MAX_COUNT) {
+    toast(`一次最多 ${ATTACHMENT_MAX_COUNT} 檔`, 'warn');
+    input.value = '';
+    return;
+  }
+  if (submitBtn) submitBtn.disabled = true;
+  if (preview) preview.innerHTML = '上傳中…';
+  try {
+    for (const f of files) {
+      const meta = await uploadApprovalAttachment(f);
+      pendingAttachments.push(meta);
+    }
+  } catch (e) {
+    alert(`上傳失敗:${e.message}`);
+  } finally {
+    renderAttachmentPreview();
+    if (submitBtn) submitBtn.disabled = false;
+    input.value = '';
+  }
+}
+
+function renderAttachmentPreview() {
+  const preview = document.getElementById('ff-attachments-preview');
+  if (!preview) return;
+  if (!pendingAttachments.length) { preview.innerHTML = ''; return; }
+  preview.innerHTML = pendingAttachments.map((a, i) =>
+    `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+      <span>📎 ${_esc(a.name)} <span style="opacity:.6">(${Math.round((a.size||0)/1024)} KB)</span></span>
+      <button class="btn btn-ghost" style="font-size:10px;padding:1px 6px" onclick="removePendingAttachment(${i})">✕ 移除</button>
+    </div>`).join('');
+}
+
+function removePendingAttachment(i) {
+  pendingAttachments.splice(i, 1);
+  renderAttachmentPreview();
 }
 
 async function submitRequest() {
@@ -764,7 +858,9 @@ async function submitRequest() {
       action: 'create', request_type: currentConfig.request_type,
       applicant_id: window.currentUser?.id,
       form_data, note,
+      attachments: pendingAttachments,
     })});
+    pendingAttachments = [];
     closeModal('new-form-modal');
     await loadMyRequests();
     toast('✅ 申請已送出，等待審批', 'success');
@@ -791,6 +887,15 @@ function renderDetail(data) {
   const emp   = data.employees;
   const steps = data.steps || [];
   document.getElementById('detail-title').textContent = (cfg?.icon||'📋') + ' ' + data.title;
+
+  // hoist:effRole / currentStep / isMyStep 供下方附件 / 補件 / approve box 三處共用
+  const effRole = Roles.effectiveApprovalRole(window.currentUser);
+  const currentStep = steps.find(s => s.status === 'in_progress');
+  const isMyStep = currentStep && (currentStep.approver_role === effRole || (effRole==='chairman' && currentStep.approver_role==='ceo'));
+  // 補件權限(同後端 add_attachment OR gate 的「approver / backoffice」分支;
+  // 申請人不在前端 UI 顯示、但後端依然允許,符合 Ray spec)
+  const canAttachMore = (Roles.isBackofficeRole?.(window.currentUser) || isMyStep)
+                     && !['cancelled','completed','rejected'].includes(data.status);
 
   // Info header
   let html = `<div class="emp-modal-header" style="margin-bottom:14px">
@@ -834,6 +939,28 @@ function renderDetail(data) {
     }
   }
 
+  // Feature A:附件區塊(僅在有附件 OR 可補件時 render;兩者都無 → 不出空區塊)
+  const atts = Array.isArray(data.attachments) ? data.attachments : [];
+  if (atts.length > 0 || canAttachMore) {
+    html += `<div class="section-sep">📎 附件（${atts.length}）</div>`;
+    if (atts.length > 0) {
+      html += `<div style="background:rgba(0,0,0,.08);border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12px">
+        ${atts.map(a => `<div style="padding:4px 0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <a href="javascript:void(0)" onclick="openApprovalAttachment('${_esc(data.id)}','${_esc(a.path)}')" style="color:#7FBBFF;text-decoration:underline">📄 ${_esc(a.name)}</a>
+          <span style="color:var(--text-dim);font-size:11px">${a.size?Math.round(a.size/1024)+' KB · ':''}${a.uploaded_at?fmtDate(a.uploaded_at):''}${a.uploaded_by?' · '+_esc(a.uploaded_by):''}</span>
+        </div>`).join('')}
+      </div>`;
+    }
+    if (canAttachMore) {
+      html += `<div style="margin-bottom:12px">
+        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">補件(PDF/Excel/Word/圖片,單檔≤10MB)</label>
+        <input type="file" class="form-input" multiple
+               accept=".pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg,.gif,.webp"
+               onchange="onAttachmentAdd('${_esc(data.id)}', this)">
+      </div>`;
+    }
+  }
+
   // Timeline
   html += `<div class="section-sep">審批流程</div><div class="timeline">`;
   steps.forEach((step, i) => {
@@ -862,9 +989,7 @@ function renderDetail(data) {
   html += `</div>`;
 
   // Approve action box (for current approver)
-  const effRole = Roles.effectiveApprovalRole(window.currentUser);
-  const currentStep = steps.find(s => s.status === 'in_progress');
-  const isMyStep = currentStep && (currentStep.approver_role === effRole || (effRole==='chairman' && currentStep.approver_role==='ceo'));
+  // (effRole / currentStep / isMyStep 已在 renderDetail 開頭 hoist)
   if (isMyStep) {
     html += `<div class="action-area">
       <div style="font-size:13px;font-weight:500;margin-bottom:10px">📝 步驟 ${currentStep.step_number}：${currentStep.step_name}</div>
@@ -990,6 +1115,48 @@ async function cancelRequest(requestId) {
     await loadMyRequests();
     toast('已取消申請', 'success');
   } catch(e) { toast('操作失敗：'+e.message, 'error'); }
+}
+
+// Feature A:開附件(走後端 sign_attachment_url、拿 60 秒 signed URL 開新分頁)
+async function openApprovalAttachment(requestId, path) {
+  if (!requestId || !path) return;
+  try {
+    const r = await api('/api/approvals', { method:'POST', body: JSON.stringify({
+      action: 'sign_attachment_url', request_id: requestId, path,
+    })});
+    if (r.signedUrl) window.open(r.signedUrl, '_blank');
+    else toast('無法產生附件連結', 'error');
+  } catch (e) { toast('附件開啟失敗：' + e.message, 'error'); }
+}
+
+// Feature A:補件(approver / backoffice 用)— 上傳後呼叫 add_attachment、重 render detail
+async function onAttachmentAdd(requestId, input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  if (files.length > ATTACHMENT_MAX_COUNT) {
+    toast(`一次最多 ${ATTACHMENT_MAX_COUNT} 檔`, 'warn');
+    input.value = '';
+    return;
+  }
+  input.disabled = true;
+  let success = 0;
+  try {
+    for (const f of files) {
+      const meta = await uploadApprovalAttachment(f);
+      await api('/api/approvals', { method:'POST', body: JSON.stringify({
+        action: 'add_attachment', request_id: requestId, attachment: meta,
+      })});
+      success++;
+    }
+    toast(`已新增 ${success} 個附件`, 'success');
+    await openDetail(requestId);  // 重 render 拿到最新 attachments 清單
+  } catch (e) {
+    toast(`補件失敗(已成功 ${success} 個):` + e.message, 'error');
+    if (success > 0) await openDetail(requestId);  // 部分成功也要更新 UI
+  } finally {
+    input.disabled = false;
+    input.value = '';
+  }
 }
 
 // ───── P7.2 Admin Edit approval_requests ─────
