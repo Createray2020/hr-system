@@ -20,11 +20,15 @@ export function makeSalaryRepo() {
     },
 
     async findEmployeeHourlyRate(employee_id) {
+      // 優先讀 employees.hourly_rate 欄(part_time 員工專用、HR 直接設值)。
+      // fallback:base_salary / monthly_work_hours_base(預設 240)— 既有正職計算路徑不變。
+      const { data: emp } = await supabaseAdmin
+        .from('employees').select('base_salary, hourly_rate').eq('id', employee_id).maybeSingle();
+      const direct = Number(emp?.hourly_rate) || 0;
+      if (direct > 0) return direct;
       const { data: settings } = await supabaseAdmin
         .from('system_overtime_settings').select('monthly_work_hours_base').eq('id', 1).maybeSingle();
       const base = Number(settings?.monthly_work_hours_base) || 240;
-      const { data: emp } = await supabaseAdmin
-        .from('employees').select('base_salary').eq('id', employee_id).maybeSingle();
       const monthly = Number(emp?.base_salary) || 0;
       return base > 0 ? monthly / base : 0;
     },
@@ -146,6 +150,24 @@ export function makeSalaryRepo() {
       if (error) throw error;
       const distinct = new Set((data || []).map(r => r.work_date));
       return distinct.size;
+    },
+
+    // 兼職時薪制專用:當月實際工作時數加總(平日上班、不含 holiday)。
+    // status 白名單 = ['normal','late','early_leave'];排除 absent / leave / holiday。
+    // holiday_work_pay 在 Step 8 用「全額算法」(multiplier 2.0 = 含基本 1 倍 + 加成 1 倍)
+    // 另行計算,本 helper 不重複算 holiday、避免重複給薪。
+    async findTotalWorkHoursByEmployeeMonth(employee_id, year, month) {
+      const start = `${year}-${String(month).padStart(2,'0')}-01`;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+      const { data, error } = await supabaseAdmin
+        .from('attendance').select('work_hours')
+        .eq('employee_id', employee_id)
+        .gte('work_date', start).lte('work_date', end)
+        .in('status', ['normal', 'late', 'early_leave'])
+        .not('work_hours', 'is', null);
+      if (error) throw error;
+      return (data || []).reduce((sum, r) => sum + (Number(r.work_hours) || 0), 0);
     },
 
     async findHolidaysByMonth(year, month) {
