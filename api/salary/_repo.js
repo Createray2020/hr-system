@@ -152,8 +152,11 @@ export function makeSalaryRepo() {
       return distinct.size;
     },
 
-    // 兼職時薪制專用:當月實際工作時數加總(平日上班、不含 holiday)。
+    // 兼職時薪制專用:當月計薪基本工時加總(平日上班、不含 holiday)。
     // status 白名單 = ['normal','late','early_leave'];排除 absent / leave / holiday。
+    // 🔴 每日上限 8 小時:每筆 work_hours 用 Math.min(h, 8) cap、超過 8h 屬加班,
+    //    需另經核准加班申請(overtime_requests status='approved')才計加班費、
+    //    不自動從 attendance 換算加班(Step 6 aggregateOvertimePay 只認核准申請)。
     // holiday_work_pay 在 Step 8 用「全額算法」(multiplier 2.0 = 含基本 1 倍 + 加成 1 倍)
     // 另行計算,本 helper 不重複算 holiday、避免重複給薪。
     async findTotalWorkHoursByEmployeeMonth(employee_id, year, month) {
@@ -167,7 +170,10 @@ export function makeSalaryRepo() {
         .in('status', ['normal', 'late', 'early_leave'])
         .not('work_hours', 'is', null);
       if (error) throw error;
-      return (data || []).reduce((sum, r) => sum + (Number(r.work_hours) || 0), 0);
+      return (data || []).reduce(
+        (sum, r) => sum + Math.min(Number(r.work_hours) || 0, 8),
+        0,
+      );
     },
 
     async findHolidaysByMonth(year, month) {
