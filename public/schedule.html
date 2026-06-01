@@ -730,12 +730,15 @@ function render() {
       opHtml = `<span style="font-size:11px;color:var(--text-dim)">無排班</span>`;
     }
 
-    // C8-3:逐人套範本按鈕(canManagePeriod=true 且 status ∈ draft/submitted/approved 顯示;
+    // C8-3:逐人套範本按鈕(同部門主管 OR backoffice 角色;status ∈ draft/submitted/approved 顯示;
     //       published/locked 已過階段不顯示;period=null 仍顯示、點了 toast 提示)
+    //       對齊後端 apply.js L33-36 — isBackofficeRole(含 CEO/HR/admin/chairman)可套
+    const canApplyTpl = canManagePeriod
+      || (window.Roles && window.Roles.isBackofficeRole(window.currentUser));
     const tplApplicableStatus =
       !periodStatus || periodStatus === 'draft' ||
       periodStatus === 'submitted' || periodStatus === 'approved';
-    const tplHtml = (canManagePeriod && tplApplicableStatus)
+    const tplHtml = (canApplyTpl && tplApplicableStatus)
       ? `<button class="btn btn-ghost" style="font-size:11px;padding:4px 10px" onclick="applyTplToOne('${escHtml(emp.id)}', ${period ? `'${escHtml(period.id)}'` : 'null'}, '${escHtml(emp.name || emp.id)}')">📋 套範本</button>`
       : '';
 
