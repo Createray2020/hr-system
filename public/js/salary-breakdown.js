@@ -61,9 +61,21 @@
     sal = sal || {};
 
     // 應發
+    // 兼職時薪制(salary_records.hourly_rate > 0 且 work_hours > 0、
+    // calculator commit f9ed174 part_time 分支寫入)→ label 改顯時薪 × 工時明細
+    // 一般正職 prorata_base 非 null = 離職月 day-based pro-rata
+    // 兩者都用 prorata_base 入 GENERATED gross 公式、靠 hourly_rate/work_hours 區辨
     const hasProrata = sal.prorata_base != null;
     const baseValue = hasProrata ? n(sal.prorata_base) : n(sal.base_salary);
-    const baseLabel = hasProrata ? '本薪（離職月按出勤比例）' : '本薪';
+    const isHourlyMode = n(sal.hourly_rate) > 0 && n(sal.work_hours) > 0;
+    let baseLabel;
+    if (isHourlyMode) {
+      baseLabel = `本薪（時薪 ${n(sal.hourly_rate).toLocaleString('zh-TW')} × 工時 ${n(sal.work_hours)}）`;
+    } else if (hasProrata) {
+      baseLabel = '本薪（離職月按出勤比例）';
+    } else {
+      baseLabel = '本薪';
+    }
 
     const grossAll = GROSS_FIELDS.map(f => {
       if (f.key === '__base__') {
