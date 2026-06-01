@@ -1166,3 +1166,88 @@ describe('calculateMonthlySalary — B26 批次 4 離職月 pro-rata', () => {
     expect(record.employer_cost_health).toBe(Math.round(1050 * ratio));
   });
 });
+
+// ─── part_time:不計月薪型加給(grade_allowance / manager_allowance / attendance_bonus)──────
+describe('calculateMonthlySalary — part_time 不計月薪型加給', () => {
+  it('emp 有 grade=1000 / mgr=500 / attendance_bonus=2000 殘留、但 part_time 應全歸 0', async () => {
+    // 模擬吳/鄭 case:歷史 employees row 仍掛一等2 的加給結構(prod 沒被洗掉)、
+    // calculator part_time 分支必須強制忽略、不滲漏到 gross。
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_PT', base_salary: 0,             // 兼職 base=0
+        attendance_bonus: 2000,                 // 🔴 殘留值、calculator 應忽略
+        grade_allowance:  1000,                 // 🔴 同
+        manager_allowance: 500,                 // 🔴 同
+        employment_type: 'part_time',
+      })),
+      // part_time 分支需要這 2 個 helper(commit 0b89d5e 加的)
+      findEmployeeHourlyRate: vi.fn(async () => 210),
+      findTotalWorkHoursByEmployeeMonth: vi.fn(async () => 100),  // 100 hr × 210 = 21,000
+      findEmployeeInsuranceSettings: vi.fn(async () => null),     // 無投保
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E_PT', year:2026, month:5 });
+    const row = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+
+    // base/勞健保 0、加給 3 項一律 0
+    expect(row.base_salary).toBe(0);
+    expect(row.grade_allowance).toBe(0);
+    expect(row.manager_allowance).toBe(0);
+    expect(row.attendance_bonus_actual).toBe(0);
+    expect(row.attendance_bonus_base).toBe(0);
+    // 時薪 × 工時 進 prorata_base(GENERATED gross 走 COALESCE(prorata_base, base_salary))
+    expect(row.prorata_base).toBe(21000);
+    expect(row.hourly_rate).toBe(210);
+    expect(row.work_hours).toBe(100);
+
+    // gross 對齊 GENERATED 公式 COALESCE(prorata_base, base_salary) + 加項
+    // 不能用 refGrossSalary(它沒 prorata_base 邏輯、會用 base_salary=0 漏算)
+    const gross =
+      (row.prorata_base != null ? Number(row.prorata_base) : Number(row.base_salary))
+      + Number(row.attendance_bonus_actual || 0)
+      + Number(row.grade_allowance || 0)
+      + Number(row.manager_allowance || 0)
+      + Number(row.allowance || 0)
+      + Number(row.extra_allowance || 0)
+      + Number(row.overtime_pay_auto || 0)
+      + Number(row.overtime_pay_manual || 0)
+      + Number(row.comp_expiry_payout || 0)
+      + Number(row.holiday_work_pay || 0)
+      + Number(row.settlement_amount || 0);
+    expect(gross).toBe(21000);  // 只有 prorata_base、其他全 0
+  });
+
+  it('part_time + employees 殘留 attendance_bonus=2000 → calculator 跳過 applyAttendanceBonus', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_PT', base_salary: 0, attendance_bonus: 2000,
+        employment_type: 'part_time',
+      })),
+      findEmployeeHourlyRate: vi.fn(async () => 200),
+      findTotalWorkHoursByEmployeeMonth: vi.fn(async () => 80),
+      findEmployeeInsuranceSettings: vi.fn(async () => null),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E_PT', year:2026, month:5 });
+    // 不該打到 applyAttendanceBonus 內用的兩個 mock(part_time 分支跳過整個 step 5)
+    expect(repo.findApprovedAttendanceBonusLeaves).not.toHaveBeenCalled();
+    expect(repo.findPenaltyRecordsByEmployeeMonth).not.toHaveBeenCalled();
+  });
+
+  it('full_time 對照(回歸驗證):grade=3000 / mgr=2000 / attendance_bonus=2000 全進 gross', async () => {
+    // 對比同 fixture 但 full_time、確認正職行為完全沒被改、加給該入帳就入帳
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_FT', base_salary: 30000,
+        attendance_bonus: 2000, grade_allowance: 3000, manager_allowance: 2000,
+        employment_type: 'full_time',
+      })),
+      findEmployeeInsuranceSettings: vi.fn(async () => null),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E_FT', year:2026, month:5 });
+    const row = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(row.base_salary).toBe(30000);
+    expect(row.grade_allowance).toBe(3000);    // 正職:殘留值入帳 ✓
+    expect(row.manager_allowance).toBe(2000);
+    expect(row.attendance_bonus_actual).toBe(2000);
+    expect(row.prorata_base).toBeNull();        // 正職非離職月:null、GENERATED COALESCE 走 base
+  });
+});
