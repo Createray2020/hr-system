@@ -744,10 +744,10 @@ function openEditModal(id) {
   document.getElementById('btn-resign').style.display = e.status === 'active' ? '' : 'none';
   document.getElementById('btn-delete').style.display = e.status === 'active' ? '' : 'none';
 
-  // Reset-password button: only for hr/chairman/admin
+  // Reset-password button: 對齊後端 canManageAuthAccounts(BACKOFFICE_ROLES)
   const adminRole = window.currentUser?.role;
   document.getElementById('btn-reset-pw').style.display =
-    ['hr','chairman','admin'].includes(adminRole) ? '' : 'none';
+    ['hr','ceo','chairman','admin'].includes(adminRole) ? '' : 'none';
 
   document.getElementById('emp-modal').classList.add('open');
 }

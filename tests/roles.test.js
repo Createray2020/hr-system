@@ -17,16 +17,16 @@ const ROLES = ['employee', 'hr', 'ceo', 'chairman', 'admin'];
 const emp = (role, is_manager = false) => ({ role, is_manager });
 
 describe('canManageAuthAccounts', () => {
-  it('只允許 hr / chairman / admin', () => {
+  it('hr / ceo / chairman / admin 可(對齊 BACKOFFICE_ROLES、CEO=HR=最高權限)', () => {
     expect(canManageAuthAccounts(emp('hr'))).toBe(true);
+    expect(canManageAuthAccounts(emp('ceo'))).toBe(true);
     expect(canManageAuthAccounts(emp('chairman'))).toBe(true);
     expect(canManageAuthAccounts(emp('admin'))).toBe(true);
-    expect(canManageAuthAccounts(emp('ceo'))).toBe(false);
     expect(canManageAuthAccounts(emp('employee'))).toBe(false);
   });
-  it('is_manager 不影響', () => {
+  it('is_manager 不影響(employee+is_manager 仍不可、ceo+is_manager 仍可)', () => {
     expect(canManageAuthAccounts(emp('employee', true))).toBe(false);
-    expect(canManageAuthAccounts(emp('ceo', true))).toBe(false);
+    expect(canManageAuthAccounts(emp('ceo', true))).toBe(true);
   });
   it('null/undefined 回 false', () => {
     expect(canManageAuthAccounts(null)).toBe(false);

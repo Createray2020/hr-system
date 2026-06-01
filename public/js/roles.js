@@ -6,7 +6,7 @@
 
   window.Roles = {
     canManageAuthAccounts(u) {
-      return !!u && ['hr', 'chairman', 'admin'].includes(u.role);
+      return !!u && BACKOFFICE.includes(u.role);
     },
 
     canAccessBackoffice(u) {
