@@ -239,6 +239,11 @@ function render(r){
         </a>
       </div>
 
+      ${(n0(r.hourly_rate) > 0 && n0(r.work_hours) > 0) ? `
+      <div class="slip-row head">兼職時薪</div>
+      <div class="slip-row"><div>時薪</div><div class="v">$${fmt$(r.hourly_rate)} / 小時</div></div>
+      <div class="slip-row"><div>當月工時</div><div class="v">${r.work_hours} 小時</div></div>` : ''}
+
       <div class="slip-row head"><div>收入項目</div><div class="v">金額</div></div>
       ${grossItemsAug.length
         ? grossItemsAug.map(it => `<div class="slip-row"><div>${escHtml(it.label)}</div><div class="v pos">+ ${fmt$(it.value)}</div></div>`).join('')
