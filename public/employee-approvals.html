@@ -800,9 +800,11 @@ async function openDetail(id) {
   document.getElementById('detail-modal').classList.add('open');
 
   try {
-    const data = await apiFetch(`/api/approvals?id=${id}`);
-    const r = data.request;
-    const steps = data.steps || [];
+    // 後端 /api/approvals?id= 回的是 flat shape:{ id, applicant_id, ...,
+    // employees:{name,dept_id,position,avatar,dept_name}, steps:[...] }
+    // 不是 { request:{...}, steps:[...] }。直接攤平讀 data 即可。
+    const r = await apiFetch(`/api/approvals?id=${id}`);
+    const steps = r.steps || [];
     const cfg = allConfigs.find(c => c.request_type === r.request_type);
     document.getElementById('detail-title').textContent = `${cfg?.icon||'📄'} ${cfg?.type_name||r.request_type}`;
 
@@ -818,10 +820,18 @@ async function openDetail(id) {
       <div class="detail-label">申請時間</div>
       <div class="detail-value">${fmtDate(r.created_at)}</div>
     </div>`;
-    if (r.applicant_name) {
+    // 申請人:後端 employees join 給 {name, dept_id, position, dept_name},取 name 為主、
+    // 拼上 position / dept_name(對齊 approvals.html L1286)
+    const emp = r.employees || {};
+    if (emp.name || r.applicant_id) {
+      const extras = [];
+      if (emp.position) extras.push(escapeHtml(emp.position));
+      const deptName = emp.dept_name || emp.dept;
+      if (deptName) extras.push(escapeHtml(deptName));
+      const empLine = escapeHtml(emp.name || r.applicant_id) + (extras.length ? ' · ' + extras.join(' · ') : '');
       html += `<div class="detail-section">
         <div class="detail-label">申請人</div>
-        <div class="detail-value">${r.applicant_name}</div>
+        <div class="detail-value">${empLine}</div>
       </div>`;
     }
     for (const f of fields) {
