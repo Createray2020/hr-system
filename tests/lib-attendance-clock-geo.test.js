@@ -22,6 +22,7 @@ function makeRepo(over = {}) {
     findAttendanceByDateSegment: vi.fn().mockResolvedValue(null),
     findOpenAttendanceForEmployee: vi.fn().mockResolvedValue(null),
     findScheduleById: vi.fn().mockResolvedValue(dayShift()),
+    findApprovedOvertimeRequestByDate: vi.fn().mockResolvedValue(null),
     upsertAttendance: vi.fn(async row => ({ ...row })),
     updateAttendance: vi.fn(async (id, patch) => ({ id, ...patch })),
     findActiveOfficeLocations: vi.fn(async () => []),

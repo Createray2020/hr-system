@@ -33,6 +33,7 @@ function makeRepo(over = {}) {
     findAttendanceByDateSegment: vi.fn().mockResolvedValue(null),
     findOpenAttendanceForEmployee: vi.fn().mockResolvedValue(null),
     findScheduleById: vi.fn().mockResolvedValue(dayShift()),
+    findApprovedOvertimeRequestByDate: vi.fn().mockResolvedValue(null),
     upsertAttendance: vi.fn(async row => ({ ...row })),
     updateAttendance: vi.fn(async (id, patch) => ({ id, ...patch })),
     ...over,
@@ -394,6 +395,105 @@ describe('clockOut overtime — 守護:early_arrival 不影響現有算法(Phase
     const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T18:00:00+08:00' });
     expect(att.work_hours).toBe(9.5);
     expect(att.overtime_hours).toBe(1.5);  // Phase B 待重評估、本階不動
+  });
+});
+
+describe('clockOut — 超時 is_anomaly 自動偵測', () => {
+  // 規格:work_hours > 9.5 + 當日無 status='approved' overtime_requests → is_anomaly=true、anomaly_note='超時：...'
+  //       work_hours > 9.5 + 有核准加班 → 不標(合法超時)
+  //       work_hours <= 9.5 → 不主動動 is_anomaly
+  //       anomaly_note 用「超時：」前綴識別自動標、不蓋 HR 手填
+  it('work_hours=10、無核准加班 → is_anomaly=true、anomaly_note 超時前綴', async () => {
+    const repo = makeRepo({
+      findOpenAttendanceForEmployee: vi.fn().mockResolvedValue({
+        id: 'A1', employee_id: 'E001', work_date: '2026-04-26',
+        schedule_id: 'S1', clock_in: '2026-04-26T09:00:00+08:00',
+        status: 'normal', is_anomaly: false, anomaly_note: null,
+      }),
+      findApprovedOvertimeRequestByDate: vi.fn().mockResolvedValue(null),
+    });
+    const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T19:00:00+08:00' });
+    expect(att.work_hours).toBe(10);
+    expect(att.is_anomaly).toBe(true);
+    expect(att.anomaly_note).toBe('超時：10h、無核准加班申請');
+    expect(repo.findApprovedOvertimeRequestByDate).toHaveBeenCalledWith('E001', '2026-04-26');
+  });
+
+  it('work_hours=10、有核准加班 → 不標 is_anomaly、anomaly_note 不寫', async () => {
+    const repo = makeRepo({
+      findOpenAttendanceForEmployee: vi.fn().mockResolvedValue({
+        id: 'A1', employee_id: 'E001', work_date: '2026-04-26',
+        schedule_id: 'S1', clock_in: '2026-04-26T09:00:00+08:00',
+        status: 'normal', is_anomaly: false, anomaly_note: null,
+      }),
+      findApprovedOvertimeRequestByDate: vi.fn().mockResolvedValue({ id: 7 }),
+    });
+    const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T19:00:00+08:00' });
+    expect(att.work_hours).toBe(10);
+    expect(att.is_anomaly).toBeUndefined();
+    expect(att.anomaly_note).toBeUndefined();
+  });
+
+  it('work_hours=9(<=9.5)→ 不查 overtime、不動 is_anomaly', async () => {
+    const findApproved = vi.fn().mockResolvedValue(null);
+    const repo = makeRepo({
+      findOpenAttendanceForEmployee: vi.fn().mockResolvedValue({
+        id: 'A1', employee_id: 'E001', work_date: '2026-04-26',
+        schedule_id: 'S1', clock_in: '2026-04-26T09:00:00+08:00',
+        status: 'normal', is_anomaly: false, anomaly_note: null,
+      }),
+      findApprovedOvertimeRequestByDate: findApproved,
+    });
+    const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T18:00:00+08:00' });
+    expect(att.work_hours).toBe(9);
+    expect(att.is_anomaly).toBeUndefined();
+    expect(att.anomaly_note).toBeUndefined();
+    expect(findApproved).not.toHaveBeenCalled();
+  });
+
+  it('work_hours=9.5 邊界 → 不算超時(strict >)', async () => {
+    const findApproved = vi.fn().mockResolvedValue(null);
+    const repo = makeRepo({
+      findOpenAttendanceForEmployee: vi.fn().mockResolvedValue({
+        id: 'A1', employee_id: 'E001', work_date: '2026-04-26',
+        schedule_id: 'S1', clock_in: '2026-04-26T08:30:00+08:00',
+        status: 'normal', is_anomaly: false, anomaly_note: null,
+      }),
+      findApprovedOvertimeRequestByDate: findApproved,
+    });
+    const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T18:00:00+08:00' });
+    expect(att.work_hours).toBe(9.5);
+    expect(att.is_anomaly).toBeUndefined();
+    expect(findApproved).not.toHaveBeenCalled();
+  });
+
+  it('work_hours=10、HR 已手填 anomaly_note → 標 is_anomaly 但不蓋 HR 備註', async () => {
+    const repo = makeRepo({
+      findOpenAttendanceForEmployee: vi.fn().mockResolvedValue({
+        id: 'A1', employee_id: 'E001', work_date: '2026-04-26',
+        schedule_id: 'S1', clock_in: '2026-04-26T09:00:00+08:00',
+        status: 'normal', is_anomaly: false, anomaly_note: 'HR:忘記打卡補登',
+      }),
+      findApprovedOvertimeRequestByDate: vi.fn().mockResolvedValue(null),
+    });
+    const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T19:00:00+08:00' });
+    expect(att.is_anomaly).toBe(true);
+    // HR 手填的不蓋掉(只有 null 或「超時：」前綴的才覆寫)
+    expect(att.anomaly_note).toBeUndefined();
+  });
+
+  it('work_hours=10、舊的「超時：」自動標 → 覆寫成新值', async () => {
+    const repo = makeRepo({
+      findOpenAttendanceForEmployee: vi.fn().mockResolvedValue({
+        id: 'A1', employee_id: 'E001', work_date: '2026-04-26',
+        schedule_id: 'S1', clock_in: '2026-04-26T09:00:00+08:00',
+        status: 'normal', is_anomaly: true, anomaly_note: '超時：9.8h、無核准加班申請',
+      }),
+      findApprovedOvertimeRequestByDate: vi.fn().mockResolvedValue(null),
+    });
+    const att = await clockOut(repo, { employee_id: 'E001', timestamp: '2026-04-26T19:00:00+08:00' });
+    expect(att.is_anomaly).toBe(true);
+    expect(att.anomaly_note).toBe('超時：10h、無核准加班申請');
   });
 });
 

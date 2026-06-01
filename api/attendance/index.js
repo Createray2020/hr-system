@@ -309,6 +309,16 @@ export function makeRepo() {
       return data || null;
     },
 
+    async findApprovedOvertimeRequestByDate(employee_id, date) {
+      // 給 lib/clock.js clockOut 超時偵測用:當日有 status='approved' 的加班申請即視為合法超時、不標 is_anomaly
+      const { data, error } = await supabaseAdmin
+        .from('overtime_requests').select('id')
+        .eq('employee_id', employee_id).eq('overtime_date', date).eq('status', 'approved')
+        .limit(1).maybeSingle();
+      if (error) throw error;
+      return data || null;
+    },
+
     async upsertAttendance(row) {
       const { data, error } = await supabaseAdmin
         .from('attendance')
