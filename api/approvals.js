@@ -127,6 +127,27 @@ function canApproveStep(caller, step, applicantDeptId) {
   return caller.role === r;
 }
 
+/**
+ * canCallerSeeAttachmentsOfRequest — 三條 OR gate(申請人本人 / backoffice /
+ * 該單 current step 的 eligible approver)。
+ *
+ * 用於 sign_attachment_url 與 add_attachment 兩個 action 的權限守門。
+ * 兩 action 的「讀附件 / 補附件」屬同一信任邊界(看得到就能補)、共用判斷。
+ */
+async function canCallerSeeAttachmentsOfRequest(caller, request) {
+  if (!caller || !caller.id || !request) return false;
+  if (caller.id === request.applicant_id) return true;
+  if (isBackofficeRole(caller)) return true;
+  // eligible approver of current step?
+  const { data: step } = await supabaseAdmin
+    .from('approval_steps').select('*')
+    .eq('request_id', request.id).eq('step_number', request.current_step).maybeSingle();
+  if (!step) return false;
+  const { data: applicant } = await supabaseAdmin
+    .from('employees').select('dept_id').eq('id', request.applicant_id).maybeSingle();
+  return canApproveStep(caller, step, applicant?.dept_id);
+}
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -511,6 +532,81 @@ export default async function handler(req, res) {
     }
 
     // ── 更新流程設定 ────────────────────────────────────────────────────────
+    // ── 簽附件 URL ─────────────────────────────────────────────────────────
+    // 申請人本人 / backoffice / current step 的 eligible approver → 對該單已存在的
+    // 附件 path 簽 60 秒 signed URL(用 service-role bypass storage RLS)。
+    // path 必須屬於該單 attachments 陣列、防任意簽別單的檔。
+    if (body.action === 'sign_attachment_url') {
+      const { request_id, path } = body;
+      if (!request_id || !path) {
+        return res.status(400).json({ error: 'request_id 與 path 必填' });
+      }
+      const { data: request } = await supabaseAdmin
+        .from('approval_requests').select('*').is('deleted_at', null).eq('id', request_id).single();
+      if (!request) return res.status(404).json({ error: '找不到申請' });
+
+      const atts = Array.isArray(request.attachments) ? request.attachments : [];
+      if (!atts.some(a => a && a.path === path)) {
+        return res.status(403).json({ error: '附件不屬於此申請' });
+      }
+      if (!(await canCallerSeeAttachmentsOfRequest(caller, request))) {
+        return res.status(403).json({ error: '無權看此附件' });
+      }
+      const { data: signed, error: signErr } = await supabaseAdmin.storage
+        .from('leave-attachments').createSignedUrl(path, 60);
+      if (signErr) return res.status(500).json({ error: signErr.message });
+      return res.status(200).json({ signedUrl: signed?.signedUrl });
+    }
+
+    // ── 補件(append 附件 metadata 進 attachments JSONB[]) ──────────────────
+    // 同 sign_attachment_url 的權限 gate。實體檔案由 client-side _sb.storage 上傳到
+    // leave-attachments bucket(對齊 employee-leave.html 既有 pattern),本 action 只
+    // 寫 metadata + audit 一行。uploaded_by 強制用 caller.id、不接受前端傳。
+    if (body.action === 'add_attachment') {
+      const { request_id, attachment } = body;
+      if (!request_id || !attachment || typeof attachment !== 'object') {
+        return res.status(400).json({ error: 'request_id 與 attachment 必填' });
+      }
+      for (const k of ['path', 'name']) {
+        if (!attachment[k] || typeof attachment[k] !== 'string') {
+          return res.status(400).json({ error: `附件 ${k} 必填` });
+        }
+      }
+      const { data: request } = await supabaseAdmin
+        .from('approval_requests').select('*').is('deleted_at', null).eq('id', request_id).single();
+      if (!request) return res.status(404).json({ error: '找不到申請' });
+
+      if (!(await canCallerSeeAttachmentsOfRequest(caller, request))) {
+        return res.status(403).json({ error: '無權補件' });
+      }
+
+      const current = Array.isArray(request.attachments) ? request.attachments : [];
+      const cleaned = {
+        path: attachment.path,
+        name: attachment.name,
+        mime: typeof attachment.mime === 'string' ? attachment.mime : null,
+        size: typeof attachment.size === 'number' ? attachment.size : null,
+        uploaded_at: attachment.uploaded_at || new Date().toISOString(),
+        uploaded_by: caller.id,  // 強制 caller.id、不信前端
+      };
+      const next = [...current, cleaned];
+      const nowDate = new Date().toISOString().slice(0, 10);
+      const auditLine = `[${nowDate}] attach by ${caller.id}: ${cleaned.name}`;
+      const nextAudit = request.admin_audit_note
+        ? `${auditLine}\n${request.admin_audit_note}`
+        : auditLine;
+      const { error: upErr } = await supabaseAdmin
+        .from('approval_requests')
+        .update({
+          attachments: next,
+          admin_audit_note: nextAudit,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', request_id);
+      if (upErr) return res.status(500).json({ error: upErr.message });
+      return res.status(200).json({ attachments: next, audit: auditLine });
+    }
+
     if (body.action === 'update_config') {
       // 僅 hr / admin 可改流程設定(對齊 lib/roles.js::canEditApprovalConfig)
       if (!['hr', 'admin'].includes(caller.role)) {
