@@ -297,6 +297,8 @@ const ATTACHMENT_EXTS = ['pdf','xlsx','xls','docx','doc','png','jpg','jpeg','gif
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 const ATTACHMENT_MAX_COUNT = 10;
 let pendingAttachments = [];  // 送單表單暫存:上傳完成的附件 metadata 陣列
+let currentDetailData = null; // Feature B:openDetail 快取最後一次 detail 物件、供匯出交辦單用
+const ROLE_LABELS = { manager:'直屬主管', ceo:'執行長', hr:'人資', admin:'管理員', chairman:'董事長' };
 
 async function apiFetch(path, opts={}) {
   const { data: { session } } = await _sb.auth.getSession();
@@ -865,6 +867,8 @@ async function openDetail(id) {
     // employees:{name,dept_id,position,avatar,dept_name}, steps:[...] }
     // 不是 { request:{...}, steps:[...] }。直接攤平讀 data 即可。
     const r = await apiFetch(`/api/approvals?id=${id}`);
+    // Feature B:快取 detail 物件、匯出交辦單時不必重 fetch
+    currentDetailData = r;
     const steps = r.steps || [];
     const cfg = allConfigs.find(c => c.request_type === r.request_type);
     document.getElementById('detail-title').textContent = `${cfg?.icon||'📄'} ${cfg?.type_name||r.request_type}`;
@@ -978,6 +982,10 @@ async function openDetail(id) {
         btns += `<button class="btn btn-primary" onclick="approveStep(${myStep.step_number})">核准</button>`;
       }
     }
+    // Feature B:核准完成 → 顯示「📄 匯出交辦單」(列印 → PDF / 紙本傳遞)
+    if (r.status === 'completed') {
+      btns += `<button class="btn btn-ghost" onclick="exportApprovalHandoff()">📄 匯出交辦單</button>`;
+    }
     if (!btns) btns = `<button class="btn btn-ghost" onclick="closeModal('detail-modal')">關閉</button>`;
     footer.innerHTML = btns;
   } catch(e) {
@@ -1069,6 +1077,184 @@ async function onAttachmentAdd(requestId, input) {
   } finally {
     input.disabled = false;
     input.value = '';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Feature B:匯出交辦單(approval_requests.status='completed' 才出按鈕)
+// 用 currentDetailData 組一份獨立 HTML、新分頁 + window.print() → 存 PDF / 列印。
+// 不裝任何 lib、不嵌簽 URL(60 秒會過期)、附件只列清單。
+// 移植自 approvals.html L1174-1345,_esc 改 escapeHtml、window.Roles?.ROLE_LABEL
+// 改 ROLE_LABELS、window.currentUser 改 currentUser。
+// ─────────────────────────────────────────────────────────────────
+function _fmtDateStrForHandoff(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (isNaN(d)) return String(s);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function _stepResultLabel(st) {
+  if (st === 'approved') return '同意';
+  if (st === 'rejected') return '駁回';
+  if (st === 'skipped')  return '系統略過';
+  if (st === 'in_progress') return '進行中';
+  if (st === 'waiting')  return '等待中';
+  return st || '—';
+}
+
+function exportApprovalHandoff() {
+  const data = currentDetailData;
+  if (!data) { toast('請先開啟簽呈詳情', 'warn'); return; }
+  if (data.status !== 'completed') {
+    toast('僅核准完成的簽呈可匯出交辦單', 'warn'); return;
+  }
+  const cfg = allConfigs.find(c => c.request_type === data.request_type);
+  const cfgName = cfg ? `${cfg.icon || ''} ${cfg.type_name}` : data.request_type;
+  const emp = data.employees || {};
+  const steps = (data.steps || []).slice().sort((a, b) => (a.step_number||0) - (b.step_number||0));
+  const atts = Array.isArray(data.attachments) ? data.attachments : [];
+  const fields = FORM_SCHEMA[data.request_type] || [];
+  const fd = data.form_data || {};
+  const me = currentUser || {};
+  const docTitle = `交辦單_${data.id}`;
+
+  let formRows;
+  if (fields.length) {
+    formRows = fields.map(f =>
+      `<tr><th>${escapeHtml(f.label)}</th><td>${escapeHtml(fd[f.id] ?? '—')}</td></tr>`
+    ).join('');
+  } else {
+    const keys = Object.keys(fd);
+    formRows = keys.length
+      ? keys.map(k => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(fd[k] ?? '—')}</td></tr>`).join('')
+      : '<tr><td colspan="2" style="text-align:center;color:#999">(無表單欄位)</td></tr>';
+  }
+
+  const stepApprover = (step) => {
+    if (step.employees?.name) {
+      const pos = step.employees.position ? ` (${step.employees.position})` : '';
+      return escapeHtml(step.employees.name + pos);
+    }
+    return escapeHtml(step.approver_id || '—');
+  };
+  const stepRows = steps.length
+    ? steps.map(s => `<tr>
+        <td style="text-align:center">${s.step_number}</td>
+        <td>${escapeHtml(s.step_name || '—')}</td>
+        <td>${escapeHtml(ROLE_LABELS[s.approver_role] || s.approver_role || '—')}</td>
+        <td>${stepApprover(s)}</td>
+        <td style="text-align:center">${escapeHtml(_stepResultLabel(s.status))}</td>
+        <td>${escapeHtml(_fmtDateStrForHandoff(s.handled_at))}</td>
+        <td>${escapeHtml(s.note || '—')}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="7" style="text-align:center;color:#999">(無歷程)</td></tr>';
+
+  const attRows = atts.length
+    ? atts.map(a => `<tr>
+        <td>📎 ${escapeHtml(a.name || '—')}</td>
+        <td>${escapeHtml(a.uploaded_by || '—')}</td>
+        <td>${escapeHtml(_fmtDateStrForHandoff(a.uploaded_at))}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="3" style="text-align:center;color:#999">無</td></tr>';
+
+  const noteBlock = data.note
+    ? `<section><h2>備注</h2><div class="note-box">${escapeHtml(data.note)}</div></section>`
+    : '';
+
+  const html = `<!DOCTYPE html>
+<html lang="zh-TW"><head><meta charset="UTF-8"><title>${escapeHtml(docTitle)}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif; color: #111; font-size: 12pt; line-height: 1.5; margin: 0; padding: 20px; max-width: 800px; }
+  header.handoff-h { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 8px; margin-bottom: 16px; }
+  header.handoff-h h1 { font-size: 22pt; margin: 0; }
+  .status-badge { display: inline-block; padding: 4px 12px; border: 2px solid #2c8a3f; color: #2c8a3f; border-radius: 4px; font-size: 12pt; font-weight: bold; }
+  section { margin-bottom: 16px; page-break-inside: avoid; }
+  h2 { font-size: 13pt; margin: 12px 0 6px; padding: 4px 8px; background: #f0f0f0; border-left: 4px solid #333; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th, td { border: 1px solid #333; padding: 6px 8px; text-align: left; vertical-align: top; font-size: 11pt; }
+  th { background: #f5f5f5; font-weight: 600; }
+  table.info-grid th { width: 28%; }
+  table.steps th { background: #e8e8e8; text-align: center; font-size: 10.5pt; }
+  table.steps td { font-size: 10.5pt; }
+  .note-box { border: 1px solid #ccc; padding: 8px 12px; background: #fafafa; white-space: pre-wrap; }
+  footer.handoff-f { margin-top: 24px; padding-top: 8px; border-top: 1px solid #999; font-size: 9pt; color: #666; display: flex; justify-content: space-between; }
+  @media print {
+    body { padding: 0; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head><body>
+<header class="handoff-h">
+  <h1>📄 審批交辦單</h1>
+  <div class="status-badge">✓ 已核准</div>
+</header>
+
+<section>
+  <h2>基本資訊</h2>
+  <table class="info-grid"><tbody>
+    <tr><th>單號</th><td>${escapeHtml(data.id)}</td></tr>
+    <tr><th>類別</th><td>${escapeHtml(cfgName)}</td></tr>
+    <tr><th>標題</th><td>${escapeHtml(data.title || '—')}</td></tr>
+    <tr><th>申請人</th><td>${escapeHtml(emp.name || data.applicant_id || '—')}${emp.position ? ' · ' + escapeHtml(emp.position) : ''}${(emp.dept_name || emp.dept) ? ' · ' + escapeHtml(emp.dept_name || emp.dept) : ''}</td></tr>
+    <tr><th>申請日期</th><td>${escapeHtml(_fmtDateStrForHandoff(data.created_at))}</td></tr>
+    <tr><th>核准完成</th><td>${escapeHtml(_fmtDateStrForHandoff(data.completed_at))}</td></tr>
+  </tbody></table>
+</section>
+
+<section>
+  <h2>申請內容</h2>
+  <table><tbody>${formRows}</tbody></table>
+</section>
+
+${noteBlock}
+
+<section>
+  <h2>審批歷程</h2>
+  <table class="steps">
+    <thead><tr>
+      <th style="width:6%">步驟</th>
+      <th style="width:18%">名稱</th>
+      <th style="width:11%">角色</th>
+      <th style="width:17%">審批人</th>
+      <th style="width:9%">結果</th>
+      <th style="width:14%">時間</th>
+      <th>意見</th>
+    </tr></thead>
+    <tbody>${stepRows}</tbody>
+  </table>
+</section>
+
+<section>
+  <h2>附件清單</h2>
+  <table>
+    <thead><tr><th style="width:55%">檔名</th><th style="width:20%">上傳者</th><th>上傳時間</th></tr></thead>
+    <tbody>${attRows}</tbody>
+  </table>
+</section>
+
+<footer class="handoff-f">
+  <div>匯出時間:${escapeHtml(_fmtDateStrForHandoff(new Date().toISOString()))}</div>
+  <div>匯出者:${escapeHtml(me.name || me.id || '—')}</div>
+</footer>
+
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('無法開啟新分頁、請允許此網站的彈出視窗後再試一次');
+    return;
+  }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.document.title = docTitle;
+  const triggerPrint = () => { try { win.print(); } catch (e) { /* 用戶取消列印 */ } };
+  win.onload = () => setTimeout(triggerPrint, 150);
+  if (win.document.readyState === 'complete') {
+    setTimeout(triggerPrint, 250);
   }
 }
 
