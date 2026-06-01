@@ -50,9 +50,9 @@ export default async function handler(req, res) {
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'PERIOD_NOT_FOUND' });
 
-  // 撈員工 dept_id(同 approve.js L44-46 pattern)
+  // 撈員工 dept_id + employment_type(同 approve.js / publish.js pattern)
   const { data: emp } = await supabaseAdmin
-    .from('employees').select('dept_id').eq('id', period.employee_id).maybeSingle();
+    .from('employees').select('dept_id, employment_type').eq('id', period.employee_id).maybeSingle();
   const employeeDeptId = emp?.dept_id || null;
 
   // 時間閘門 + 角色授權
@@ -68,16 +68,29 @@ export default async function handler(req, res) {
   }
 
   // F2 守門:每天 ≥1 筆 schedules row(同 approve/publish)
+  // 兼職員工(part_time)放寬:本來就不是每天上班、只要求至少排到一天。
   const { data: scheds, error: schErr } = await supabaseAdmin
     .from('schedules').select('work_date').eq('period_id', id);
   if (schErr) return res.status(500).json({ error: schErr.message });
-  const cov = isPeriodFullyScheduled(period, scheds || []);
-  if (!cov.ok) {
-    return res.status(422).json({
-      error: 'FORCE_EMPTY_PERIOD',
-      detail: `缺少排班的日期:${cov.missingDates.join(', ')}`,
-      missingDates: cov.missingDates,
-    });
+  const isPartTime = emp?.employment_type === 'part_time';
+  if (isPartTime) {
+    if ((scheds || []).length === 0) {
+      return res.status(422).json({
+        error: 'FORCE_EMPTY_PERIOD',
+        detail: '兼職員工至少需排一天才能公告',
+        missingDates: [],
+      });
+    }
+    // 有排到天數即可、跳過 full-coverage 檢查
+  } else {
+    const cov = isPeriodFullyScheduled(period, scheds || []);
+    if (!cov.ok) {
+      return res.status(422).json({
+        error: 'FORCE_EMPTY_PERIOD',
+        detail: `缺少排班的日期:${cov.missingDates.join(', ')}`,
+        missingDates: cov.missingDates,
+      });
+    }
   }
 
   // walk 到 published — reducer 純驗轉移合法性(實際授權上面 forceFinalizeAuth 已過)。

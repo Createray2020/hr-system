@@ -54,7 +54,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'NOT_MANAGER', detail: '只有部門主管可公告' });
   }
   const { data: emp } = await supabaseAdmin
-    .from('employees').select('dept_id').eq('id', period.employee_id).maybeSingle();
+    .from('employees').select('dept_id, employment_type').eq('id', period.employee_id).maybeSingle();
   const employeeDeptId = emp?.dept_id || null;
   if (!employeeDeptId || caller.dept_id !== employeeDeptId) {
     return res.status(403).json({
@@ -73,16 +73,29 @@ export default async function handler(req, res) {
   // 的 .in('period_id', ...) 同 pattern,語意精準(這個 period 的 schedules)。
   // 員工同月跨 period 是反常狀態(schedule_periods UNIQUE 保證一員工一月一 row),
   // option A 寧可擋下逼清資料、不寬鬆放行。
+  // 兼職員工(part_time)放寬:本來就不是每天上班、只要求至少排到一天。
   const { data: scheds, error: schErr } = await supabaseAdmin
     .from('schedules').select('work_date').eq('period_id', id);
   if (schErr) return res.status(500).json({ error: schErr.message });
-  const cov = isPeriodFullyScheduled(period, scheds || []);
-  if (!cov.ok) {
-    return res.status(422).json({
-      error: 'PUBLISH_EMPTY_PERIOD',
-      detail: `缺少排班的日期:${cov.missingDates.join(', ')}`,
-      missingDates: cov.missingDates,
-    });
+  const isPartTime = emp?.employment_type === 'part_time';
+  if (isPartTime) {
+    if ((scheds || []).length === 0) {
+      return res.status(422).json({
+        error: 'PUBLISH_EMPTY_PERIOD',
+        detail: '兼職員工至少需排一天才能公告',
+        missingDates: [],
+      });
+    }
+    // 有排到天數即可、跳過 full-coverage 檢查
+  } else {
+    const cov = isPeriodFullyScheduled(period, scheds || []);
+    if (!cov.ok) {
+      return res.status(422).json({
+        error: 'PUBLISH_EMPTY_PERIOD',
+        detail: `缺少排班的日期:${cov.missingDates.join(', ')}`,
+        missingDates: cov.missingDates,
+      });
+    }
   }
 
   // update status (optimistic：避免 race) + Phase 2.x.3 published_by/at audit

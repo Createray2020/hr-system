@@ -237,4 +237,32 @@ describe('/api/schedule-periods/:id/force-finalize', () => {
     expect(upd?.patch.approved_by).toBe('M1');
     expect(upd?.patch.published_by).toBe('C1');
   });
+
+  // ─── part_time 兼職放寬:不要求每天有 row、但至少排 1 天 ───
+  it('part_time + CEO 6/1 + 部分天有 row(非全覆蓋)→ 200 published(跳過 full-coverage)', async () => {
+    overrides.caller = CEO_USER;
+    setupDraftPeriod({
+      employee: { dept_id: 'D1', employment_type: 'part_time' },
+      schedules: [{ work_date: '2026-06-02' }],  // 只排 1 天、6/1 / 6/3 空著
+    });
+    const [req, res] = makeReqRes({ query: { id: 'P1' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.status).toBe('published');
+    expect(res.body?.tier).toBe('ceo_force');
+  });
+
+  it('part_time + CEO 6/1 + 完全 0 筆 schedules → 422 + detail「至少需排一天」、missingDates=[]', async () => {
+    overrides.caller = CEO_USER;
+    setupDraftPeriod({
+      employee: { dept_id: 'D1', employment_type: 'part_time' },
+      schedules: [],
+    });
+    const [req, res] = makeReqRes({ query: { id: 'P1' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(422);
+    expect(res.body?.error).toBe('FORCE_EMPTY_PERIOD');
+    expect(res.body?.detail).toContain('至少需排一天');
+    expect(res.body?.missingDates).toEqual([]);
+  });
 });

@@ -228,4 +228,35 @@ describe('/api/schedule-periods/:id/approve — Phase 2.x.3 嚴格 spec', () => 
     expect(res.body?.missingDates).toEqual(['2026-06-01', '2026-06-02', '2026-06-03']);
     expect(calls.updates.find(u => u.table === 'schedule_periods')).toBeUndefined();
   });
+
+  // ─── part_time 兼職放寬:不要求每天有 row、但至少排 1 天 ───
+  it('part_time + 部分天有 row(非全覆蓋)→ 200(跳過 full-coverage、正常 approve)', async () => {
+    overrides.caller = MGR;
+    setupSubmittedPeriod({
+      employee: { dept_id: 'D1', employment_type: 'part_time' },
+      schedules: [
+        // 只排 1 天、其他兩天空著
+        { work_date: '2026-06-02' },
+      ],
+    });
+    const [req, res] = makeReqRes({ query: { id: 'P1' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(calls.updates.find(u => u.table === 'schedule_periods')).toBeDefined();
+  });
+
+  it('part_time + 完全 0 筆 schedules → 422 + detail「至少需排一天」、missingDates=[]', async () => {
+    overrides.caller = MGR;
+    setupSubmittedPeriod({
+      employee: { dept_id: 'D1', employment_type: 'part_time' },
+      schedules: [],
+    });
+    const [req, res] = makeReqRes({ query: { id: 'P1' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(422);
+    expect(res.body?.error).toBe('APPROVE_EMPTY_PERIOD');
+    expect(res.body?.detail).toContain('至少需排一天');
+    expect(res.body?.missingDates).toEqual([]);
+    expect(calls.updates.find(u => u.table === 'schedule_periods')).toBeUndefined();
+  });
 });
