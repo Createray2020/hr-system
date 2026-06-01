@@ -333,7 +333,10 @@ export default async function handler(req, res) {
     if (SUPABASE_SERVICE_KEY) {
       try {
         const adminClient = createClient(process.env.SUPABASE_URL, SUPABASE_SERVICE_KEY);
-        authEmail = body.email || `${body.emp_no || id}@chuwa.hr`;
+        // Auth 帳號一律用 {emp_no}@chuwa.hr 後綴(對齊 api/auth.js L21
+        // change-password 的 email 拼裝;body.email 仍寫進 employees.email 聯絡用、
+        // 但不再當 Auth 登入帳號、避免兩端 email 不一致導致簽入失敗)
+        authEmail = `${body.emp_no || id}@chuwa.hr`;
         const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
           email: authEmail,
           password: '123456',
