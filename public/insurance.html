@@ -355,8 +355,9 @@ async function loadBrackets() {
 }
 
 /* ── Status helpers ─────────────────────────────────────────────────────── */
+// 兼職比照正職:走 insMap 判 unset/insured/none、不再用 part_time 獨立 status 攔截。
+// HR 可逐人決定 part_time 員工要不要投保(原本被前端擋住、現在解開)。
 function insStatus(emp) {
-  if (emp.employment_type === 'part_time') return 'part_time';
   const ins = insMap[emp.id];
   if (!ins) return 'unset';
   if (ins.has_insurance === false || emp.has_insurance === false) return 'none';
@@ -364,6 +365,7 @@ function insStatus(emp) {
 }
 
 function statusBadge(status) {
+  // 'part_time' map 項保留(向後相容、實際不再被命中)、part_time 員工現走 insured/unset/none 三態
   const m = { insured:'已投保', none:'無投保', unset:'未設定', part_time:'時薪制' };
   const c = { insured:'badge-ins', none:'badge-no', unset:'badge-unset', part_time:'badge-pt' };
   return `<span class="badge ${c[status]||'badge-no'}" style="font-size:11px">${m[status]||status}</span>`;
@@ -399,15 +401,20 @@ function renderTable() {
     const salary = calcSalary(emp);
     const status = insStatus(emp);
     const isPt   = emp.employment_type === 'part_time';
-    const canSel = !isPt;  // only selectable for non part-time
+    // 兼職開放勾選(批次操作)、checkbox 不再 disabled
+    // 月薪欄:part_time 顯示已設投保級距(ins.labor_ins_bracket)、無 ins 顯示「—」、
+    //         非 part_time 維持月薪推算值
+    const monthDisp = isPt
+      ? (ins?.labor_ins_bracket ? fmtN(ins.labor_ins_bracket) : '—')
+      : (salary ? fmt(salary) : '—');
     return `<tr>
       <td style="text-align:center">
         <input type="checkbox" class="emp-checkbox" data-id="${emp.id}"
-          ${canSel?'':'disabled style="opacity:.3"'} onchange="updateSelection()">
+          onchange="updateSelection()">
       </td>
       <td><div class="emp-cell"><div class="avatar">${emp.avatar||emp.name?.[0]||'?'}</div>
         <div><div class="emp-name">${emp.name}</div><div class="emp-dept">${emp.dept_name || emp.dept || ''}</div></div></div></td>
-      <td style="font-family:'DM Mono',monospace;font-size:12px">${isPt?`<span style="${dim}">時薪制</span>`:salary?fmt(salary):'—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px">${monthDisp}</td>
       <td>${statusBadge(status)}</td>
       <td style="font-family:'DM Mono',monospace;font-size:12px">${ins?.labor_ins_bracket?fmtN(ins.labor_ins_bracket):'—'}</td>
       <td style="font-family:'DM Mono',monospace;font-size:12px;color:var(--red)">${ins?.labor_ins_employee?fmt(ins.labor_ins_employee):'—'}</td>
@@ -422,8 +429,8 @@ function renderTable() {
 }
 
 function updateStats() {
-  const active  = allEmployees.filter(e => e.employment_type !== 'part_time');
-  const insured = active.filter(e => insStatus(e) === 'insured');
+  // 兼職納入統計:has_insurance 看 ins row + emp.has_insurance、不再排除 part_time
+  const insured = allEmployees.filter(e => insStatus(e) === 'insured');
   document.getElementById('st-insured').textContent = insured.length;
   document.getElementById('st-labor').textContent   = fmt(insured.reduce((s,e)=>s+(insMap[e.id]?.labor_ins_company||0),0));
   document.getElementById('st-health').textContent  = fmt(insured.reduce((s,e)=>s+(insMap[e.id]?.health_ins_company||0),0));
@@ -431,9 +438,9 @@ function updateStats() {
 }
 
 function checkUnsetNotice() {
+  // 兼職納入未設提醒(讓 has_insurance=true 但無 ins row 的兼職也會被列出)
   const unset = allEmployees.filter(e =>
     e.has_insurance !== false &&
-    e.employment_type !== 'part_time' &&
     !insMap[e.id]
   );
   const notice = document.getElementById('unset-notice');
@@ -662,10 +669,15 @@ function openModal(empId) {
   document.getElementById('m-avatar').textContent   = emp.avatar || emp.name?.[0] || '?';
   document.getElementById('m-emp-name').textContent = emp.name;
   document.getElementById('m-emp-info').textContent = `${emp.dept_name || emp.dept || ''} · ${emp.position}`;
-  document.getElementById('m-salary').textContent   = salary ? fmt(salary) : '時薪制';
+  // 月薪欄:part_time 顯示已設投保級距(沒設就「時薪制」)、非 part_time 顯示月薪推算值
+  const isPt = emp.employment_type === 'part_time';
+  document.getElementById('m-salary').textContent = isPt
+    ? (ins?.labor_ins_bracket ? fmtN(ins.labor_ins_bracket) : '時薪制')
+    : (salary ? fmt(salary) : '時薪制');
 
-  const isPt  = emp.employment_type === 'part_time';
-  const noIns = isPt || ins?.has_insurance === false || emp.has_insurance === false;
+  // 兼職比照正職:noIns 只看 ins.has_insurance / emp.has_insurance,不再用 isPt 強鎖
+  // 讓 HR 可對兼職勾投保 + 填級距
+  const noIns = ins?.has_insurance === false || emp.has_insurance === false;
   document.getElementById('m-no-insurance').checked = noIns;
   document.getElementById('m-ins-form').style.opacity       = noIns ? '0.4' : '1';
   document.getElementById('m-ins-form').style.pointerEvents = noIns ? 'none' : '';
