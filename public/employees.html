@@ -263,11 +263,6 @@
     <!-- 薪資結構（唯讀） -->
     <div class="detail-section">
       <div class="detail-section-title">薪資結構（自動計算）</div>
-      <!-- 兼職時薪 input(employment_type=part_time 時 onEmpTypeToggleSalaryFields 切顯) -->
-      <div class="form-row" id="hourly-rate-row" style="display:none;margin-bottom:12px">
-        <label class="form-label">時薪 (NT$/小時)</label>
-        <input class="form-input" type="number" id="f-hourly-rate" min="0" step="0.01" placeholder="例:200">
-      </div>
       <div class="salary-summary" id="salary-summary-block">
         <div class="sal-item">
           <div class="sal-label">底薪</div>
@@ -585,15 +580,11 @@ function getSelectedEmpType() {
   return document.getElementById('f-type-part').checked ? 'part_time' : 'full_time';
 }
 
-// 兼職時薪欄 vs 正職職等欄 切換顯示(新增 + 編輯 mode 都跑)
+// 切換正/兼職時刷新薪資結構顯示(讓 salary-summary 跟著切到對的版本)
 function onEmpTypeToggleSalaryFields() {
-  const isPart = document.getElementById('f-type-part').checked;
-  // 兼職:顯示時薪欄、隱藏「薪資結構(自動計算)」唯讀區
-  // 正職:反之
-  const hourlyRow = document.getElementById('hourly-rate-row');
-  const summary   = document.getElementById('salary-summary-block');
-  if (hourlyRow) hourlyRow.style.display = isPart ? '' : 'none';
-  if (summary)   summary.style.display   = isPart ? 'none' : '';
+  // part_time / full_time 都顯示職等選單,onGradeLevelChange 內依 isPart 切顯內容
+  // (兼職 → 時薪 / 正職 → 月薪結構),所以這裡只需要觸發一次 onGradeLevelChange
+  onGradeLevelChange();
 }
 
 function onEmpTypeOrHireChange() {
@@ -646,9 +637,44 @@ function onGradeLevelChange() {
   const level = parseInt(document.getElementById('f-grade-level').value) || null;
   const isManager = document.getElementById('f-is-manager').checked;
   const role  = document.getElementById('f-role').value;
+  const isPart = document.getElementById('f-type-part').checked;
 
   const row = allSalaryGrades.find(r => r.grade === grade && r.grade_level === level);
+  const mgrNote = document.getElementById('mgr-note');
 
+  // ── part_time 分支:顯示時薪、月薪相關欄全 — ──
+  // hourly_rate 由 salary_grade.hourly_rate 帶(2026-06-02 migration、一等 1-3 有值)
+  // 二等/三等 hourly_rate=NULL → 顯紅字提示、saveEmployee 會擋
+  if (isPart) {
+    const hr = row?.hourly_rate;
+    const hasHr = hr != null && Number(hr) > 0;
+    document.getElementById('disp-base').textContent =
+      hasHr ? '$' + Number(hr).toLocaleString() + ' / 小時' : '—';
+    document.getElementById('disp-grade-allow').textContent = '—';
+    document.getElementById('disp-att-bonus').textContent   = '—';
+    document.getElementById('att-bonus-hint').style.display = 'none';
+    document.getElementById('disp-mgr-allow').textContent   = '—';
+    document.getElementById('disp-mgr-wrap').style.opacity  = '0.4';
+    const total = document.getElementById('disp-total');
+    if (hasHr) {
+      total.textContent = '$' + Number(hr).toLocaleString() + ' / 小時';
+      total.style.color = '';
+    } else if (row) {
+      // 選到二等/三等(salary_grade.hourly_rate 為 NULL)
+      total.textContent = '此職等未設定兼職時薪、請改選一等';
+      total.style.color = 'var(--red)';
+    } else {
+      total.textContent = '—';
+      total.style.color = '';
+    }
+    // 兼職一律不視為部門主管
+    document.getElementById('f-is-manager').disabled = true;
+    document.getElementById('f-is-manager').checked  = false;
+    if (mgrNote) mgrNote.textContent = '（兼職不可擔任主管）';
+    return;
+  }
+
+  // ── full_time 分支(原邏輯不變)──
   const base   = 30000;
   const ga     = row ? (row.grade_allowance  || 0) : 0;
   const skipAb = Roles.skipAttendanceBonus({ role, is_manager: isManager });
@@ -657,7 +683,6 @@ function onGradeLevelChange() {
   const ma     = (isManager && canMgr) ? (row?.manager_allowance || 0) : 0;
 
   // Update manager checkbox availability
-  const mgrNote = document.getElementById('mgr-note');
   if (row) {
     document.getElementById('f-is-manager').disabled = !canMgr;
     mgrNote.textContent = canMgr ? '' : '（此職等職級不可擔任主管）';
@@ -668,6 +693,7 @@ function onGradeLevelChange() {
   }
 
   // Update display
+  document.getElementById('disp-base').textContent        = '$' + base.toLocaleString();
   document.getElementById('disp-grade-allow').textContent = ga  ? '$'+ga.toLocaleString()  : '—';
   document.getElementById('disp-att-bonus').textContent   = ab  ? '$'+ab.toLocaleString()  : '—';
   document.getElementById('att-bonus-hint').style.display = skipAb ? 'block' : 'none';
@@ -675,7 +701,9 @@ function onGradeLevelChange() {
   document.getElementById('disp-mgr-wrap').style.opacity  = isManager && canMgr ? '1' : '0.4';
 
   const total = row ? base + ga + ab + ma : null;
-  document.getElementById('disp-total').textContent = total ? '$'+total.toLocaleString() : '—';
+  const totalEl = document.getElementById('disp-total');
+  totalEl.textContent = total ? '$'+total.toLocaleString() : '—';
+  totalEl.style.color = '';
 }
 
 function calcSeniority(hireDate) {
@@ -714,7 +742,6 @@ function openAddModal() {
   document.getElementById('btn-delete').style.display = 'none';
   document.getElementById('f-extra-allow').value      = '';
   document.getElementById('f-extra-allow-note').value = '';
-  document.getElementById('f-hourly-rate').value      = '';
   resetSalaryDisplay();
   document.getElementById('emp-modal').classList.add('open');
 }
@@ -732,10 +759,8 @@ function openEditModal(id) {
   document.getElementById('f-type-full').checked    = !isPart;
   document.getElementById('f-type-part').checked    =  isPart;
   document.getElementById('f-no-insurance').checked = (e.has_insurance === false);
-  // 切顯時薪欄 / 薪資結構區(編輯 mode 也要跑、依員工當前 employment_type)
-  onEmpTypeToggleSalaryFields();
-  // 兼職:帶入現有時薪
-  document.getElementById('f-hourly-rate').value = e.hourly_rate != null ? e.hourly_rate : '';
+  // 切換正/兼職時刷新薪資結構顯示(編輯 mode 也要跑、依員工當前 employment_type)
+  // 後續 grade/level 帶入後 onGradeLevelChange 會依 isPart 顯示時薪 / 月薪結構
   document.getElementById('f-email').value       = e.email       || '';
   document.getElementById('f-phone').value       = e.phone       || '';
   document.getElementById('f-id-num').value      = e.id_number   || '';
@@ -785,8 +810,18 @@ function resetSalaryDisplay() {
 async function saveEmployee() {
   const empType = getSelectedEmpType();
   const isPart  = empType === 'part_time';
-  // 兼職:base_salary 寫 0、hourly_rate 從 input 讀、grade 相關全 0
-  // 正職:維持原有 grade-based 自動帶入(base_salary 寫死 30000、grade 加給從 GRADE_LEVELS 表)
+  // 兼職:grade/grade_level 保留(由職等帶時薪)、base_salary=0、hourly_rate
+  //       從 salary_grade.hourly_rate 帶(一等 1-3 有值、二等三等 NULL)、
+  //       月薪型加給(grade_allowance/attendance_bonus/manager_allowance)一律 0
+  // 正職:維持原有 grade-based 自動帶入(base_salary=30000、加給從 salary_grade)
+  const gradeRow = currentGradeRow();
+  if (isPart) {
+    const hr = gradeRow?.hourly_rate;
+    if (hr == null || Number(hr) <= 0) {
+      toast('此職等職級未設定兼職時薪、請改選「一等 1-3」', 'error');
+      return;
+    }
+  }
   const payload = {
     name:            document.getElementById('f-name').value.trim(),
     emp_no:          document.getElementById('f-emp-no').value.trim() || null,
@@ -799,24 +834,26 @@ async function saveEmployee() {
     dept_id:      document.getElementById('f-dept').value || null,
     position:     document.getElementById('f-position').value.trim(),
     role:         document.getElementById('f-role').value,
-    grade:             isPart ? null : (document.getElementById('f-grade').value || null),
-    grade_level:       isPart ? null : (parseInt(document.getElementById('f-grade-level').value) || null),
+    grade:             document.getElementById('f-grade').value || null,
+    grade_level:       parseInt(document.getElementById('f-grade-level').value) || null,
     is_manager:        document.getElementById('f-is-manager').checked,
     base_salary:       isPart ? 0 : 30000,
-    hourly_rate:       isPart ? (parseFloat(document.getElementById('f-hourly-rate').value) || 0) : 0,
-    grade_allowance:   isPart ? 0 : (currentGradeRow()?.grade_allowance  ?? 0),
+    // hourly_rate:part_time 直接送(從職等帶);正職故意省略、讓後端
+    // autoRecalcHourlyRate(api/employees/[id].js L15-23)算 base/240=125
+    // (省略時 body.hourly_rate === undefined → 後端會 recalc)
+    ...(isPart ? { hourly_rate: Number(gradeRow?.hourly_rate) || 0 } : {}),
+    grade_allowance:   isPart ? 0 : (gradeRow?.grade_allowance  ?? 0),
     attendance_bonus:  (() => {
       if (isPart) return 0;
       const r2 = document.getElementById('f-role').value;
       const m2 = document.getElementById('f-is-manager').checked;
       if (Roles.skipAttendanceBonus({ role: r2, is_manager: m2 })) return 0;
-      return currentGradeRow()?.attendance_bonus ?? 0;
+      return gradeRow?.attendance_bonus ?? 0;
     })(),
     manager_allowance: (() => {
       if (isPart) return 0;
-      const row = currentGradeRow();
-      return (document.getElementById('f-is-manager').checked && row?.can_be_manager)
-        ? (row?.manager_allowance ?? 0) : 0;
+      return (document.getElementById('f-is-manager').checked && gradeRow?.can_be_manager)
+        ? (gradeRow?.manager_allowance ?? 0) : 0;
     })(),
     extra_allowance:      parseFloat(document.getElementById('f-extra-allow').value) || 0,
     extra_allowance_note: document.getElementById('f-extra-allow-note').value.trim() || null,
