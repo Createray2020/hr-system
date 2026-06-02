@@ -999,8 +999,20 @@ function escapeHtml(s) {
 }
 
 // ── Feature A 上傳 helper(對齊 approvals.html L306-334、但用本頁 _sb / currentUser)──
+// ASCII-safe storage key(對齊 approvals.html L306-322):中文 / 括號 / # / % 會被
+// Supabase Storage 拒收(Invalid key),storage key 嚴格 sanitize 成 [A-Za-z0-9._-]、
+// 副檔名轉小寫只留 [a-z0-9];原始檔名留 metadata.name 顯示用、不影響 UI。
 function _safeFilename(name) {
-  return String(name).replace(/[\/\\"']/g, '_').slice(0, 120);
+  const raw = String(name || '');
+  const dot = raw.lastIndexOf('.');
+  let base = dot > 0 ? raw.slice(0, dot) : raw;
+  let ext  = dot > 0 ? raw.slice(dot + 1) : '';
+  base = base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  if (!base) base = 'file';
+  if (base.length > 80) base = base.slice(0, 80);
+  ext = ext.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!ext) ext = 'bin';
+  return `${base}.${ext}`;
 }
 async function uploadApprovalAttachment(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();

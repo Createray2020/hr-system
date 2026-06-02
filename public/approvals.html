@@ -303,8 +303,21 @@ let currentDetailData = null; // Feature B:renderDetail 快取最後一次載入
 function _esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// ASCII-safe storage key:Supabase Storage 對非 ASCII / 部分特殊字元(中文、括號、#、%
+// 等)會回 Invalid key,故 storage key 嚴格 sanitize。基礎名稱(去副檔名)只留
+// [A-Za-z0-9._-]、其餘換 _、collapse 連續 _、trim 頭尾 _,空字串時 fallback 'file';
+// 副檔名轉小寫只留 [a-z0-9],非法用 'bin'。原始檔名(含中文)仍存 metadata.name 顯示用。
 function _safeFilename(name) {
-  return String(name).replace(/[\/\\"']/g, '_').slice(0, 120);
+  const raw = String(name || '');
+  const dot = raw.lastIndexOf('.');
+  let base = dot > 0 ? raw.slice(0, dot) : raw;
+  let ext  = dot > 0 ? raw.slice(dot + 1) : '';
+  base = base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+  if (!base) base = 'file';
+  if (base.length > 80) base = base.slice(0, 80);
+  ext = ext.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!ext) ext = 'bin';
+  return `${base}.${ext}`;
 }
 async function uploadApprovalAttachment(file) {
   const ext = (file.name.split('.').pop() || '').toLowerCase();
