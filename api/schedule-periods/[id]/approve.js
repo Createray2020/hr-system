@@ -32,24 +32,32 @@ export default async function handler(req, res) {
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'period not found' });
 
-  // Phase 2.x.3:self-approval guard
+  // Phase 2.x.3:self-approval guard(executive 也擋、不開)
   if (caller.id && caller.id === period.employee_id) {
     return res.status(403).json({ error: 'CANNOT_APPROVE_OWN_PERIOD' });
   }
 
-  // Phase 2.x.3:嚴格 dept+is_manager(拔 isBackofficeRole bypass)
-  if (caller.is_manager !== true || !caller.dept_id) {
+  // executive(admin/chairman/ceo) bypass:跨部門可定案、不需要 is_manager
+  const isExecutive = ['admin', 'chairman', 'ceo'].includes(caller.role);
+
+  // 非 executive 先驗 is_manager(短路、避免 emp 撈失敗時把「非主管」case 推遲)
+  if (!isExecutive && (caller.is_manager !== true || !caller.dept_id)) {
     return res.status(403).json({ error: 'NOT_MANAGER', detail: '只有部門主管可定案' });
   }
+
+  // 撈員工 dept_id + employment_type(同部門比對 + F2 part_time 放寬都要)
   const { data: emp } = await supabaseAdmin
     .from('employees').select('dept_id, employment_type').eq('id', period.employee_id).maybeSingle();
   const employeeDeptId = emp?.dept_id || null;
-  if (!employeeDeptId || caller.dept_id !== employeeDeptId) {
-    return res.status(403).json({
-      error: 'NOT_SAME_DEPT',
-      detail: '只有同部門主管可定案',
-      employee_dept_id: employeeDeptId,
-    });
+
+  if (!isExecutive) {
+    if (!employeeDeptId || caller.dept_id !== employeeDeptId) {
+      return res.status(403).json({
+        error: 'NOT_SAME_DEPT',
+        detail: '只有同部門主管可定案',
+        employee_dept_id: employeeDeptId,
+      });
+    }
   }
 
   const tr = canTransition(period.status, 'approve', { is_manager: true });

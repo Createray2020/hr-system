@@ -6,6 +6,7 @@
 //   3. 非 is_manager → 403
 //   4. 跨部門 manager → 403
 //   5. HR(is_manager=false)→ 403(原本 isBackofficeRole bypass 拔)
+//   5b. CEO/admin/chairman(executive)→ 200 跨部門 bypass(2026-06 加)
 //   6. 真主管(同 dept + is_manager + 非自己)→ 200 + approved_by=caller.id
 //   7. 偽造 approved_by(client 傳)→ ignored
 
@@ -137,12 +138,22 @@ describe('/api/schedule-periods/:id/approve — Phase 2.x.3 嚴格 spec', () => 
     expect(res.body?.error).toBe('NOT_MANAGER');
   });
 
-  it('CEO(is_manager=false)→ 403', async () => {
+  it('CEO(role=ceo、is_manager=false)→ 200(executive bypass、跨部門可定案)', async () => {
     overrides.caller = CEO;
     setupSubmittedPeriod();
     const [req, res] = makeReqRes({ query: { id: 'P1' } });
     await handler(req, res);
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(200);
+    const upd = calls.updates.find(u => u.table === 'schedule_periods');
+    expect(upd?.patch.approved_by).toBe('C1');
+  });
+
+  it('admin / chairman 同 CEO → executive bypass、200', async () => {
+    overrides.caller = { id: 'A1', role: 'admin', is_manager: false, dept_id: null };
+    setupSubmittedPeriod();
+    const [req, res] = makeReqRes({ query: { id: 'P1' } });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
   });
 
   it('跨部門 manager → 403(NOT_SAME_DEPT)', async () => {

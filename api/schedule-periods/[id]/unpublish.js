@@ -1,9 +1,9 @@
 // api/schedule-periods/[id]/unpublish.js
 // POST /api/schedule-periods/:id/unpublish
-// F3:主管 / admin / chairman 撤回公告(published → approved)、通知員工
+// F3:主管 / admin / chairman / ceo 撤回公告(published → approved)、通知員工
 //
 // 反向版骨架對齊 publish.js,但:
-//   - 權限放寬:admin / chairman / 同部門主管 三選一(endpoint 層擋,純函式 RULES
+//   - 權限放寬:admin / chairman / ceo / 同部門主管 四選一(endpoint 層擋,純函式 RULES
 //     仍只認 is_manager 布林、endpoint 算完轉成 { is_manager: true } 傳進去)
 //   - 不需要 F2 守門(撤回是反向、period 早已有 schedules)
 //   - 決策 4:published_by / published_at 保留、不在 update patch 內動
@@ -28,7 +28,7 @@ function repoFromSupabase() {
   };
 }
 
-const UNPUBLISH_ALLOWED_ROLES = ['admin', 'chairman'];
+const UNPUBLISH_ALLOWED_ROLES = ['admin', 'chairman', 'ceo'];
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -53,8 +53,8 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'CANNOT_UNPUBLISH_OWN_PERIOD' });
   }
 
-  // 權限(方案 a、endpoint 層擋):admin / chairman / 同部門主管 三選一
-  //   admin / chairman:不分 dept 都可(跨部門 bypass)
+  // 權限(方案 a、endpoint 層擋):admin / chairman / ceo / 同部門主管 四選一
+  //   admin / chairman / ceo:不分 dept 都可(跨部門 bypass)
   //   主管:必須同部門(對齊 publish.js NOT_SAME_DEPT 嚴格設計)
   let authorized = UNPUBLISH_ALLOWED_ROLES.includes(caller.role);
   if (!authorized && caller.is_manager === true && caller.dept_id) {
@@ -66,7 +66,7 @@ export default async function handler(req, res) {
   if (!authorized) {
     return res.status(403).json({
       error: 'NOT_AUTHORIZED',
-      detail: '撤回公告限 admin / chairman / 同部門主管',
+      detail: '撤回公告限 admin / chairman / ceo / 同部門主管',
     });
   }
 

@@ -203,13 +203,12 @@ describe('/api/schedule-periods/:id/unpublish — F3 spec', () => {
     expect(res.body?.error).toBe('NOT_AUTHORIZED');
   });
 
-  it('CEO(role=ceo、is_manager=false)→ 403 NOT_AUTHORIZED(CEO 不在 allowlist、只 chairman 可)', async () => {
+  it('CEO(role=ceo、is_manager=false)→ 200(executive bypass、2026-06 加入 allowlist)', async () => {
     overrides.caller = CEO;
     setupPublishedPeriod();
     const [req, res] = makeReqRes({ query: { id: 'P1' } });
     await handler(req, res);
-    expect(res.statusCode).toBe(403);
-    expect(res.body?.error).toBe('NOT_AUTHORIZED');
+    expect(res.statusCode).toBe(200);
   });
 
   it('一般員工(非自己)→ 403 NOT_AUTHORIZED', async () => {
