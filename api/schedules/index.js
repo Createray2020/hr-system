@@ -277,6 +277,18 @@ async function handleNewPost(req, res) {
   if (pErr) return res.status(500).json({ error: pErr.message });
   if (!period) return res.status(404).json({ error: 'period not found' });
 
+  // 2026-06 防禦:work_date 必須落在 period 範圍內,避免把跨月日期塞進別月 period_id
+  // (schedule_periods UNIQUE(employee_id, year, month) 保證一員工一月一 period,跨月寫
+  // 進別 period_id 是邏輯錯誤)
+  if (period.period_start && period.period_end &&
+      (String(work_date) < String(period.period_start) || String(work_date) > String(period.period_end))) {
+    return res.status(422).json({
+      error: 'WORK_DATE_OUT_OF_PERIOD',
+      detail: `work_date ${work_date} 不在 period ${period.period_start} ~ ${period.period_end} 範圍內`,
+      period_start: period.period_start, period_end: period.period_end,
+    });
+  }
+
   // 權限：員工 vs 主管/HR
   const today = new Date().toISOString().slice(0, 10);
   const isSelf = caller.id && caller.id === employee_id;

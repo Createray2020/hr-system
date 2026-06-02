@@ -242,4 +242,47 @@ describe('canManagerEditSchedule', () => {
     );
     expect(r.ok).toBe(true);
   });
+
+  // 2026-06 fail-closed:workDate 缺漏不再 bypass
+  it('C5 fail-closed: 主管 + published + workDate=undefined → MANAGER_LATE_DENIED', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'published' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      undefined,  // 不傳 workDate
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('C5 fail-closed: 主管 + locked + workDate=null → MANAGER_LATE_DENIED', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'locked' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      null,
+    );
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('C5 fail-closed: HR + published + workDate 缺 → 仍 ok(HR bypass)', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'published' }),
+      { id: 'HR1', role: 'hr', is_manager: false },
+      '2026-04-26',
+      undefined,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('C5 fail-closed: 主管 + draft + workDate 缺 → ok(draft 不受 isPublished 限制)', () => {
+    const r = canManagerEditSchedule(
+      period({ status: 'draft' }),
+      { id: 'M1', role: 'employee', is_manager: true, in_same_dept: true },
+      '2026-04-26',
+      undefined,
+    );
+    expect(r.ok).toBe(true);
+  });
 });

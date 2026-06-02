@@ -36,6 +36,17 @@ export default async function handler(req, res) {
     return res.status(409).json({ error: 'schedule has no period_id (legacy data?)' });
   }
 
+  // 2026-06 防禦:existing.work_date 必須落在 period 範圍內(legacy 資料防呆)
+  // PUT 不改 work_date、但若既有 row 是跨月錯置、後續 attendance cascade 會錯到別月
+  if (period.period_start && period.period_end &&
+      (String(existing.work_date) < String(period.period_start) || String(existing.work_date) > String(period.period_end))) {
+    return res.status(422).json({
+      error: 'WORK_DATE_OUT_OF_PERIOD',
+      detail: `schedule.work_date ${existing.work_date} 不在 period ${period.period_start} ~ ${period.period_end} 範圍內`,
+      period_start: period.period_start, period_end: period.period_end,
+    });
+  }
+
   // 權限檢查
   const today = new Date().toISOString().slice(0, 10);
   const isSelf = caller.id && caller.id === existing.employee_id;
