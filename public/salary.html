@@ -239,7 +239,7 @@ function render(){
       <td class="num auto-cell">${fmt$(r.comp_expiry_payout)}</td>
       <td class="num auto-cell">${fmt$(r.settlement_amount)}</td>
       <td class="num auto-cell">${fmt$(r.holiday_work_pay)}</td>
-      <td class="num manual-cell">${fmt$(n0(r.allowance)+n0(r.extra_allowance))}</td>
+      <td class="num manual-cell">${fmt$(n0(r.allowance)+n0(r.extra_allowance)+n0(r.night_allowance))}</td>
       <td class="num auto-cell">${fmt$(r.deduct_absence)}</td>
       <td class="num manual-cell">${fmt$(r.deduct_labor_ins)}</td>
       <td class="num manual-cell">${fmt$(r.deduct_health_ins)}</td>
@@ -398,7 +398,7 @@ function renderSummary(rows){
       <td class="num">${fmt$(sum('comp_expiry_payout'))}</td>
       <td class="num">${fmt$(sum('settlement_amount'))}</td>
       <td class="num">${fmt$(sum('holiday_work_pay'))}</td>
-      <td class="num">${fmt$(sumExpr(r => n0(r.allowance) + n0(r.extra_allowance)))}</td>
+      <td class="num">${fmt$(sumExpr(r => n0(r.allowance) + n0(r.extra_allowance) + n0(r.night_allowance)))}</td>
       <td class="num">${fmt$(sum('deduct_absence'))}</td>
       <td class="num">${fmt$(sum('deduct_labor_ins'))}</td>
       <td class="num">${fmt$(sum('deduct_health_ins'))}</td>

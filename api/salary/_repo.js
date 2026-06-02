@@ -185,6 +185,33 @@ export function makeSalaryRepo() {
       );
     },
 
+    // 夜間津貼:撈當月排班、過 confirmed/locked + 排除 is_off shift。
+    // night_eligible 解析:schedule.night_eligible_override ?? shift_types.night_allowance_eligible
+    //   - override = true → 強制 eligible
+    //   - override = false → 強制 not eligible
+    //   - override = null → 依 shift_types 預設(晚班/夜班 = true、日班/中班 = false)
+    async findNightShiftSchedulesByMonth(employee_id, year, month) {
+      const start = `${year}-${String(month).padStart(2,'0')}-01`;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const end = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+      const { data, error } = await supabaseAdmin
+        .from('schedules')
+        .select('work_date, scheduled_work_minutes, segment_no, status, night_eligible_override, shift_types(night_allowance_eligible, is_off)')
+        .eq('employee_id', employee_id)
+        .gte('work_date', start).lte('work_date', end)
+        .in('status', ['confirmed', 'locked']);
+      if (error) throw error;
+      return (data || [])
+        .filter(s => !s.shift_types?.is_off)
+        .map(s => {
+          const ovr = s.night_eligible_override;
+          const night_eligible = ovr === true ? true
+            : ovr === false ? false
+            : !!s.shift_types?.night_allowance_eligible;
+          return { work_date: s.work_date, night_eligible, scheduled_work_minutes: s.scheduled_work_minutes };
+        });
+    },
+
     async findHolidaysByMonth(year, month) {
       const start = `${year}-${String(month).padStart(2,'0')}-01`;
       const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();

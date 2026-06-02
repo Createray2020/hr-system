@@ -12,14 +12,14 @@
 // 規則:
 //   - 應發 base 欄是合成的:prorata_base 非 null 用 prorata_base + label「本薪(離職月按出勤比例)」;
 //     否則用 base_salary、label「本薪」
-//   - 應發 14 + base 合成 = 15 項;扣除 12 項
+//   - 應發 15 + base 合成 = 16 項(2026-06-03 加 night_allowance);扣除 12 項
 //   - subtotal 不濾 0(全項加總),item list 濾掉 value === 0
 //   - 絕不納入 admin_audit_note / status / snapshot / audit 欄位
 
 (function (global) {
   'use strict';
 
-  // 應發 15 項(__base__ 是合成欄、實際從 prorata_base / base_salary 動態取值)
+  // 應發 16 項(__base__ 是合成欄、實際從 prorata_base / base_salary 動態取值)
   const GROSS_FIELDS = [
     { key: '__base__',                label: '本薪' },
     { key: 'attendance_bonus_actual', label: '全勤獎金' },
@@ -27,6 +27,7 @@
     { key: 'manager_allowance',       label: '主管加給' },
     { key: 'allowance',               label: '津貼（系統）' },
     { key: 'extra_allowance',         label: '額外津貼' },
+    { key: 'night_allowance',         label: '夜間津貼' },
     { key: 'overtime_pay_auto',       label: '加班費（系統計算）' },
     { key: 'overtime_pay_manual',     label: '加班費（手動調整）' },
     { key: 'holiday_work_pay',        label: '假日工資' },

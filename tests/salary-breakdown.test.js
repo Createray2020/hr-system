@@ -169,11 +169,18 @@ describe('SalaryBreakdown.buildSalaryBreakdown', () => {
     expect(r2.grossSubtotal).toBe(0);
   });
 
-  it('GROSS_FIELDS / DEDUCT_FIELDS 順序固定、長度 15 + 12', () => {
-    expect(SB.GROSS_FIELDS.length).toBe(15);
+  it('GROSS_FIELDS / DEDUCT_FIELDS 順序固定、長度 16 + 12(2026-06-03 加 night_allowance)', () => {
+    expect(SB.GROSS_FIELDS.length).toBe(16);
     expect(SB.DEDUCT_FIELDS.length).toBe(12);
     expect(SB.GROSS_FIELDS[0].key).toBe('__base__');
     expect(SB.GROSS_FIELDS[1].key).toBe('attendance_bonus_actual');
+    // night_allowance 插在 extra_allowance 後、overtime_pay_auto 前
+    const nightIdx = SB.GROSS_FIELDS.findIndex(f => f.key === 'night_allowance');
+    const extraIdx = SB.GROSS_FIELDS.findIndex(f => f.key === 'extra_allowance');
+    const otIdx    = SB.GROSS_FIELDS.findIndex(f => f.key === 'overtime_pay_auto');
+    expect(extraIdx).toBeGreaterThan(-1);
+    expect(nightIdx).toBe(extraIdx + 1);
+    expect(otIdx).toBe(nightIdx + 1);
     expect(SB.DEDUCT_FIELDS[0].key).toBe('deduct_absence');
     expect(SB.DEDUCT_FIELDS[DEDUCT_LAST_IDX()].key).toBe('deduct_other');
   });
