@@ -269,6 +269,18 @@ export function makeLeaveRepo() {
       return data || [];
     },
 
+    // 2026-06:給 expiry-sweep auto_payout 用、回讀來源加班單的凍結金額(§32-1)。
+    // 只 select 折發需要的欄;不撈整 row 避免帶到不必要的審核欄位。
+    async findOvertimeRequestById(id) {
+      if (id == null) return null;
+      const { data, error } = await supabaseAdmin
+        .from('overtime_requests')
+        .select('id, estimated_pay, hours, pay_multiplier, overtime_date')
+        .eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data || null;
+    },
+
     // ─── system_overtime_settings ─────
     async getSystemOvertimeSettings() {
       const { data, error } = await supabaseAdmin
