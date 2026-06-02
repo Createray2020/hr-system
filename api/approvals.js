@@ -607,6 +607,59 @@ export default async function handler(req, res) {
       return res.status(200).json({ attachments: next, audit: auditLine });
     }
 
+    // ── 移除附件(從 attachments 陣列濾掉 + 嘗試刪 storage 實體檔)─────────────
+    // 權限三選一:backoffice(任何狀態)/ 該附件上傳者本人 / 申請人本人但限未定案
+    //   (申請人在 completed/rejected/cancelled 不能再動附件,避免破壞已完結紀錄)
+    // storage.remove 是 best-effort:DB metadata 才是 source of truth,實體檔失敗
+    // 也回 200(可能已被 GC、key 已 rename、或 RLS)、避免 DB / storage 不一致時前端 stuck。
+    if (body.action === 'remove_attachment') {
+      const { request_id, path } = body;
+      if (!request_id || !path) {
+        return res.status(400).json({ error: 'request_id 與 path 必填' });
+      }
+      const { data: request } = await supabaseAdmin
+        .from('approval_requests').select('*').is('deleted_at', null).eq('id', request_id).single();
+      if (!request) return res.status(404).json({ error: '找不到申請' });
+
+      const current = Array.isArray(request.attachments) ? request.attachments : [];
+      const target = current.find(a => a && a.path === path);
+      if (!target) return res.status(404).json({ error: '找不到該附件' });
+
+      const isBackoffice = isBackofficeRole(caller);
+      const isUploader   = target.uploaded_by === caller.id;
+      const isApplicantEditable = request.applicant_id === caller.id
+        && !['completed', 'rejected', 'cancelled'].includes(request.status);
+      if (!isBackoffice && !isUploader && !isApplicantEditable) {
+        return res.status(403).json({ error: '無權移除此附件' });
+      }
+
+      const next = current.filter(a => !a || a.path !== path);
+      const nowDate = new Date().toISOString().slice(0, 10);
+      const auditLine = `[${nowDate}] remove attachment by ${caller.id}: ${target.name || path}`;
+      const nextAudit = request.admin_audit_note
+        ? `${auditLine}\n${request.admin_audit_note}`
+        : auditLine;
+
+      const { error: upErr } = await supabaseAdmin
+        .from('approval_requests')
+        .update({
+          attachments: next,
+          admin_audit_note: nextAudit,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', request_id);
+      if (upErr) return res.status(500).json({ error: upErr.message });
+
+      // best-effort 刪 storage 實體檔
+      try {
+        await supabaseAdmin.storage.from('leave-attachments').remove([path]);
+      } catch (storageErr) {
+        console.warn('[remove_attachment] storage remove failed:', storageErr.message);
+      }
+
+      return res.status(200).json({ attachments: next, audit: auditLine });
+    }
+
     if (body.action === 'update_config') {
       // 僅 hr / admin 可改流程設定(對齊 lib/roles.js::canEditApprovalConfig)
       if (!['hr', 'admin'].includes(caller.role)) {

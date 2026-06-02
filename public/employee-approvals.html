@@ -918,13 +918,25 @@ async function openDetail(id) {
     const atts = Array.isArray(r.attachments) ? r.attachments : [];
     const canAttachMore = (currentUser.id === r.applicant_id || isBackoffice(currentUser))
                        && !['completed','rejected','cancelled'].includes(r.status);
+    // 移除附件 client mirror(後端三選一 gate、實際以後端判定為準)
+    const applicantEditable = currentUser.id === r.applicant_id
+                           && !['completed','rejected','cancelled'].includes(r.status);
     if (atts.length > 0 || canAttachMore) {
       let attHtml = '';
       if (atts.length > 0) {
-        attHtml += atts.map(a => `<div style="padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,.04)">
-          <a href="javascript:void(0)" onclick="openApprovalAttachment('${escapeHtml(r.id)}','${escapeHtml(a.path)}')" style="color:#7FBBFF;text-decoration:underline;font-size:13px">📄 ${escapeHtml(a.name)}</a>
-          <div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:2px">${a.size?Math.round(a.size/1024)+' KB · ':''}${a.uploaded_at?fmtDate(a.uploaded_at):''}${a.uploaded_by?' · '+escapeHtml(a.uploaded_by):''}</div>
-        </div>`).join('');
+        attHtml += atts.map(a => {
+          const canRemove = isBackoffice(currentUser) || a.uploaded_by === currentUser.id || applicantEditable;
+          const rmBtn = canRemove
+            ? `<button class="m-btn" style="font-size:10px;padding:2px 8px;color:#F87171;border:1px solid rgba(248,113,113,.4);background:transparent;flex:none;width:auto;margin-left:8px" onclick="removeApprovalAttachment('${escapeHtml(r.id)}','${escapeHtml(a.path)}')" title="移除附件">✕</button>`
+            : '';
+          return `<div style="padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,.04);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="flex:1;min-width:0">
+              <a href="javascript:void(0)" onclick="openApprovalAttachment('${escapeHtml(r.id)}','${escapeHtml(a.path)}')" style="color:#7FBBFF;text-decoration:underline;font-size:13px">📄 ${escapeHtml(a.name)}</a>
+              <div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:2px">${a.size?Math.round(a.size/1024)+' KB · ':''}${a.uploaded_at?fmtDate(a.uploaded_at):''}${a.uploaded_by?' · '+escapeHtml(a.uploaded_by):''}</div>
+            </div>
+            ${rmBtn}
+          </div>`;
+        }).join('');
       }
       if (canAttachMore) {
         attHtml += `<div style="margin-top:8px">
@@ -1060,6 +1072,19 @@ async function openApprovalAttachment(requestId, path) {
     if (r.signedUrl) window.open(r.signedUrl, '_blank');
     else toast('無法產生附件連結', 'error');
   } catch (e) { toast('附件開啟失敗:' + e.message, 'error'); }
+}
+
+// 移除附件:呼叫後端 remove_attachment(三選一 gate、後端判定為準),成功後重 render detail
+async function removeApprovalAttachment(requestId, path) {
+  if (!requestId || !path) return;
+  if (!confirm('確定刪除這個附件?')) return;
+  try {
+    await apiFetch('/api/approvals', { method:'POST', body: JSON.stringify({
+      action: 'remove_attachment', request_id: requestId, path,
+    })});
+    toast('已移除附件', 'success');
+    await openDetail(requestId);
+  } catch (e) { toast('移除失敗:' + e.message, 'error'); }
 }
 
 // Feature A:補件(申請人 / approver / backoffice 用)— 上傳後呼叫 add_attachment、重 render detail

@@ -957,14 +957,25 @@ function renderDetail(data) {
 
   // Feature A:附件區塊(僅在有附件 OR 可補件時 render;兩者都無 → 不出空區塊)
   const atts = Array.isArray(data.attachments) ? data.attachments : [];
+  // 移除附件權限:後端三選一 gate 的 client mirror(實際以後端判定為準)
+  const isBackoffice = Roles.isBackofficeRole?.(window.currentUser);
+  const applicantEditable = window.currentUser?.id === data.applicant_id
+                         && !['completed','rejected','cancelled'].includes(data.status);
   if (atts.length > 0 || canAttachMore) {
     html += `<div class="section-sep">📎 附件（${atts.length}）</div>`;
     if (atts.length > 0) {
       html += `<div style="background:rgba(0,0,0,.08);border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:12px">
-        ${atts.map(a => `<div style="padding:4px 0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
-          <a href="javascript:void(0)" onclick="openApprovalAttachment('${_esc(data.id)}','${_esc(a.path)}')" style="color:#7FBBFF;text-decoration:underline">📄 ${_esc(a.name)}</a>
-          <span style="color:var(--text-dim);font-size:11px">${a.size?Math.round(a.size/1024)+' KB · ':''}${a.uploaded_at?fmtDate(a.uploaded_at):''}${a.uploaded_by?' · '+_esc(a.uploaded_by):''}</span>
-        </div>`).join('')}
+        ${atts.map(a => {
+          const canRemove = isBackoffice || a.uploaded_by === window.currentUser?.id || applicantEditable;
+          const rmBtn = canRemove
+            ? `<button class="btn btn-ghost" style="font-size:10px;padding:1px 6px;color:#F87171;border:1px solid rgba(248,113,113,.4);margin-left:auto" onclick="removeApprovalAttachment('${_esc(data.id)}','${_esc(a.path)}')" title="移除附件">✕</button>`
+            : '';
+          return `<div style="padding:4px 0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+            <a href="javascript:void(0)" onclick="openApprovalAttachment('${_esc(data.id)}','${_esc(a.path)}')" style="color:#7FBBFF;text-decoration:underline">📄 ${_esc(a.name)}</a>
+            <span style="color:var(--text-dim);font-size:11px">${a.size?Math.round(a.size/1024)+' KB · ':''}${a.uploaded_at?fmtDate(a.uploaded_at):''}${a.uploaded_by?' · '+_esc(a.uploaded_by):''}</span>
+            ${rmBtn}
+          </div>`;
+        }).join('')}
       </div>`;
     }
     if (canAttachMore) {
@@ -1147,6 +1158,19 @@ async function openApprovalAttachment(requestId, path) {
     if (r.signedUrl) window.open(r.signedUrl, '_blank');
     else toast('無法產生附件連結', 'error');
   } catch (e) { toast('附件開啟失敗：' + e.message, 'error'); }
+}
+
+// 移除附件:呼叫後端 remove_attachment(三選一 gate、後端判定為準),成功後重 render detail
+async function removeApprovalAttachment(requestId, path) {
+  if (!requestId || !path) return;
+  if (!confirm('確定刪除這個附件?')) return;
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({
+      action: 'remove_attachment', request_id: requestId, path,
+    })});
+    toast('已移除附件', 'success');
+    await openDetail(requestId);
+  } catch (e) { toast('移除失敗：' + e.message, 'error'); }
 }
 
 // Feature A:補件(approver / backoffice 用)— 上傳後呼叫 add_attachment、重 render detail
