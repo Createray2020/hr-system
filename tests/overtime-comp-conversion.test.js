@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { convertOvertimeToCompTime } from '../lib/overtime/comp-conversion.js';
+import { convertOvertimeToCompTime, convertOvertimeToCompTimeSafe } from '../lib/overtime/comp-conversion.js';
 
 function makeRepo(over = {}) {
   // 同 grantCompTime + comp-conversion 共用的 repo 介面
@@ -98,5 +98,80 @@ describe('convertOvertimeToCompTime — 接通 grantCompTime', () => {
   it('沒 overtimeRequest 必填欄位 → throw', async () => {
     await expect(convertOvertimeToCompTime(makeRepo(), null)).rejects.toThrow();
     await expect(convertOvertimeToCompTime(makeRepo(), { compensation_type: 'comp_leave' })).rejects.toThrow();
+  });
+});
+
+describe('convertOvertimeToCompTimeSafe — silent-fail 硬化', () => {
+  it('ok 路徑:convert 成功 → { ok:true, comp_balance, warning:null };不寫 audit note', async () => {
+    const appendAudit = vi.fn(async () => ({}));
+    const notify     = vi.fn(async () => ({ ok: true }));
+    const repo = makeRepo({
+      appendOvertimeAuditNote: appendAudit,
+      notifyCompConversionFailure: notify,
+    });
+    const r = await convertOvertimeToCompTimeSafe(repo, ot());
+    expect(r.ok).toBe(true);
+    expect(r.comp_balance).toBeTruthy();
+    expect(r.comp_balance.id).toBe(555);
+    expect(r.warning).toBe(null);
+    expect(appendAudit).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('fail 路徑:convert throw → { ok:false, warning.code };append audit + notify 都被叫', async () => {
+    const appendAudit = vi.fn(async () => ({}));
+    const notify     = vi.fn(async () => ({ ok: true }));
+    const repo = makeRepo({
+      // 強迫 convertOvertimeToCompTime 內部 throw:grantCompTime 不回 id
+      insertCompBalance: vi.fn(async () => ({ id: null })),
+      appendOvertimeAuditNote: appendAudit,
+      notifyCompConversionFailure: notify,
+    });
+    const r = await convertOvertimeToCompTimeSafe(repo, ot());
+    expect(r.ok).toBe(false);
+    expect(r.comp_balance).toBe(null);
+    expect(r.warning?.code).toBe('COMP_CONVERSION_FAILED');
+    expect(r.warning?.message).toContain('補休餘額建立失敗');
+    expect(appendAudit).toHaveBeenCalledTimes(1);
+    expect(appendAudit.mock.calls[0][0]).toBe(100); // overtime_request_id
+    expect(appendAudit.mock.calls[0][1]).toContain('補休轉換失敗');
+    expect(appendAudit.mock.calls[0][1]).toContain('需 HR 介入');
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0][0]).toMatchObject({
+      overtime_request_id: 100, employee_id: 'E001',
+    });
+  });
+
+  it('fail 路徑 + audit 又失敗:不再 throw、仍回 warning', async () => {
+    const appendAudit = vi.fn(async () => { throw new Error('audit DB down'); });
+    const repo = makeRepo({
+      insertCompBalance: vi.fn(async () => ({ id: null })),
+      appendOvertimeAuditNote: appendAudit,
+    });
+    const r = await convertOvertimeToCompTimeSafe(repo, ot());
+    expect(r.ok).toBe(false);
+    expect(r.warning?.code).toBe('COMP_CONVERSION_FAILED');
+    expect(appendAudit).toHaveBeenCalled();
+  });
+
+  it('fail 路徑 + notify 又失敗:不再 throw、仍回 warning', async () => {
+    const repo = makeRepo({
+      insertCompBalance: vi.fn(async () => ({ id: null })),
+      appendOvertimeAuditNote: vi.fn(async () => ({})),
+      notifyCompConversionFailure: vi.fn(async () => { throw new Error('push offline'); }),
+    });
+    const r = await convertOvertimeToCompTimeSafe(repo, ot());
+    expect(r.ok).toBe(false);
+    expect(r.warning?.code).toBe('COMP_CONVERSION_FAILED');
+  });
+
+  it('fail 路徑 + repo 沒提供 audit / notify helper:silently 跳過、仍回 warning', async () => {
+    const repo = makeRepo({
+      insertCompBalance: vi.fn(async () => ({ id: null })),
+      // 不掛 appendOvertimeAuditNote / notifyCompConversionFailure
+    });
+    const r = await convertOvertimeToCompTimeSafe(repo, ot());
+    expect(r.ok).toBe(false);
+    expect(r.warning?.code).toBe('COMP_CONVERSION_FAILED');
   });
 });

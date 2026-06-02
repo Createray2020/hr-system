@@ -18,7 +18,7 @@
 import { supabaseAdmin } from '../../../lib/supabase.js';
 import { requireAuth } from '../../../lib/auth.js';
 import { canTransition } from '../../../lib/overtime/request-state.js';
-import { convertOvertimeToCompTime } from '../../../lib/overtime/comp-conversion.js';
+import { convertOvertimeToCompTimeSafe } from '../../../lib/overtime/comp-conversion.js';
 import { makeOvertimeRepo } from '../_repo.js';
 
 // 04.5 §四:補償方式於申請時即須選定,審核者不得改寫
@@ -103,15 +103,14 @@ export default async function handler(req, res) {
 
   const updated = await repo.updateOvertimeRequest(id, patch);
 
-  // 若直接 approved 且 comp_leave → 觸發轉換補休
+  // 若直接 approved 且 comp_leave → 觸發轉換補休(safe wrapper:失敗 durable 寫 audit + 帶 warning 回 response)
   let comp_balance = null;
+  const warnings = [];
   if (tr.nextState === 'approved' && finalCompType === 'comp_leave') {
-    try {
-      comp_balance = await convertOvertimeToCompTime(repo, updated);
-    } catch (e) {
-      console.error('[overtime:manager-review] convertOvertimeToCompTime failed:', e.message);
-    }
+    const conv = await convertOvertimeToCompTimeSafe(repo, updated);
+    comp_balance = conv.comp_balance;
+    if (!conv.ok && conv.warning) warnings.push(conv.warning);
   }
 
-  return res.status(200).json({ request: updated, comp_balance });
+  return res.status(200).json({ request: updated, comp_balance, warnings });
 }

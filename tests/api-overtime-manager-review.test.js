@@ -51,8 +51,11 @@ vi.mock('../lib/auth.js', () => ({
   }),
 }));
 
+// 2026-06:review endpoint 改用 safe wrapper(失敗不 throw、改帶 warning + audit note)
+const mockConvertSafe = vi.fn(async () => ({ ok: true, comp_balance: {}, warning: null }));
 vi.mock('../lib/overtime/comp-conversion.js', () => ({
   convertOvertimeToCompTime: vi.fn(async () => ({})),
+  convertOvertimeToCompTimeSafe: mockConvertSafe,
 }));
 
 const { default: handler } = await import('../api/overtime-requests/[id]/manager-review.js');
@@ -261,5 +264,49 @@ describe('/api/overtime-requests/:id/manager-review — Phase 2.x.2 嚴格 spec'
     await handler(req, res);
     expect(res.statusCode).toBe(400);
     expect(res.body?.error).toBe('invalid compensation_type');
+  });
+
+  // 2026-06:safe wrapper 失敗 → 仍 200、response 帶 warning
+  it('comp_leave 轉換失敗 → 200 仍核准成功、response.warnings 含 COMP_CONVERSION_FAILED', async () => {
+    overrides.caller = MGR;
+    setupPending();
+    mockConvertSafe.mockResolvedValueOnce({
+      ok: false,
+      comp_balance: null,
+      warning: {
+        code: 'COMP_CONVERSION_FAILED',
+        message: '加班已核准,但補休餘額建立失敗,請聯繫 HR。',
+        detail: 'grantCompTime did not return a record with id',
+      },
+    });
+    const [req, res] = makeReqRes({
+      query: { id: 'OT1' },
+      body: { decision: 'approved' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.request).toBeTruthy();
+    expect(res.body?.comp_balance).toBe(null);
+    expect(Array.isArray(res.body?.warnings)).toBe(true);
+    expect(res.body.warnings).toHaveLength(1);
+    expect(res.body.warnings[0].code).toBe('COMP_CONVERSION_FAILED');
+  });
+
+  it('comp_leave 轉換成功 → response.warnings 空陣列、comp_balance 有值', async () => {
+    overrides.caller = MGR;
+    setupPending();
+    mockConvertSafe.mockResolvedValueOnce({
+      ok: true,
+      comp_balance: { id: 'CB42' },
+      warning: null,
+    });
+    const [req, res] = makeReqRes({
+      query: { id: 'OT1' },
+      body: { decision: 'approved' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.comp_balance?.id).toBe('CB42');
+    expect(res.body?.warnings).toEqual([]);
   });
 });

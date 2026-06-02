@@ -6,6 +6,7 @@
 // 對應實作計畫:docs/attendance-system-implementation-plan-v1.md §9.6
 
 import { supabaseAdmin } from '../../lib/supabase.js';
+import { sendPushToRoles, createNotificationsForRoles, sendPushToEmployees, createNotifications } from '../../lib/push.js';
 
 export function makeOvertimeRepo() {
   return {
@@ -109,6 +110,51 @@ export function makeOvertimeRepo() {
         .eq('id', id).select().maybeSingle();
       if (error) throw error;
       return data;
+    },
+
+    // Append 一行到 admin_audit_note(prepend、新行在頂、舊內容保留)。
+    // 給 convertOvertimeToCompTimeSafe / 其他需要 audit 失敗事件的路徑用,
+    // 對齊 admin-edit.js L102-105 的 prepend 慣例。
+    async appendOvertimeAuditNote(id, line) {
+      if (!id || !line) return null;
+      const { data: cur } = await supabaseAdmin
+        .from('overtime_requests').select('admin_audit_note').eq('id', id).maybeSingle();
+      const next = cur?.admin_audit_note
+        ? `${line}\n${cur.admin_audit_note}`
+        : line;
+      const { data, error } = await supabaseAdmin
+        .from('overtime_requests')
+        .update({ admin_audit_note: next, updated_at: new Date().toISOString() })
+        .eq('id', id).select().maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+
+    // 補休轉換失敗通知:推 HR(role)+ 申請人本人。
+    // best-effort:推播 / DB notification 任一段失敗都吞錯,不影響 caller 回 ok。
+    async notifyCompConversionFailure({ overtime_request_id, employee_id, error }) {
+      const payload = {
+        title: '⚠ 補休餘額建立失敗',
+        body: `加班單 #${overtime_request_id} 已核准,但轉補休失敗:${error || '未知'}。請 HR 介入。`,
+        url: '/overtime-admin.html',
+        tag: `comp-conversion-fail-${overtime_request_id}`,
+      };
+      const tasks = [
+        sendPushToRoles(['hr', 'admin'], payload).catch(() => {}),
+        createNotificationsForRoles(['hr', 'admin'], { ...payload, type: 'overtime' }).catch(() => {}),
+      ];
+      if (employee_id) {
+        const empPayload = {
+          ...payload,
+          body: `你的加班單已核准,但補休餘額建立失敗、HR 已收通知。錯誤:${error || '未知'}`,
+        };
+        tasks.push(
+          sendPushToEmployees([employee_id], empPayload).catch(() => {}),
+          createNotifications([employee_id], { ...empPayload, type: 'overtime' }).catch(() => {}),
+        );
+      }
+      await Promise.allSettled(tasks);
+      return { ok: true };
     },
     async listOvertimeRequests({ employee_id, status, year, month, manager_id }) {
       let q = supabaseAdmin.from('overtime_requests').select('*').order('overtime_date', { ascending: false });

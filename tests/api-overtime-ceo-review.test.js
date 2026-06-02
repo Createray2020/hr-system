@@ -53,8 +53,11 @@ vi.mock('../lib/auth.js', () => ({
   }),
 }));
 
+// 2026-06:review endpoint 改用 safe wrapper(失敗不 throw、改帶 warning + audit note)
+const mockConvertSafeCeo = vi.fn(async () => ({ ok: true, comp_balance: {}, warning: null }));
 vi.mock('../lib/overtime/comp-conversion.js', () => ({
   convertOvertimeToCompTime: vi.fn(async () => ({})),
+  convertOvertimeToCompTimeSafe: mockConvertSafeCeo,
 }));
 
 const { default: handler } = await import('../api/overtime-requests/[id]/ceo-review.js');
