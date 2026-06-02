@@ -21,6 +21,12 @@
       return !!u && BACKOFFICE.includes(u.role);
     },
 
+    // executive bypass:對齊後端 approve/publish/unpublish/unlock 的跨部門 allowlist
+    // (HR 不在內、HR 走 isBackofficeRole)
+    isExecutive(u) {
+      return !!u && ['admin', 'chairman', 'ceo'].includes(u.role);
+    },
+
     canViewAllApprovals(u) {
       return !!u && BACKOFFICE.includes(u.role);
     },

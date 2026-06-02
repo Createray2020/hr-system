@@ -683,17 +683,18 @@ function render() {
     //   approve / publish 都需要 同部門 + is_manager + 非自己
     //   不合法 → 隱藏按鈕、顯示「待主管」hint
     const u = window.currentUser || {};
-    const canManagePeriod = u.is_manager === true
-                            && !!u.dept_id
-                            && u.dept_id === emp.dept_id
-                            && u.id !== emp.id;
-    // F3:撤回公告權限(對齊後端 unpublish.js):admin / chairman / 同部門主管 三選一、
-    // 且非自己 period(對齊 self-approval guard);HR / CEO 不在 allowlist、後端也擋
-    const canUnpublish = u.id !== emp.id
-      && (
-        ['admin', 'chairman'].includes(u.role)
-        || (u.is_manager === true && !!u.dept_id && u.dept_id === emp.dept_id)
-      );
+    // executive(admin/chairman/ceo) 跨部門可定案/公告(對齊後端 approve.js / publish.js
+    // 2026-06 加的 executive bypass);同部門主管也可,均擋 self-approval。
+    const canManagePeriod = u.id !== emp.id && (
+      window.Roles.isExecutive(u)
+      || (u.is_manager === true && !!u.dept_id && u.dept_id === emp.dept_id)
+    );
+    // F3:撤回公告權限(對齊後端 unpublish.js):admin / chairman / ceo / 同部門主管 四選一、
+    // 且非自己 period(對齊 self-approval guard);HR 不在 allowlist、後端也擋
+    const canUnpublish = u.id !== emp.id && (
+      window.Roles.isExecutive(u)
+      || (u.is_manager === true && !!u.dept_id && u.dept_id === emp.dept_id)
+    );
     // F4:時間閘門「強制公告」視覺判定(真授權在後端 force-finalize.js)。
     // client 時間僅視覺;前端拿台北今日字串比 period_start 推的 mgr/ceo 窗。
     // 注意:force 路徑允許主管定案自己 period(後端 forceFinalizeAuth 無 self 擋),
@@ -722,8 +723,12 @@ function render() {
         ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;border:1px solid rgba(248,113,113,.4);color:#F87171" onclick="unpublishPeriod('${escHtml(period.id)}')">↩ 撤回公告</button>`
         : `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已公告</span>`;
     } else if (periodStatus === 'locked') {
-      // 鎖月後不可撤回(後端 RULES 也擋),維持綠 span 不分權限
-      opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已公告</span>`;
+      // 2026-06:executive(admin/chairman/ceo)可解鎖 locked → approved(後端 unlock.js)
+      // 主管不能解鎖(避免繞過 cron lock)、僅 executive
+      const canUnlock = window.Roles.isExecutive(u) && u.id !== emp.id;
+      opHtml = canUnlock
+        ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px;border:1px solid rgba(251,191,36,.5);color:#FBBF24" onclick="unlockPeriod('${escHtml(period.id)}')">🔓 解鎖</button>`
+        : `<span style="font-size:11px;padding:2px 8px;background:rgba(74,222,128,.15);color:#4ADE80;border-radius:6px">已鎖定</span>`;
     } else if (periodStatus === 'draft') {
       opHtml = `<span style="font-size:11px;padding:2px 8px;background:rgba(91,141,239,.15);color:#7FBBFF;border-radius:6px">員工標中</span>${forceBtn}`;
     } else {
@@ -1481,7 +1486,7 @@ async function publishPeriod(periodId) {
   } catch(e) { toast('公告失敗：' + e.message,'error'); }
 }
 
-// F3:撤回公告(published → approved)、限 admin/chairman/同部門主管
+// F3:撤回公告(published → approved)、限 admin/chairman/ceo/同部門主管
 async function unpublishPeriod(periodId) {
   if (!periodId) return;
   if (!confirm('撤回後班表會回到「待公告」狀態、員工會收到通知,確定撤回?')) return;
@@ -1490,6 +1495,17 @@ async function unpublishPeriod(periodId) {
     toast('已撤回公告');
     await load();
   } catch(e) { toast('撤回失敗：' + e.message,'error'); }
+}
+
+// 2026-06:解鎖(locked → approved)、限 admin/chairman/ceo(主管不能解、避免繞過 cron lock)
+async function unlockPeriod(periodId) {
+  if (!periodId) return;
+  if (!confirm('解鎖後班表會回到「待公告」狀態、可重新編輯,員工會收到通知,確定解鎖?')) return;
+  try {
+    await api(`/api/schedule-periods/${encodeURIComponent(periodId)}/unlock`, { method:'POST' });
+    toast('已解鎖,班表回到待公告');
+    await load();
+  } catch(e) { toast('解鎖失敗：' + e.message, 'error'); }
 }
 
 // F4:時間閘門「強制定案+公告」(draft/submitted/approved → published 一刀)。
