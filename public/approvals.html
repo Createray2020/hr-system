@@ -1090,6 +1090,12 @@ function renderDetail(data) {
   if (data.status === 'completed') {
     actions += `<button class="btn btn-ghost" style="border:1px solid rgba(127,187,255,.4);color:#7FBBFF" onclick="exportApprovalHandoff()">📄 匯出交辦單</button>`;
   }
+  // 撤回核准(限 admin/chairman/ceo、completed 才出):resignation / punch_correction
+  // 因 cascade 由後端擋(回 422),前端不再 client-side filter、讓後端訊息透回
+  const isExecutive = window.Roles?.isExecutive?.(window.currentUser);
+  if (isExecutive && data.status === 'completed') {
+    actions += `<button class="btn btn-ghost" style="border:1px solid rgba(248,113,113,.5);color:#F87171" onclick="revokeApproval('${_esc(data.id)}')">↩ 撤回核准</button>`;
+  }
   // Phase 5:離職核准完成 → 顯示「離職檢核」入口(HR-only gate 由 /resignation-checklist.html 自身擋)
   if (data.request_type === 'resignation' && data.status === 'completed') {
     actions += `<a class="btn btn-primary" href="/resignation-checklist.html?employee_id=${encodeURIComponent(data.applicant_id)}">📋 離職檢核</a>`;
@@ -1171,6 +1177,25 @@ async function removeApprovalAttachment(requestId, path) {
     toast('已移除附件', 'success');
     await openDetail(requestId);
   } catch (e) { toast('移除失敗：' + e.message, 'error'); }
+}
+
+// 撤回核准(completed → in_progress、退回最後核准步驟、限 admin/chairman/ceo)
+// resignation / punch_correction 被後端 422 擋(cascade 連動),錯誤訊息透回給 user
+async function revokeApproval(requestId) {
+  if (!requestId) return;
+  const reason = prompt('請輸入撤回理由(必填、會記錄在審計紀錄)：');
+  if (reason === null) return;
+  const trimmed = String(reason).trim();
+  if (!trimmed) { toast('需填撤回理由', 'warn'); return; }
+  try {
+    await api('/api/approvals', { method:'POST', body: JSON.stringify({
+      action: 'revoke_approval', request_id: requestId, reason: trimmed,
+    })});
+    toast('已撤回核准、退回重新審核', 'success');
+    closeModal('detail-modal');
+    await Promise.all([loadMyRequests(), loadPendingApprovals()]);
+    if (currentTab === 'all') loadAllRequests();
+  } catch (e) { toast('撤回失敗：' + e.message, 'error'); }
 }
 
 // Feature A:補件(approver / backoffice 用)— 上傳後呼叫 add_attachment、重 render detail

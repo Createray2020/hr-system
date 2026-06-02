@@ -660,6 +660,107 @@ export default async function handler(req, res) {
       return res.status(200).json({ attachments: next, audit: auditLine });
     }
 
+    // ── 撤回核准(completed → in_progress、回退到最後核准步驟重審)─────────────
+    // 限 admin / chairman / ceo,reason 必填。樂觀鎖 WHERE status='completed' 防 race。
+    // 連動類別擋:resignation / punch_correction 已產生 cascade 資料(員工狀態變更 /
+    // 補打卡 attendance row),不允許直接撤回(否則 cascade 不一致),需管理員手動處理。
+    // 重置策略:target step(approved 最大 step_number)→ in_progress;target 之後的
+    // step 強制 waiting(防禦性);target 前的 skipped/approved 不動。
+    if (body.action === 'revoke_approval') {
+      const { request_id, reason } = body;
+      if (!request_id) return res.status(400).json({ error: 'request_id required' });
+      if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        return res.status(400).json({ error: '撤回理由必填' });
+      }
+      const trimmedReason = reason.trim();
+      if (trimmedReason.length > 500) {
+        return res.status(400).json({ error: '撤回理由過長(上限 500 字)' });
+      }
+
+      const isExecutive = ['admin', 'chairman', 'ceo'].includes(caller.role);
+      if (!isExecutive) {
+        return res.status(403).json({ error: '無撤回權限(限 admin / chairman / ceo)' });
+      }
+
+      const { data: request } = await supabaseAdmin
+        .from('approval_requests').select('*').is('deleted_at', null).eq('id', request_id).single();
+      if (!request) return res.status(404).json({ error: '找不到申請' });
+      if (request.status !== 'completed') {
+        return res.status(409).json({ error: '此申請非已完成狀態、無法撤回', actual: request.status });
+      }
+      if (['resignation', 'punch_correction'].includes(request.request_type)) {
+        return res.status(422).json({
+          error: 'CASCADE_LOCKED',
+          detail: '此類申請已產生連動資料(離職 / 補打卡)、無法直接撤回、請管理員手動處理',
+          request_type: request.request_type,
+        });
+      }
+
+      // 找 target step = approved 步驟裡最大的 step_number(最後核准的步驟)
+      const { data: allSteps } = await supabaseAdmin
+        .from('approval_steps').select('*')
+        .eq('request_id', request_id).order('step_number');
+      const approvedSteps = (allSteps || []).filter(s => s.status === 'approved');
+      if (approvedSteps.length === 0) {
+        return res.status(409).json({ error: '找不到可重開的核准步驟' });
+      }
+      const target = approvedSteps[approvedSteps.length - 1];
+      const targetNum = target.step_number;
+
+      // 樂觀鎖 update request:WHERE status='completed' 防 race
+      const nowIso = new Date().toISOString();
+      const nowDate = nowIso.slice(0, 10);
+      const auditLine = `[${nowDate}] revoke by ${caller.id}: completed→in_progress (重開步驟 ${targetNum}) 理由: ${trimmedReason}`;
+      const nextAudit = request.admin_audit_note
+        ? `${auditLine}\n${request.admin_audit_note}`
+        : auditLine;
+      const { data: updReq, error: updReqErr } = await supabaseAdmin
+        .from('approval_requests')
+        .update({
+          status: 'in_progress',
+          current_step: targetNum,
+          completed_at: null,
+          admin_audit_note: nextAudit,
+          updated_at: nowIso,
+        })
+        .eq('id', request_id).eq('status', 'completed')
+        .select().maybeSingle();
+      if (updReqErr) return res.status(500).json({ error: updReqErr.message });
+      if (!updReq) return res.status(409).json({ error: 'STATUS_RACE_CONDITION' });
+
+      // target step → in_progress(重開)、清 approver_id/handled_at/note
+      await supabaseAdmin.from('approval_steps')
+        .update({ status: 'in_progress', approver_id: null, handled_at: null, note: null })
+        .eq('request_id', request_id).eq('step_number', targetNum);
+
+      // 防禦性:target 之後的 step(理論上 completed 時應該都是 approved/skipped,
+      // 不該有 waiting 以外的狀態,但保險起見強制 reset)
+      await supabaseAdmin.from('approval_steps')
+        .update({ status: 'waiting', approver_id: null, handled_at: null, note: null })
+        .eq('request_id', request_id).gt('step_number', targetNum);
+
+      // 通知申請人 + target step approver_role
+      const _p1 = {
+        title: '↩ 申請已被撤回核准',
+        body: `你的「${request.title}」已被撤回核准、退回至第 ${targetNum} 步重新審核`,
+        url: '/approvals.html',
+      };
+      sendPushToEmployees([request.applicant_id], { ..._p1, tag: 'approval-' + request_id }).catch(() => {});
+      createNotifications([request.applicant_id], { ..._p1, type: 'approval' }).catch(() => {});
+
+      if (target.approver_role) {
+        const _p2 = {
+          title: '📋 有撤回案待重審',
+          body: `「${request.title}」第 ${targetNum} 步已被撤回核准、需重新審批`,
+          url: '/approvals.html',
+        };
+        sendPushToRoles([target.approver_role], { ..._p2, tag: 'pending-' + request_id }).catch(() => {});
+        createNotificationsForRoles([target.approver_role], { ..._p2, type: 'approval' }).catch(() => {});
+      }
+
+      return res.status(200).json({ request: updReq, target_step: targetNum, audit: auditLine });
+    }
+
     if (body.action === 'update_config') {
       // 僅 hr / admin 可改流程設定(對齊 lib/roles.js::canEditApprovalConfig)
       if (!['hr', 'admin'].includes(caller.role)) {

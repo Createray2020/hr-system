@@ -998,6 +998,11 @@ async function openDetail(id) {
     if (r.status === 'completed') {
       btns += `<button class="btn btn-ghost" onclick="exportApprovalHandoff()">📄 匯出交辦單</button>`;
     }
+    // 撤回核准(限 admin/chairman/ceo、completed 才出);此頁無 window.Roles、inline 檢查
+    const isExecutive = !!currentUser && ['admin','chairman','ceo'].includes(currentUser.role);
+    if (isExecutive && r.status === 'completed') {
+      btns += `<button class="btn btn-ghost" style="border:1px solid rgba(248,113,113,.5);color:#F87171" onclick="revokeApproval('${escapeHtml(r.id)}')">↩ 撤回核准</button>`;
+    }
     if (!btns) btns = `<button class="btn btn-ghost" onclick="closeModal('detail-modal')">關閉</button>`;
     footer.innerHTML = btns;
   } catch(e) {
@@ -1085,6 +1090,24 @@ async function removeApprovalAttachment(requestId, path) {
     toast('已移除附件', 'success');
     await openDetail(requestId);
   } catch (e) { toast('移除失敗:' + e.message, 'error'); }
+}
+
+// 撤回核准(completed → in_progress、退回最後核准步驟、限 admin/chairman/ceo)
+// resignation / punch_correction 後端 422 擋(cascade 連動),錯誤訊息透回給 user
+async function revokeApproval(requestId) {
+  if (!requestId) return;
+  const reason = prompt('請輸入撤回理由(必填、會記錄在審計紀錄):');
+  if (reason === null) return;
+  const trimmed = String(reason).trim();
+  if (!trimmed) { toast('需填撤回理由', 'warn'); return; }
+  try {
+    await apiFetch('/api/approvals', { method:'POST', body: JSON.stringify({
+      action: 'revoke_approval', request_id: requestId, reason: trimmed,
+    })});
+    toast('已撤回核准、退回重新審核', 'success');
+    closeModal('detail-modal');
+    await loadAll();
+  } catch (e) { toast('撤回失敗:' + e.message, 'error'); }
 }
 
 // Feature A:補件(申請人 / approver / backoffice 用)— 上傳後呼叫 add_attachment、重 render detail
