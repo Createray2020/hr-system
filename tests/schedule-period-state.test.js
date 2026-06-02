@@ -8,6 +8,7 @@ import {
 const employee  = { is_employee_self: true };
 const manager   = { is_manager: true };
 const sysActor  = { is_system: true };
+const executive = { is_executive: true };
 const otherEmp  = {};
 
 describe('canTransition: 6 條合法 transition', () => {
@@ -81,8 +82,8 @@ describe('export 常數正確', () => {
   it('states 5 個（C12-2 加 published）', () => {
     expect(SCHEDULE_PERIOD_STATES).toEqual(['draft', 'submitted', 'approved', 'published', 'locked']);
   });
-  it('actions 6 個（C12-2 加 publish + F3 加 unpublish）', () => {
-    expect(SCHEDULE_PERIOD_ACTIONS).toEqual(['submit', 'approve', 'publish', 'adjust', 'lock', 'unpublish']);
+  it('actions 7 個（C12-2 加 publish + F3 加 unpublish + 2026-06 加 unlock）', () => {
+    expect(SCHEDULE_PERIOD_ACTIONS).toEqual(['submit', 'approve', 'publish', 'adjust', 'lock', 'unpublish', 'unlock']);
   });
 });
 
@@ -148,6 +149,38 @@ describe('canTransition: F3 unpublish flow', () => {
 
   it('locked + unpublish → ILLEGAL_TRANSITION(已鎖月、不可撤回)', () => {
     const r = canTransition('locked', 'unpublish', manager);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ILLEGAL_TRANSITION');
+  });
+});
+
+describe('canTransition: 2026-06 executive unlock flow', () => {
+  it('locked + unlock (executive) → approved', () => {
+    const r = canTransition('locked', 'unlock', executive);
+    expect(r.ok).toBe(true);
+    expect(r.nextState).toBe('approved');
+  });
+
+  it('locked + unlock 但 actor 是 manager → FORBIDDEN_ACTOR(主管不能 unlock)', () => {
+    const r = canTransition('locked', 'unlock', manager);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/FORBIDDEN_ACTOR/);
+  });
+
+  it('locked + unlock 但 actor 是 system → FORBIDDEN_ACTOR', () => {
+    const r = canTransition('locked', 'unlock', sysActor);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/FORBIDDEN_ACTOR/);
+  });
+
+  it('published + unlock → ILLEGAL_TRANSITION(用 unpublish 才對)', () => {
+    const r = canTransition('published', 'unlock', executive);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ILLEGAL_TRANSITION');
+  });
+
+  it('approved + unlock → ILLEGAL_TRANSITION', () => {
+    const r = canTransition('approved', 'unlock', executive);
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('ILLEGAL_TRANSITION');
   });

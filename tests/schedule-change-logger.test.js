@@ -100,7 +100,7 @@ describe('logScheduleChange', () => {
     })).rejects.toThrow(/insertScheduleChangeLog/);
   });
 
-  it('CHANGE_TYPES 包含設計文件 6 個 + C6-2/C7-C13 新增 4 個 + C12-2 manager_publish + F3 manager_unpublish', () => {
+  it('CHANGE_TYPES 包含設計文件 6 個 + C6-2/C7-C13 新增 4 個 + C12-2 manager_publish + F3 manager_unpublish + 2026-06 executive_unlock', () => {
     expect(CHANGE_TYPES).toEqual([
       'employee_draft', 'employee_submit',
       'manager_adjust', 'manager_approve',
@@ -109,6 +109,7 @@ describe('logScheduleChange', () => {
       'hr_unlock', 'manager_announce',
       'manager_publish',
       'manager_unpublish',
+      'executive_unlock',
     ]);
   });
 });
