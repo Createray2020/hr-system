@@ -121,48 +121,58 @@ describe('runCompExpirySweep — auto_payout (§32-1 回讀來源凍結金額)',
     expect(updPatch.expiry_payout_source_multiplier).toBe(2.0);
   });
 
-  it('unresolvable:source_overtime_request_id=null → 走人工核定、payout=null、不歸零', async () => {
+  it('legacy fallback:source=null + hourly=200 → unit=268、remaining=5 → payout=1340、legacy_payout_count=1', async () => {
     const repo = makeSweepRepo({
       findExpiringCompBalances: vi.fn(async () => [cb({
         id: 4, source_overtime_request_id: null,
         earned_hours: 5, used_hours: 0,
       })]),
+      // 預設 makeSweepRepo findEmployeeHourlyRate 已回 200,這裡 explicit 寫明
+      findEmployeeHourlyRate: vi.fn(async () => 200),
     });
     const r = await runCompExpirySweep(repo, '2026-04-26');
     expect(r.expired_count).toBe(1);
-    expect(r.unresolvable_count).toBe(1);
-    expect(r.payout_total).toBe(0);
+    expect(r.unresolvable_count).toBe(0);
+    expect(r.legacy_payout_count).toBe(1);
+    expect(r.payout_total).toBe(1340);
 
     const updPatch = repo.updateCompBalance.mock.calls[0][1];
     expect(updPatch.status).toBe('expired_paid');
-    expect(updPatch.expiry_payout_amount).toBe(null);     // 不歸零!明確 null
-    expect(updPatch.admin_audit_note).toContain('需 HR 人工核定');
-    expect(updPatch.admin_audit_note).toContain('source_overtime_request_id 為 null');
-    // 不寫 snapshot 三欄(因為沒來源)
-    expect(updPatch.expiry_payout_unit_amount).toBeUndefined();
-    expect(updPatch.expiry_payout_source_multiplier).toBeUndefined();
-    // log reason 含 unresolvable 標記
-    expect(repo.insertBalanceLog.mock.calls[0][0].reason).toContain('unresolvable');
-    // 確認沒呼叫舊的時薪重算路徑
-    expect(repo.findEmployeeHourlyRate).not.toHaveBeenCalled();
+    expect(updPatch.expiry_payout_amount).toBe(1340);
+    expect(updPatch.expiry_payout_unit_amount).toBe(268);  // 200 × 1.34
+    expect(updPatch.expiry_payout_source_multiplier).toBe(1.34);
+    expect(updPatch.expiry_payout_source_overtime_date).toBe(null);
+    expect(updPatch.admin_audit_note).toContain('採公司政策折發');
+    expect(updPatch.admin_audit_note).toContain('legacy 補休(無來源加班、上線前匯入)');
+    expect(updPatch.admin_audit_note).toContain('HR 如有原加班屬休息日/國定之證據可上修');
+    // log reason 不再 unresolvable(走政策折發)、payout 進入 reason
+    expect(repo.insertBalanceLog.mock.calls[0][0].reason).toContain('payout=1340');
+    expect(repo.insertBalanceLog.mock.calls[0][0].reason).not.toContain('unresolvable');
+    // 確認有呼叫時薪
+    expect(repo.findEmployeeHourlyRate).toHaveBeenCalledWith('E001');
   });
 
-  it('unresolvable:來源加班 row 不存在 → 同 unresolvable 處理、admin_audit_note 標 OT id', async () => {
+  it('legacy fallback:來源加班 row 不存在 → 政策折發、admin_audit_note 標 OT id', async () => {
     const repo = makeSweepRepo({
       findExpiringCompBalances: vi.fn(async () => [cb({
         id: 5, source_overtime_request_id: 9999,
         earned_hours: 2, used_hours: 0,
       })]),
       findOvertimeRequestById: vi.fn(async () => null),
+      findEmployeeHourlyRate: vi.fn(async () => 200),
     });
     const r = await runCompExpirySweep(repo, '2026-04-26');
-    expect(r.unresolvable_count).toBe(1);
+    expect(r.legacy_payout_count).toBe(1);
+    expect(r.unresolvable_count).toBe(0);
+    // 200 × 1.34 × 2 = 536
+    expect(r.payout_total).toBe(536);
     const updPatch = repo.updateCompBalance.mock.calls[0][1];
-    expect(updPatch.expiry_payout_amount).toBe(null);
+    expect(updPatch.expiry_payout_amount).toBe(536);
     expect(updPatch.admin_audit_note).toContain('來源加班 #9999 不存在');
+    expect(updPatch.admin_audit_note).toContain('採公司政策折發');
   });
 
-  it('unresolvable:來源加班 estimated_pay=null → 同 unresolvable', async () => {
+  it('legacy fallback:來源加班 estimated_pay=null → 政策折發', async () => {
     const repo = makeSweepRepo({
       findExpiringCompBalances: vi.fn(async () => [cb({
         id: 6, source_overtime_request_id: 200,
@@ -172,24 +182,53 @@ describe('runCompExpirySweep — auto_payout (§32-1 回讀來源凍結金額)',
         id: 200, estimated_pay: null, hours: 3,
         pay_multiplier: null, overtime_date: '2025-04-01',
       })),
+      findEmployeeHourlyRate: vi.fn(async () => 200),
     });
     const r = await runCompExpirySweep(repo, '2026-04-26');
-    expect(r.unresolvable_count).toBe(1);
-    expect(repo.updateCompBalance.mock.calls[0][1].expiry_payout_amount).toBe(null);
+    expect(r.legacy_payout_count).toBe(1);
+    // 200 × 1.34 × 3 = 804
+    expect(repo.updateCompBalance.mock.calls[0][1].expiry_payout_amount).toBe(804);
   });
 
-  it('unresolvable:既有 admin_audit_note 保留、新 line 在頂', async () => {
+  it('legacy fallback:既有 admin_audit_note 保留、新 line 在頂', async () => {
     const repo = makeSweepRepo({
       findExpiringCompBalances: vi.fn(async () => [cb({
         id: 7, source_overtime_request_id: null,
         earned_hours: 1, used_hours: 0,
         admin_audit_note: '舊備註保留',
       })]),
+      findEmployeeHourlyRate: vi.fn(async () => 200),
     });
     await runCompExpirySweep(repo, '2026-04-26');
     const note = repo.updateCompBalance.mock.calls[0][1].admin_audit_note;
-    expect(note.split('\n')[0]).toContain('需 HR 人工核定');
+    expect(note.split('\n')[0]).toContain('採公司政策折發');
     expect(note).toContain('舊備註保留');
+  });
+
+  it('真人工核定:source=null 且 findEmployeeHourlyRate 回 0 → payout=null、unresolvable_count=1', async () => {
+    const repo = makeSweepRepo({
+      findExpiringCompBalances: vi.fn(async () => [cb({
+        id: 10, source_overtime_request_id: null,
+        earned_hours: 4, used_hours: 0,
+      })]),
+      findEmployeeHourlyRate: vi.fn(async () => 0),
+    });
+    const r = await runCompExpirySweep(repo, '2026-04-26');
+    expect(r.expired_count).toBe(1);
+    expect(r.unresolvable_count).toBe(1);
+    expect(r.legacy_payout_count).toBe(0);
+    expect(r.payout_total).toBe(0);
+
+    const updPatch = repo.updateCompBalance.mock.calls[0][1];
+    expect(updPatch.status).toBe('expired_paid');
+    expect(updPatch.expiry_payout_amount).toBe(null);
+    expect(updPatch.admin_audit_note).toContain('需 HR 人工核定');
+    expect(updPatch.admin_audit_note).toContain('無法取得時薪基數');
+    expect(updPatch.admin_audit_note).toContain('legacy 補休(無來源加班、上線前匯入)');
+    // 不寫 snapshot 三欄
+    expect(updPatch.expiry_payout_unit_amount).toBeUndefined();
+    expect(updPatch.expiry_payout_source_multiplier).toBeUndefined();
+    expect(repo.insertBalanceLog.mock.calls[0][0].reason).toContain('unresolvable');
   });
 
   it('Batch 9 設計:不再呼叫 applyToSalaryRecord(改由 calculator 月底讀)', async () => {
