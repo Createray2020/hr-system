@@ -49,13 +49,17 @@ export function makeSalaryRepo() {
 
     // B26 批次 3:batch_v2 走 active + 該月離職員工(讓離職員工最後月薪 batch 撈得到)
     // 用兩條 query Promise.all merge(避開 supabase-js .or + and() nested syntax 不穩)
+    // 2026-06:加 hire_date 過濾,排除「入職日晚於結算月」的員工
+    //         (例:范峯羽 hire_date=2026-06-02 不該出現在 2026-05 月結)
     async listEmployeesForPayroll(year, month) {
       const periodStart = `${year}-${String(month).padStart(2, '0')}-01T00:00:00+08:00`;
       const nextYear = month === 12 ? year + 1 : year;
       const nextMonth = month === 12 ? 1 : month + 1;
       const periodEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01T00:00:00+08:00`;
+      // 結算月最後一天(YYYY-MM-DD),用來排除「入職日晚於結算月」的員工
+      const lastDayOfMonth = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 
-      const SELECT_COLS = 'id, name, dept_id, departments(name), base_salary, attendance_bonus, employment_type';
+      const SELECT_COLS = 'id, name, dept_id, departments(name), base_salary, attendance_bonus, employment_type, hire_date';
       const q1 = supabaseAdmin.from('employees').select(SELECT_COLS).eq('status', 'active');
       const q2 = supabaseAdmin.from('employees').select(SELECT_COLS)
         .eq('status', 'resigned').gte('resigned_at', periodStart).lt('resigned_at', periodEnd);
@@ -66,7 +70,10 @@ export function makeSalaryRepo() {
       ]);
       if (active.error) throw active.error;
       if (resigned.error) throw resigned.error;
-      return [...(active.data || []), ...(resigned.data || [])];
+
+      // 只納入「結算月當月或更早入職」的在職員工;hire_date 為 null 的舊資料一律保留
+      const activeHired = (active.data || []).filter(e => !e.hire_date || e.hire_date <= lastDayOfMonth);
+      return [...activeHired, ...(resigned.data || [])];
     },
 
     // ─── salary_records ──────────────────────────────────────
