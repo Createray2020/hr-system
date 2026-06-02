@@ -4,6 +4,7 @@
 
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
+import { getOvertimeHourlyBase } from '../../lib/overtime/pay-calc.js';
 
 export function makeSalaryRepo() {
   return {
@@ -20,17 +21,18 @@ export function makeSalaryRepo() {
     },
 
     async findEmployeeHourlyRate(employee_id) {
-      // 優先讀 employees.hourly_rate 欄(part_time 員工專用、HR 直接設值)。
-      // fallback:base_salary / monthly_work_hours_base(預設 240)— 既有正職計算路徑不變。
+      // 給 calculator step 8 holiday_work_pay + lib/comp-time/expiry-sweep auto_payout 用。
+      // 對齊勞基法 §2-4(平日每小時工資額含經常性給付):走 lib canonical
+      // getOvertimeHourlyBase,part_time 用 employees.hourly_rate(已是含經常性的全價),
+      // full_time 用 base + attendance_bonus + grade_allowance + manager_allowance + extra_allowance。
       const { data: emp } = await supabaseAdmin
-        .from('employees').select('base_salary, hourly_rate').eq('id', employee_id).maybeSingle();
-      const direct = Number(emp?.hourly_rate) || 0;
-      if (direct > 0) return direct;
+        .from('employees')
+        .select('employment_type, hourly_rate, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance')
+        .eq('id', employee_id).maybeSingle();
       const { data: settings } = await supabaseAdmin
         .from('system_overtime_settings').select('monthly_work_hours_base').eq('id', 1).maybeSingle();
       const base = Number(settings?.monthly_work_hours_base) || 240;
-      const monthly = Number(emp?.base_salary) || 0;
-      return base > 0 ? monthly / base : 0;
+      return getOvertimeHourlyBase(emp, base);
     },
 
     async listActiveEmployees() {

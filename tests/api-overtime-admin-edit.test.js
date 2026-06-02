@@ -69,6 +69,7 @@ vi.mock('../lib/auth.js', () => ({
 const mockMakeOvertimeRepo = vi.fn(() => ({
   findOvertimeRequestById: vi.fn(async () => repoState.existing ? { ...repoState.existing } : null),
   findEmployeeMonthlySalary: vi.fn(async () => repoState.monthlySalary),
+  findEmployeeWageProfile:   vi.fn(async () => repoState.wageProfile),
   getSystemOvertimeSettings: vi.fn(async () => repoState.settings),
   findHolidayByDate: vi.fn(async () => repoState.holiday),
   updateOvertimeRequest: vi.fn(async (id, patch) => {
@@ -80,12 +81,12 @@ vi.mock('../api/overtime-requests/_repo.js', () => ({
   makeOvertimeRepo: mockMakeOvertimeRepo,
 }));
 
-// pay-calc lib mock
+// pay-calc lib mock(2026-06 改用 getOvertimeHourlyBase、含經常性給付基數)
 const mockCalculateOvertimePay = vi.fn(() => ({ ...overrides.payCalcReturn }));
-const mockGetHourlyRate = vi.fn(() => overrides.hourlyRate);
+const mockGetOvertimeHourlyBase = vi.fn(() => overrides.hourlyRate);
 vi.mock('../lib/overtime/pay-calc.js', () => ({
   calculateOvertimePay: mockCalculateOvertimePay,
-  getHourlyRate: mockGetHourlyRate,
+  getOvertimeHourlyBase: mockGetOvertimeHourlyBase,
 }));
 
 const { default: handler } = await import('../api/overtime-requests/[id]/admin-edit.js');
@@ -104,12 +105,13 @@ beforeEach(() => {
   repoState.existing = null;
   repoState.holiday = null;
   repoState.updatedPatches = [];
+  repoState.wageProfile = { employment_type: 'full_time', base_salary: 30000 };
   overrides.caller = { id: 'HR1', role: 'hr', is_manager: false, dept_id: 'D_HR' };
   overrides.payCalcReturn = { amount: 999, breakdown: {} };
   overrides.hourlyRate = 250;
   mockMakeOvertimeRepo.mockClear();
   mockCalculateOvertimePay.mockClear();
-  mockGetHourlyRate.mockClear();
+  mockGetOvertimeHourlyBase.mockClear();
 });
 
 function setExisting(over = {}) {
@@ -134,7 +136,7 @@ describe('PUT /api/overtime-requests/:id/admin-edit', () => {
 
     expect(res.statusCode).toBe(200);
     expect(mockCalculateOvertimePay).toHaveBeenCalledTimes(1);
-    expect(mockGetHourlyRate).toHaveBeenCalledTimes(1);
+    expect(mockGetOvertimeHourlyBase).toHaveBeenCalledTimes(1);
     const upd = repoState.updatedPatches[0];
     expect(upd.patch.hours).toBe(4);
     expect(upd.patch.estimated_pay).toBe(1340);
@@ -150,7 +152,7 @@ describe('PUT /api/overtime-requests/:id/admin-edit', () => {
 
     expect(res.statusCode).toBe(200);
     expect(mockCalculateOvertimePay).not.toHaveBeenCalled();
-    expect(mockGetHourlyRate).not.toHaveBeenCalled();
+    expect(mockGetOvertimeHourlyBase).not.toHaveBeenCalled();
     const upd = repoState.updatedPatches[0];
     expect(upd.patch.hours).toBe(5);
     expect(upd.patch).not.toHaveProperty('estimated_pay');  // 沒覆寫

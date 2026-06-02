@@ -150,6 +150,8 @@ export function makeOvertimeRepo() {
     async findEmployeeMonthlySalary(employee_id) {
       // salary_records 的月基薪欄位名是 base_salary(2026-05-10 schema v2 後;
       // 不存在 monthly_salary 欄位,曾誤用導致加班 POST 全員 500)
+      // 注意:此 helper 留著向後相容,目前 caller 已改用 findEmployeeWageProfile +
+      //      lib/overtime/pay-calc.js::getOvertimeHourlyBase(對齊 §2-4 經常性給付基數)
       const { data, error } = await supabaseAdmin
         .from('salary_records').select('base_salary, year, month')
         .eq('employee_id', employee_id)
@@ -157,6 +159,17 @@ export function makeOvertimeRepo() {
         .limit(1).maybeSingle();
       if (error) throw error;
       return data?.base_salary != null ? Number(data.base_salary) : 0;
+    },
+
+    // 撈員工經常性給付 profile(給 lib/overtime/pay-calc.js::getOvertimeHourlyBase 用),
+    // 含 §2-4 的所有經常性欄位 + part_time 的 hourly_rate。
+    async findEmployeeWageProfile(employee_id) {
+      const { data, error } = await supabaseAdmin
+        .from('employees')
+        .select('employment_type, hourly_rate, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance')
+        .eq('id', employee_id).maybeSingle();
+      if (error) throw error;
+      return data || null;
     },
 
     async findEmployeeManager(employee_id) {

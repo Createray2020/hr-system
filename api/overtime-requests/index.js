@@ -16,7 +16,7 @@ import { requireAuth } from '../../lib/auth.js';
 import { isBackofficeRole } from '../../lib/roles.js';
 import { checkOverLimit, checkOvertimeDateWindow } from '../../lib/overtime/limits.js';
 import {
-  calculateOvertimePay, getHourlyRate, pickFrozenPayMultiplier,
+  calculateOvertimePay, getOvertimeHourlyBase, pickFrozenPayMultiplier,
 } from '../../lib/overtime/pay-calc.js';
 import { attachManagerNames } from '../../lib/dept-name-mapper.js';
 import { makeOvertimeRepo } from './_repo.js';
@@ -204,9 +204,12 @@ function isWeekend(date) {
 }
 
 async function calcHourlyRate(repo, employee_id, settings) {
-  const monthly = await repo.findEmployeeMonthlySalary(employee_id);
+  // 對齊勞基法 §2-4:基數含 base_salary + 全勤 + 職等 + 主管 + 額外加給(經常性給付);
+  // part_time 走 employees.hourly_rate(已是含經常性的全價、不疊加 allowance)。
+  // 之前 findEmployeeMonthlySalary 只看 base_salary,正職少算 / 兼職 base_salary=0 → 0(bug)。
+  const profile = await repo.findEmployeeWageProfile(employee_id);
   const base = settings?.monthly_work_hours_base != null
     ? Number(settings.monthly_work_hours_base)
     : 240;
-  return getHourlyRate(monthly, base);
+  return getOvertimeHourlyBase(profile, base);
 }

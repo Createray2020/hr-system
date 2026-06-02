@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  calculateOvertimePay, getHourlyRate, pickFrozenPayMultiplier,
+  calculateOvertimePay, getHourlyRate, getOvertimeHourlyBase, pickFrozenPayMultiplier,
 } from '../lib/overtime/pay-calc.js';
 
 const config = {
@@ -137,6 +137,89 @@ describe('getHourlyRate', () => {
   });
   it('base 0 → 0', () => {
     expect(getHourlyRate(48000, 0)).toBe(0);
+  });
+});
+
+describe('getOvertimeHourlyBase — 加班/假日基數含經常性給付(§2-4)', () => {
+  it('full_time:純 base_salary、預設 base 240 = base/240', () => {
+    expect(getOvertimeHourlyBase({ employment_type: 'full_time', base_salary: 48000 })).toBe(200);
+  });
+
+  it('full_time:base + attendance_bonus 全納入', () => {
+    // 30000 + 2000 = 32000 / 240 = 133.33
+    expect(getOvertimeHourlyBase({
+      employment_type: 'full_time',
+      base_salary: 30000, attendance_bonus: 2000,
+    })).toBe(133.33);
+  });
+
+  it('full_time:base + AB + GA + MA + extra 全 sum;真實 case base=30000 AB=2000 GA=3000 MA=0', () => {
+    // 真實 prod 樣本(EMP_01191201 鄭昭君 二等-1):
+    // (30000+2000+3000+0+0) / 240 = 35000/240 = 145.833... → round2 145.83
+    expect(getOvertimeHourlyBase({
+      employment_type: 'full_time',
+      base_salary: 30000, attendance_bonus: 2000, grade_allowance: 3000,
+    })).toBe(145.83);
+  });
+
+  it('full_time:Ray case base=30000 extra_allowance=60000 高階經理人加給', () => {
+    // (30000+0+0+0+0+60000) / 240 = 90000/240 = 375
+    expect(getOvertimeHourlyBase({
+      employment_type: 'full_time',
+      base_salary: 30000, extra_allowance: 60000,
+    })).toBe(375);
+  });
+
+  it('full_time:含 allowance 欄(未使用但仍納入公式、未來啟用即生效)', () => {
+    // (30000 + 1000) / 240 = 129.17
+    expect(getOvertimeHourlyBase({
+      employment_type: 'full_time',
+      base_salary: 30000, allowance: 1000,
+    })).toBe(129.17);
+  });
+
+  it('full_time:缺欄位以 0 計、不爆炸', () => {
+    expect(getOvertimeHourlyBase({ employment_type: 'full_time', base_salary: 24000 })).toBe(100);
+    expect(getOvertimeHourlyBase({ employment_type: 'full_time' })).toBe(0);
+  });
+
+  it('part_time:走 employees.hourly_rate、不疊加 allowance', () => {
+    // 即使有 attendance_bonus / grade_allowance 殘值,part_time 也只用 hourly_rate
+    expect(getOvertimeHourlyBase({
+      employment_type: 'part_time',
+      hourly_rate: 210, attendance_bonus: 2000, grade_allowance: 1000,
+    })).toBe(210);
+  });
+
+  it('part_time:hourly_rate=0 → 0(避免之前 base_salary=0 → estimated_pay=0 的 bug 復發)', () => {
+    expect(getOvertimeHourlyBase({
+      employment_type: 'part_time', hourly_rate: 0, base_salary: 0,
+    })).toBe(0);
+  });
+
+  it('part_time:hourly_rate null → 0', () => {
+    expect(getOvertimeHourlyBase({ employment_type: 'part_time', hourly_rate: null })).toBe(0);
+  });
+
+  it('指定 base hours(176)→ 月薪 35200 / 176 = 200', () => {
+    expect(getOvertimeHourlyBase({
+      employment_type: 'full_time', base_salary: 35200,
+    }, 176)).toBe(200);
+  });
+
+  it('base hours 0 / 負數 → 0', () => {
+    expect(getOvertimeHourlyBase({ employment_type: 'full_time', base_salary: 48000 }, 0)).toBe(0);
+    expect(getOvertimeHourlyBase({ employment_type: 'full_time', base_salary: 48000 }, -1)).toBe(0);
+  });
+
+  it('profile null/undefined → 0', () => {
+    expect(getOvertimeHourlyBase(null)).toBe(0);
+    expect(getOvertimeHourlyBase(undefined)).toBe(0);
+  });
+
+  it('employment_type 缺 → 走 full_time 路徑(預設 sum 經常性)', () => {
+    // 沒指定 → 不是 'part_time' → 走 monthly sum path
+    expect(getOvertimeHourlyBase({ base_salary: 30000, attendance_bonus: 2000 })).toBe(133.33);
   });
 });
 

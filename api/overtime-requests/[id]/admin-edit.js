@@ -17,7 +17,7 @@
 
 import { requireRole } from '../../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../../lib/roles.js';
-import { calculateOvertimePay, getHourlyRate } from '../../../lib/overtime/pay-calc.js';
+import { calculateOvertimePay, getOvertimeHourlyBase } from '../../../lib/overtime/pay-calc.js';
 import { makeOvertimeRepo } from '../_repo.js';
 
 const ALLOWED_FIELDS = new Set(['hours', 'compensation_type']);
@@ -65,9 +65,10 @@ export default async function handler(req, res) {
 
   if ('hours' in callerPatch && finalCompType !== 'comp_leave') {
     const settings = await repo.getSystemOvertimeSettings() || {};
-    const monthlySalary = await repo.findEmployeeMonthlySalary(existing.employee_id);
+    // 對齊 §2-4 經常性給付基數(同 index.js calcHourlyRate);part_time 走 hourly_rate
+    const profile = await repo.findEmployeeWageProfile(existing.employee_id);
     const base = settings.monthly_work_hours_base != null ? Number(settings.monthly_work_hours_base) : 240;
-    const hourly = getHourlyRate(monthlySalary, base);
+    const hourly = getOvertimeHourlyBase(profile, base);
 
     // dayType 從 overtime_date 推(對齊 index.js POST create 邏輯)
     const holiday = await repo.findHolidayByDate(existing.overtime_date);

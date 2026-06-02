@@ -4,6 +4,7 @@
 // _ 前綴避免被當成 API route(Vercel 不會把 _xxx.js 當 endpoint)。
 
 import { supabaseAdmin } from '../../lib/supabase.js';
+import { getOvertimeHourlyBase } from '../../lib/overtime/pay-calc.js';
 
 export function makeLeaveRepo() {
   return {
@@ -278,16 +279,17 @@ export function makeLeaveRepo() {
 
     // ─── 員工時薪(expiry-sweep auto_payout 算金額用)─────
     async findEmployeeHourlyRate(employee_id) {
-      // 粗估:salary_records.base_salary / monthly_work_hours_base
+      // 對齊 §2-4(同 api/salary/_repo.js::findEmployeeHourlyRate):
+      // part_time 用 employees.hourly_rate,full_time 用 base + 經常性給付 sum。
+      // 走 lib canonical getOvertimeHourlyBase 統一基數計算。
+      const { data: emp } = await supabaseAdmin
+        .from('employees')
+        .select('employment_type, hourly_rate, base_salary, attendance_bonus, grade_allowance, manager_allowance, extra_allowance')
+        .eq('id', employee_id).maybeSingle();
       const { data: settings } = await supabaseAdmin
         .from('system_overtime_settings').select('monthly_work_hours_base').eq('id', 1).maybeSingle();
       const base = Number(settings?.monthly_work_hours_base) || 240;
-      const { data: sal } = await supabaseAdmin
-        .from('salary_records').select('base_salary')
-        .eq('employee_id', employee_id).order('year', { ascending: false })
-        .order('month', { ascending: false }).limit(1).maybeSingle();
-      const monthly = Number(sal?.base_salary) || 0;
-      return base > 0 ? monthly / base : 0;
+      return getOvertimeHourlyBase(emp, base);
     },
 
     // 注意:Batch 6 原版有 applyToSalaryRecord method,Batch 9 重新設計後**移除**
