@@ -19,6 +19,9 @@ import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-account
 import { makeLeaveRepo } from '../leaves/_repo.js';
 import { makeSalaryRepo } from '../salary/_repo.js';
 
+// 2026-06-05:JS 浮點減法(69.5-25.13=44.370000000000005)round 到 2 位、避免 UI 尾數
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -65,7 +68,7 @@ export default async function handler(req, res) {
           earned_at: r.earned_at,
           earned_hours: Number(r.earned_hours),
           used_hours: Number(r.used_hours),
-          remaining_hours: Math.max(0, Number(r.earned_hours) - Number(r.used_hours)),
+          remaining_hours: round2(Math.max(0, Number(r.earned_hours) - Number(r.used_hours))),
           expires_at: r.expires_at,
           expiry_processed_at: r.expiry_processed_at,
           expiry_payout_amount: Number(r.expiry_payout_amount) || 0,
@@ -119,7 +122,7 @@ export default async function handler(req, res) {
           records: [],
         };
       }
-      const remaining = Math.max(0, Number(r.earned_hours) - Number(r.used_hours));
+      const remaining = round2(Math.max(0, Number(r.earned_hours) - Number(r.used_hours)));
       byEmp[eid].total_remaining += remaining;
       byEmp[eid].records.push({
         id: r.id,
@@ -133,6 +136,8 @@ export default async function handler(req, res) {
         admin_audit_note: r.admin_audit_note,
       });
     }
+    // 2026-06-05:total_remaining 是 row remaining 加總,再 round 一次防累加尾數
+    for (const eid of Object.keys(byEmp)) byEmp[eid].total_remaining = round2(byEmp[eid].total_remaining);
     return res.status(200).json({ employees: Object.values(byEmp) });
   } catch (e) {
     return res.status(500).json({ error: e.message });

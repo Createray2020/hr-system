@@ -249,18 +249,20 @@ async function handleQuotaSummary(req, res) {
     // 2. 補休 — findActiveCompBalances 已按 expires_at ASC, earned_at ASC 排
     //   既有摘要欄不動;附帶 records[] 給前端逐筆顯示(leave-admin detail modal 用)。
     //   records 順序 = repo 內建順序(最早到期在前),只含 active(沿用 findActiveCompBalances 範圍)
+    //   2026-06-05:JS 浮點減法 round2(69.5-25.13=44.370000000000005 → 44.37)
+    const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
     const compBalances = await repo.findActiveCompBalances(employee_id);
-    const total_earned_hours = (compBalances || []).reduce(
+    const total_earned_hours = round2((compBalances || []).reduce(
       (s, b) => s + (Number(b.earned_hours) || 0), 0,
-    );
-    const total_used_hours = (compBalances || []).reduce(
+    ));
+    const total_used_hours = round2((compBalances || []).reduce(
       (s, b) => s + (Number(b.used_hours) || 0), 0,
-    );
+    ));
     const comp = {
       active_balances_count: (compBalances || []).length,
       total_earned_hours,
       total_used_hours,
-      total_remaining_hours: total_earned_hours - total_used_hours,
+      total_remaining_hours: round2(total_earned_hours - total_used_hours),
       earliest_expires_at:   compBalances?.[0]?.expires_at || null,
       records: (compBalances || []).map(b => ({
         id:              b.id,
@@ -268,7 +270,7 @@ async function handleQuotaSummary(req, res) {
         earned_hours:    Number(b.earned_hours) || 0,
         expires_at:      b.expires_at,
         used_hours:      Number(b.used_hours) || 0,
-        remaining_hours: Number(b.remaining_hours) || 0,
+        remaining_hours: round2(Number(b.remaining_hours) || 0),
         status:          b.status,
       })),
     };
