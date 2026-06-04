@@ -1251,3 +1251,164 @@ describe('calculateMonthlySalary — part_time 不計月薪型加給', () => {
     expect(row.prorata_base).toBeNull();        // 正職非離職月:null、GENERATED COALESCE 走 base
   });
 });
+
+// ─── 2026-06-04:離職月自動推導(修補 HR 直接標離職 silent-fail)──
+describe('calculateMonthlySalary — 離職月自動推導(existing 旗標未設時)', () => {
+  it('resigned 員工 + resign_date=5/10 + existing 無 is_final_month → 自動推導 isFinalMonth=true、10/31 prorata', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_LATE',
+        base_salary: 31000,
+        attendance_bonus: 0,
+        grade_allowance: 3000,
+        manager_allowance: 1000,
+        employment_type: 'full_time',
+        status: 'resigned',
+        resign_date: '2026-05-10',
+        resigned_at: '2026-05-10T00:00:00+08:00',
+      })),
+      findSalaryRecord: vi.fn(async () => null),  // existing 沒 is_final_month
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 31000,  labor_ins_employee: 690,  labor_ins_company: 2100,
+        health_ins_bracket: 31000, health_ins_employee: 465, health_ins_company: 1050,
+        pension_wage: 31000,
+      })),
+    });
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'E_LATE', year: 2026, month: 5,
+    });
+
+    // 推導出的旗標寫回 DB(下游 cascade 會讀)
+    expect(record.is_final_month).toBe(true);
+    expect(record.worked_days).toBe(10);
+    expect(record.total_days_in_month).toBe(31);
+    expect(record.pro_rata_mode).toBe('calendar_day');
+
+    // ratio = 10/31 套用到 prorata_base + 經常性加給 + 勞健保 + 雇主成本
+    expect(record.prorata_base).toBe(10000);         // round2(31000 × 10/31) = 10000
+    expect(record.grade_allowance).toBe(967.74);     // round2(3000 × 10/31)
+    expect(record.manager_allowance).toBe(322.58);   // round2(1000 × 10/31)
+    expect(record.deduct_labor_ins).toBe(Math.round(690 * 10 / 31));   // 223
+    expect(record.deduct_health_ins).toBe(Math.round(465 * 10 / 31));  // 150
+    expect(record.employer_cost_labor).toBe(Math.round(2100 * 10 / 31)); // 677
+  });
+
+  it('回歸:active 員工(status=active、resigned_at=null)→ proRataRatio=1、prorata_base=null', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_ACT', base_salary: 31000,
+        grade_allowance: 3000, manager_allowance: 1000,
+        employment_type: 'full_time',
+        status: 'active',
+        resigned_at: null, resign_date: null,
+      })),
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 31000,  labor_ins_employee: 690,  labor_ins_company: 2100,
+        health_ins_bracket: 31000, health_ins_employee: 465, health_ins_company: 1050,
+        pension_wage: 31000,
+      })),
+    });
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'E_ACT', year: 2026, month: 5,
+    });
+
+    expect(record.is_final_month).toBe(false);
+    expect(record.prorata_base).toBeNull();
+    expect(record.worked_days).toBeNull();
+    expect(record.total_days_in_month).toBeNull();
+    expect(record.pro_rata_mode).toBeNull();
+    // ratio=1 → 全額不縮水
+    expect(record.grade_allowance).toBe(3000);
+    expect(record.manager_allowance).toBe(1000);
+    expect(record.deduct_labor_ins).toBe(690);
+    expect(record.deduct_health_ins).toBe(465);
+  });
+
+  it('既有值優先:existing.is_final_month=true + worked_days=11(HR 手動)→ 不被推導覆寫', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_HR', base_salary: 31000,
+        grade_allowance: 3000,
+        employment_type: 'full_time',
+        status: 'resigned',
+        resign_date: '2026-05-25',  // HR 改 cascade 後員工又延一週、實際離 5/25 但 HR 想保留 5/11 結算
+      })),
+      // existing 已有 HR 手動填的 worked_days=11(刻意跟 resign_date 不一致)
+      findSalaryRecord: vi.fn(async () => ({
+        id: 'S_E_HR_2026_05',
+        is_final_month: true,
+        worked_days: 11,
+        total_days_in_month: 31,
+        pro_rata_mode: 'calendar_day',
+        status: 'draft',
+      })),
+      findEmployeeInsuranceSettings: vi.fn(async () => null),
+    });
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'E_HR', year: 2026, month: 5,
+    });
+
+    // 用 11 不是 25(existing 優先)
+    expect(record.is_final_month).toBe(true);
+    expect(record.worked_days).toBe(11);
+    expect(record.total_days_in_month).toBe(31);
+    expect(record.prorata_base).toBe(11000);     // round2(31000 × 11/31)
+    expect(record.grade_allowance).toBe(1064.52); // round2(3000 × 11/31)
+  });
+
+  it('resign_date 不同月(4/28)+ 算 5 月 → resolveFinalMonthDays 回 null、不誤判離職月', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_PRE', base_salary: 31000,
+        grade_allowance: 3000,
+        employment_type: 'full_time',
+        status: 'resigned',
+        resign_date: '2026-04-28',  // 4 月已離、不該影響 5 月
+        resigned_at: '2026-04-28T00:00:00+08:00',
+      })),
+      findSalaryRecord: vi.fn(async () => null),
+      findEmployeeInsuranceSettings: vi.fn(async () => null),
+    });
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'E_PRE', year: 2026, month: 5,
+    });
+
+    // 不是該月離職 → 走非離職月分支
+    expect(record.is_final_month).toBe(false);
+    expect(record.prorata_base).toBeNull();
+    // 加給全額(該員工已離但若被列為 5 月薪資對象、那是 listEmployeesForPayroll 的責任)
+    expect(record.grade_allowance).toBe(3000);
+  });
+
+  it('part_time resigned 5/10 → proRataRatio 維持 1(part_time 不被新邏輯影響)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E_PT_RES', base_salary: 0,
+        grade_allowance: 1000, manager_allowance: 500, attendance_bonus: 2000,
+        employment_type: 'part_time',
+        status: 'resigned',
+        resign_date: '2026-05-10',
+      })),
+      findEmployeeHourlyRate: vi.fn(async () => 200),
+      findTotalWorkHoursByEmployeeMonth: vi.fn(async () => 80),
+      findSalaryRecord: vi.fn(async () => null),
+      findEmployeeInsuranceSettings: vi.fn(async () => null),
+    });
+    const { record } = await calculateMonthlySalary(repo, {
+      employee_id: 'E_PT_RES', year: 2026, month: 5,
+    });
+
+    // part_time:不分離職與否,allowance / AB 一律 0、ratio 強制 1
+    expect(record.grade_allowance).toBe(0);
+    expect(record.manager_allowance).toBe(0);
+    expect(record.attendance_bonus_actual).toBe(0);
+    // is_final_month 仍會被推導出為 true、worked_days/total 也寫回(下游 cascade 仍要讀)
+    expect(record.is_final_month).toBe(true);
+    expect(record.worked_days).toBe(10);
+    // prorata_base 走 part_time pt_basePay = 200 × 80 = 16000(不是 base × ratio)
+    expect(record.prorata_base).toBe(16000);
+  });
+});
+

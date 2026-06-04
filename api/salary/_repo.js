@@ -12,9 +12,11 @@ export function makeSalaryRepo() {
 
     // ─── employees ────────────────────────────────────────────
     async findEmployeeForSalary(id) {
+      // 2026-06-04:加 status / resigned_at / resign_date 給 calculator 的離職月自行推導用
+      // (修補「HR 直接標離職未走 approvals cascade、is_final_month 旗標沒寫」的 fail-mode)
       const { data, error } = await supabaseAdmin
         .from('employees')
-        .select('id, name, base_salary, attendance_bonus, employment_type, manager_allowance, grade_allowance, dept_id, departments(name)')
+        .select('id, name, base_salary, attendance_bonus, employment_type, manager_allowance, grade_allowance, dept_id, departments(name), status, resigned_at, resign_date')
         .eq('id', id).maybeSingle();
       if (error) throw error;
       return data || null;
