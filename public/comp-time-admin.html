@@ -33,6 +33,17 @@
   .section-h{font-size:14px;font-weight:600;color:var(--text-dim);margin:18px 0 10px;display:flex;gap:8px;align-items:center}
   .count-badge{padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.08);font-size:11px;font-family:'DM Mono',monospace}
   .empty-st{padding:30px;text-align:center;color:var(--text-dim);font-size:13px}
+  /* 2026-06-05:員工列點擊展開逐筆 */
+  .ct-tbl tr.expandable{cursor:pointer}
+  .ct-tbl tr.expandable:hover{background:rgba(255,255,255,.03)}
+  .ct-tbl tr.detail-row > td{padding:0;background:rgba(0,0,0,.12);border-bottom:1px solid rgba(255,255,255,.06)}
+  .inner-tbl{width:100%;border-collapse:collapse;font-size:12px;margin:0}
+  .inner-tbl th,.inner-tbl td{padding:6px 10px;border-bottom:0.5px solid rgba(255,255,255,.04);text-align:left}
+  .inner-tbl th{font-size:10px;color:var(--text-dim);font-family:'DM Mono',monospace;background:rgba(0,0,0,.08)}
+  .inner-tbl tr.warn{background:rgba(248,113,113,.05)}
+  .source-tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;background:rgba(107,114,128,.15);color:#9CA3AF;font-family:'DM Mono',monospace}
+  .caret{display:inline-block;width:10px;color:var(--text-dim);font-size:10px;margin-right:4px;transition:transform .15s}
+  .expandable.open .caret{transform:rotate(90deg)}
 </style>
 </head>
 <body data-page="comp-time-admin">
@@ -87,6 +98,12 @@
 <script>
 function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmtDate(s){ if(!s) return '—'; return String(s).slice(0,10); }
+// 2026-06-05:展開逐筆用、顯示 earned_at 含年/月/日(對齊 comp-time.html L62-66)
+function fmtTs(s){
+  if(!s) return '—';
+  const d = new Date(s);
+  return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+}
 function daysUntil(dateStr){
   if (!dateStr) return null;
   const today = new Date(); today.setHours(0,0,0,0);
@@ -156,9 +173,11 @@ function render() {
       const earliest = e.records[0]?.expires_at;
       const d = daysUntil(earliest);
       const warn = d != null && d >= 0 && d <= 30;
+      const rowClass = `expandable${warn ? ' warn' : ''}`;
+      const safeId = escHtml(e.employee_id);
       return `
-        <tr class="${warn ? 'warn' : ''}">
-          <td>${escHtml(e.emp_name||e.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(e.employee_id)}</div></td>
+        <tr class="${rowClass}" id="emp-row-${safeId}" data-emp="${safeId}" onclick="toggleEmpDetail('${safeId}')">
+          <td><span class="caret">▸</span>${escHtml(e.emp_name||e.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(e.employee_id)}</div></td>
           <td>${escHtml(e.dept_name || e.dept || '')}</td>
           <td class="num" style="color:#4ADE80;font-weight:600">${e.total_remaining}h</td>
           <td class="num">${e.records.length} 筆</td>
@@ -212,6 +231,65 @@ function render() {
       </tr>
     `).join('');
   }
+}
+
+// ───── 2026-06-05:員工列點擊展開逐筆 ─────
+function toggleEmpDetail(empId) {
+  const row = document.getElementById('emp-row-' + empId);
+  if (!row) return;
+  const detailId = 'emp-detail-' + empId;
+  const existing = document.getElementById(detailId);
+  if (existing) {
+    existing.remove();
+    row.classList.remove('open');
+    return;
+  }
+  const emp = allEmps.find(e => e.employee_id === empId);
+  if (!emp) return;
+  const detailTr = document.createElement('tr');
+  detailTr.id = detailId;
+  detailTr.className = 'detail-row';
+  detailTr.innerHTML = `<td colspan="5">${renderEmpDetail(emp)}</td>`;
+  row.after(detailTr);
+  row.classList.add('open');
+}
+
+function renderEmpDetail(emp) {
+  const records = emp.records || [];
+  if (!records.length) {
+    return `<div class="empty-st" style="padding:14px">此員工無 active 補休</div>`;
+  }
+  const rows = records.map(r => {
+    const days = daysUntil(r.expires_at);
+    const warn = days != null && days >= 0 && days <= 30;
+    const warnTag = warn ? ` <span style="color:#F87171">⚠ ${days}d</span>` : '';
+    let sourceCell;
+    if (r.source && r.source.overtime_date) {
+      const reasonTxt = r.source.reason ? `(${escHtml(r.source.reason)})` : '';
+      sourceCell = `加班 ${escHtml(fmtDate(r.source.overtime_date))}・${r.source.hours}h ${reasonTxt}`;
+    } else if (r.source && r.source.id != null) {
+      sourceCell = `加班單 #${escHtml(String(r.source.id))}`;
+    } else {
+      sourceCell = `<span class="source-tag">舊系統匯入 / 手動</span>`;
+    }
+    return `
+      <tr class="${warn ? 'warn' : ''}">
+        <td class="num">${escHtml(fmtTs(r.earned_at))}</td>
+        <td class="num">${r.earned_hours}h</td>
+        <td class="num">${escHtml(fmtDate(r.expires_at))}${warnTag}</td>
+        <td class="num">${r.used_hours}h</td>
+        <td class="num" style="color:#4ADE80">${r.remaining_hours}h</td>
+        <td><span class="pill p-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+        <td style="font-size:11px;color:var(--text-dim)">${sourceCell}</td>
+      </tr>`;
+  }).join('');
+  return `
+    <table class="inner-tbl">
+      <thead><tr>
+        <th>取得日</th><th>時數</th><th>到期日</th><th>已用</th><th>剩餘</th><th>狀態</th><th>來源</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // ───── P5.3b Admin Edit comp_time_balance row ─────
