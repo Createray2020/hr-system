@@ -71,7 +71,7 @@
       <div class="section-h">員工補休餘額 <span class="count-badge" id="cnt-emp">0</span></div>
       <div class="table-wrap">
         <table class="ct-tbl">
-          <thead><tr><th>員工</th><th>部門</th><th>總餘額</th><th>記錄數</th><th>最近到期</th></tr></thead>
+          <thead><tr><th>員工</th><th>部門</th><th>總餘額</th><th>記錄數</th><th>最近到期</th><th>操作</th></tr></thead>
           <tbody id="tbody-emp"></tbody>
         </table>
       </div>
@@ -167,7 +167,7 @@ function render() {
   const tbEmp = document.getElementById('tbody-emp');
   document.getElementById('cnt-emp').textContent = allEmps.length;
   if (!allEmps.length) {
-    tbEmp.innerHTML = `<tr><td colspan="5"><div class="empty-st">尚無員工有補休餘額</div></td></tr>`;
+    tbEmp.innerHTML = `<tr><td colspan="6"><div class="empty-st">尚無員工有補休餘額</div></td></tr>`;
   } else {
     tbEmp.innerHTML = allEmps.map(e => {
       const earliest = e.records[0]?.expires_at;
@@ -175,13 +175,15 @@ function render() {
       const warn = d != null && d >= 0 && d <= 30;
       const rowClass = `expandable${warn ? ' warn' : ''}`;
       const safeId = escHtml(e.employee_id);
+      const safeName = escHtml(e.emp_name || e.employee_id);
       return `
         <tr class="${rowClass}" id="emp-row-${safeId}" data-emp="${safeId}" onclick="toggleEmpDetail('${safeId}')">
-          <td><span class="caret">▸</span>${escHtml(e.emp_name||e.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(e.employee_id)}</div></td>
+          <td><span class="caret">▸</span>${safeName}<div style="font-size:11px;color:var(--text-dim)">${safeId}</div></td>
           <td>${escHtml(e.dept_name || e.dept || '')}</td>
           <td class="num" style="color:#4ADE80;font-weight:600">${e.total_remaining}h</td>
           <td class="num">${e.records.length} 筆</td>
           <td class="num">${escHtml(fmtDate(earliest))}${warn ? ` <span style="color:#F87171">(${d}天)</span>` : ''}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openProxyDeductComp('${safeId}','${safeName}',${e.total_remaining})">＋ 代扣補休</button></td>
         </tr>
       `;
     }).join('');
@@ -249,7 +251,7 @@ function toggleEmpDetail(empId) {
   const detailTr = document.createElement('tr');
   detailTr.id = detailId;
   detailTr.className = 'detail-row';
-  detailTr.innerHTML = `<td colspan="5">${renderEmpDetail(emp)}</td>`;
+  detailTr.innerHTML = `<td colspan="6">${renderEmpDetail(emp)}</td>`;
   row.after(detailTr);
   row.classList.add('open');
 }
@@ -424,8 +426,126 @@ function renderCompTimeAuditHistory(note) {
   content.innerHTML = lines.map(l => `<div>${escHtml(l)}</div>`).join('');
 }
 
+// ─── Build 2:後台代扣補休(直接生效、允許負餘額)─────────────
+function openProxyDeductComp(empId, empName, totalRemaining) {
+  document.getElementById('pd-emp-id').value = empId;
+  document.getElementById('pd-emp-label').textContent = `${empName} (${empId})  現有餘額 ${totalRemaining}h`;
+  document.getElementById('pd-date').value = '';
+  document.getElementById('pd-start').value = '';
+  document.getElementById('pd-end').value = '';
+  document.getElementById('pd-hours').value = '';
+  document.getElementById('pd-reason').value = '';
+  updateProxyDeductWarn(totalRemaining, 0);
+  document.getElementById('pd-modal').classList.add('show');
+}
+function closeProxyDeductComp() {
+  document.getElementById('pd-modal').classList.remove('show');
+}
+function onProxyDeductHoursChange() {
+  const total = parseFloat(document.getElementById('pd-emp-label').textContent.match(/餘額 ([-\d.]+)h/)?.[1]) || 0;
+  const h = parseFloat(document.getElementById('pd-hours').value) || 0;
+  updateProxyDeductWarn(total, h);
+}
+function updateProxyDeductWarn(total, h) {
+  const after = total - h;
+  const warn = document.getElementById('pd-neg-warn');
+  if (h > 0 && after < 0) {
+    warn.style.display = '';
+    warn.textContent = `⚠ 扣抵後餘額將為 ${after.toFixed(2)}h(會新建一筆 over-draw record 記錄超額,可繼續送出)`;
+  } else {
+    warn.style.display = 'none';
+  }
+}
+function toIsoTaipei(local) {
+  if (!local) return null;
+  return `${local}:00+08:00`;
+}
+async function submitProxyDeductComp() {
+  const emp     = document.getElementById('pd-emp-id').value;
+  const startLc = document.getElementById('pd-start').value;
+  const endLc   = document.getElementById('pd-end').value;
+  const hours   = parseFloat(document.getElementById('pd-hours').value);
+  const reason  = document.getElementById('pd-reason').value.trim();
+
+  if (!emp) return toast('員工 ID 缺失', 'error');
+  if (!startLc || !endLc) return toast('請填起迄時間', 'error');
+  if (!Number.isFinite(hours) || hours <= 0) return toast('時數需 > 0', 'error');
+  if (!reason) return toast('請填事由', 'error');
+
+  const body = {
+    employee_id: emp,
+    start_at: toIsoTaipei(startLc),
+    end_at:   toIsoTaipei(endLc),
+    hours,
+    reason,
+  };
+
+  try {
+    const r = await api('/api/leaves/proxy-create', { method:'POST', body: JSON.stringify(body) });
+    const lr = r.leave_request;
+    if (r.comp_after?.went_negative) {
+      // 橘色警示提示已建立但負餘額
+      toast(`✓ 已建立補休假 ${lr.id};該員餘額為 ${r.comp_after.total_remaining}h(負)`, 'error');
+    } else {
+      toast(`✓ 已建立補休假 ${lr.id};扣抵後餘額 ${r.comp_after.total_remaining}h`, 'success');
+    }
+    closeProxyDeductComp();
+    await load();
+  } catch(e) {
+    toast('代扣失敗:' + e.message, 'error');
+  }
+}
+
 load();
 </script>
+
+<!-- Build 2:後台代扣補休 modal -->
+<div class="modal-bg" id="pd-modal">
+  <div class="modal" style="max-width:540px;width:95vw">
+    <div class="modal-title">＋ 代扣補休(直接核准)</div>
+    <input type="hidden" id="pd-emp-id">
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px" id="pd-emp-label"></div>
+
+    <div style="font-size:11px;color:#FB923C;background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.2);padding:6px 10px;border-radius:4px;margin-bottom:14px">
+      ⚠ 此單建立後直接 status=approved、立即扣補休餘額。<br>
+      餘額不足時會新建一筆 over-draw record(earned=0/used=shortfall),總額為負;後續員工取得新補休會 FIFO 抵銷。
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">請補休日 *(填日期、time 用下方)</label>
+        <input type="date" class="form-input" id="pd-date">
+      </div>
+      <div class="form-row">
+        <label class="form-label">時數 *</label>
+        <input type="number" class="form-input" id="pd-hours" step="0.25" min="0.25" placeholder="4.0" oninput="onProxyDeductHoursChange()">
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">起 (start) *</label>
+        <input type="datetime-local" class="form-input" id="pd-start">
+      </div>
+      <div class="form-row">
+        <label class="form-label">迄 (end) *</label>
+        <input type="datetime-local" class="form-input" id="pd-end">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">事由 *</label>
+      <input type="text" class="form-input" id="pd-reason" placeholder="例:請補休(代扣)">
+    </div>
+
+    <div id="pd-neg-warn" style="display:none;font-size:11px;color:#FB923C;background:rgba(251,146,60,.1);padding:6px 10px;border-radius:4px;margin-bottom:10px"></div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:6px">
+      <button class="btn btn-ghost" onclick="closeProxyDeductComp()">取消</button>
+      <button class="btn btn-primary" onclick="submitProxyDeductComp()">建立並核准</button>
+    </div>
+  </div>
+</div>
 
 <!-- P5.3b:HR 進階編輯補休 row -->
 <div class="modal-bg" id="ct-edit-modal">
