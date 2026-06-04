@@ -78,6 +78,7 @@
             <option value="cancelled">cancelled</option>
           </select>
           <input type="text" class="form-input" id="f-search" placeholder="搜尋員工" oninput="renderRequests()" style="flex:1;max-width:240px">
+          <button class="btn btn-primary" onclick="openProxyCreate()" style="margin-left:auto">＋ 代建已核准加班</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -164,6 +165,71 @@
     <div class="modal-actions" style="justify-content:flex-end;gap:8px">
       <button class="btn btn-ghost" onclick="closeRequestEdit()">取消</button>
       <button class="btn btn-primary" onclick="saveRequestEdit()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Build 1:後台代建已核准加班 -->
+<div class="modal-bg" id="proxy-create-modal">
+  <div class="modal" style="max-width:560px;width:95vw">
+    <div class="modal-title">＋ 代建已核准加班</div>
+    <div style="font-size:11px;color:#FB923C;background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.2);padding:6px 10px;border-radius:4px;margin-bottom:14px">
+      ⚠ 此單建立後直接 status=approved、立即生效:補休→寫補休餘額;加班費→月結自動聚合。
+      <br>超過月上限不會擋,但會記在 row 上(is_over_limit / over_limit_dimensions)。
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">員工 *</label>
+      <select class="form-select" id="pc-emp"><option value="">— 選擇 —</option></select>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">加班日期 *</label>
+        <input type="date" class="form-input" id="pc-date">
+      </div>
+      <div class="form-row">
+        <label class="form-label">時數 (hours) *</label>
+        <input type="number" class="form-input" id="pc-hours" step="0.25" min="0.25" placeholder="3.0">
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-row">
+        <label class="form-label">起 (start) *</label>
+        <input type="datetime-local" class="form-input" id="pc-start">
+      </div>
+      <div class="form-row">
+        <label class="form-label">迄 (end) *</label>
+        <input type="datetime-local" class="form-input" id="pc-end">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">補償方式 *</label>
+      <select class="form-select" id="pc-comp" onchange="onProxyCompChange()">
+        <option value="comp_leave">轉補休(grant 補休餘額)</option>
+        <option value="overtime_pay">折發加班費(月結自動聚合 estimated_pay)</option>
+      </select>
+    </div>
+
+    <div class="form-row" id="pc-daytype-row" style="display:none">
+      <label class="form-label">日別 *(折發加班費才需要)</label>
+      <select class="form-select" id="pc-daytype">
+        <option value="weekday">平日(§24-I 前 2h ×1.34、後段 ×1.67)</option>
+        <option value="rest_day">休息日(§24-II 0-2h ×1.34、2-8h ×1.67、8-12h ×2.67)</option>
+        <option value="holiday">國定假日(§40 整段 ×2.0)</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">事由 *</label>
+      <input type="text" class="form-input" id="pc-reason" placeholder="例:系統故障留下修復、活動加班、補登未申請加班">
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px">
+      <button class="btn btn-ghost" onclick="closeProxyCreate()">取消</button>
+      <button class="btn btn-primary" onclick="submitProxyCreate()">建立並核准</button>
     </div>
   </div>
 </div>
@@ -439,6 +505,94 @@ function renderRequestAuditHistory(note) {
   }
   row.style.display = '';
   content.innerHTML = lines.map(l => `<div>${escHtml(l)}</div>`).join('');
+}
+
+// ─── Build 1:後台代建已核准加班 ─────────────────────────────
+let pcEmpList = [];
+
+async function ensureProxyEmpList(){
+  if (pcEmpList.length) return;
+  try {
+    const emps = await api('/api/employees?status=active');
+    pcEmpList = (emps || []).filter(e => e.id !== 'EMP_99999999');
+    const sel = document.getElementById('pc-emp');
+    sel.innerHTML = '<option value="">— 選擇員工 —</option>' +
+      pcEmpList.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name || e.id)} (${escHtml(e.id)})</option>`).join('');
+  } catch(e){ toast('員工清單載入失敗:'+e.message, 'error'); }
+}
+
+async function openProxyCreate(){
+  await ensureProxyEmpList();
+  document.getElementById('pc-emp').value = '';
+  document.getElementById('pc-date').value = '';
+  document.getElementById('pc-hours').value = '';
+  document.getElementById('pc-start').value = '';
+  document.getElementById('pc-end').value = '';
+  document.getElementById('pc-comp').value = 'comp_leave';
+  document.getElementById('pc-daytype').value = 'weekday';
+  document.getElementById('pc-reason').value = '';
+  onProxyCompChange();
+  document.getElementById('proxy-create-modal').classList.add('show');
+}
+function closeProxyCreate(){
+  document.getElementById('proxy-create-modal').classList.remove('show');
+}
+function onProxyCompChange(){
+  const comp = document.getElementById('pc-comp').value;
+  document.getElementById('pc-daytype-row').style.display = comp === 'overtime_pay' ? '' : 'none';
+}
+function toIsoTaipei(local){
+  // datetime-local 是 'YYYY-MM-DDTHH:MM',當作 Taipei wall-clock 接 +08:00
+  if (!local) return null;
+  return `${local}:00+08:00`;
+}
+async function submitProxyCreate(){
+  const emp     = document.getElementById('pc-emp').value;
+  const date    = document.getElementById('pc-date').value;
+  const hours   = parseFloat(document.getElementById('pc-hours').value);
+  const startLc = document.getElementById('pc-start').value;
+  const endLc   = document.getElementById('pc-end').value;
+  const comp    = document.getElementById('pc-comp').value;
+  const dayType = document.getElementById('pc-daytype').value;
+  const reason  = document.getElementById('pc-reason').value.trim();
+
+  if (!emp)            return toast('請選員工', 'error');
+  if (!date)           return toast('請選日期', 'error');
+  if (!startLc || !endLc) return toast('請填起迄時間', 'error');
+  if (!Number.isFinite(hours) || hours <= 0) return toast('時數需 > 0', 'error');
+  if (!reason)         return toast('請填事由', 'error');
+
+  const body = {
+    employee_id: emp,
+    overtime_date: date,
+    start_at: toIsoTaipei(startLc),
+    end_at:   toIsoTaipei(endLc),
+    hours,
+    compensation_type: comp,
+    reason,
+  };
+  if (comp === 'overtime_pay') body.day_type = dayType;
+
+  try {
+    const r = await api('/api/overtime-requests/proxy-create', { method:'POST', body: JSON.stringify(body) });
+    const ot = r.request;
+    if (r.limitResult?.is_over_limit) {
+      const dims = (r.limitResult.over_limit_dimensions || []).join(', ');
+      toast(`✓ 已建立但超 ${dims} 上限(僅記錄、未擋)`, 'success');
+    } else {
+      toast(`✓ 已建立加班單 #${ot.id}`, 'success');
+    }
+    if (comp === 'comp_leave' && r.comp_balance) {
+      setTimeout(() => toast(`✓ 補休餘額 +${r.comp_balance.earned_hours}h(comp#${r.comp_balance.id})`, 'success'), 400);
+    }
+    if (r.warnings?.length) {
+      for (const w of r.warnings) toast('⚠ ' + (w.message || w.code), 'error');
+    }
+    closeProxyCreate();
+    loadRequests();
+  } catch(e){
+    toast('建立失敗:' + e.message, 'error');
+  }
 }
 
 buildMonthOptions();
