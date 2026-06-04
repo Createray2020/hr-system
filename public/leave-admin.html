@@ -198,6 +198,10 @@ function toast(msg, type='success') {
 }
 function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmtDt(iso){ if(!iso) return '—'; const d=new Date(iso); const pad=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+// 補休逐筆 detail modal 用(從 public/comp-time.html L61-71 對齊複製)
+function fmtDate(s){ if(!s) return '—'; return String(s).slice(0,10); }
+function fmtTs(s){ if(!s) return '—'; const d=new Date(s); return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`; }
+function daysUntil(dateStr){ const today=new Date(); today.setHours(0,0,0,0); const d=new Date(dateStr+'T00:00:00'); d.setHours(0,0,0,0); return Math.ceil((d-today)/86400000); }
 
 // 假別中文名統一從 /api/leaves?_resource=leave_types 動態拿(見 public/js/utils.js)
 // 不再 hardcode、避免新增假別(如 menstrual 生理假)時 UI 顯示英文 code
@@ -966,6 +970,31 @@ function renderQuotaDetailBody(summary, requests, year) {
     </div>`;
   const balanceRow = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">${annualCard}${compCard}</div>`;
 
+  // 補休逐筆明細(quota_summary.comp.records、最早到期在前)
+  // ⚠ 30 天內失效用 #FB923C 橘(對齊本頁累積型 over-limit 警示 L1038)
+  const compRecords = Array.isArray(comp.records) ? comp.records : [];
+  const compRecordsBlock = compRecords.length === 0
+    ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:16px;color:var(--text-dim);font-size:13px">無有效補休</div>`
+    : `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:12px">
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">補休逐筆(共 ${compRecords.length} 筆)</div>
+        <div style="display:grid;grid-template-columns:1fr 70px 1fr 70px 70px 80px;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:11px">
+          <div>取得日</div><div style="text-align:right">時數</div><div>到期日</div><div style="text-align:right">已用</div><div style="text-align:right">剩餘</div><div>狀態</div>
+        </div>
+        ${compRecords.map(r => {
+          const days = daysUntil(r.expires_at);
+          const warn = days >= 0 && days <= 30;
+          const warnTag = warn ? `<span style="color:#FB923C;margin-left:4px">⚠ ${days}d</span>` : '';
+          return `<div style="display:grid;grid-template-columns:1fr 70px 1fr 70px 70px 80px;gap:6px;padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,.06);${warn ? 'background:rgba(251,146,60,.05)' : ''}">
+            <div>${escHtml(fmtTs(r.earned_at))}</div>
+            <div style="text-align:right">${r.earned_hours}h</div>
+            <div>${escHtml(fmtDate(r.expires_at))}${warnTag}</div>
+            <div style="text-align:right">${r.used_hours}h</div>
+            <div style="text-align:right;color:#4ADE80">${r.remaining_hours}h</div>
+            <div>${escHtml(r.status)}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+
   // 區塊 2:累積型摺疊(group by leave_type、跳過 annual/comp 避免跟餘額型重複)
   const grouped = {};
   for (const r of requests) {
@@ -1033,7 +1062,7 @@ function renderQuotaDetailBody(summary, requests, year) {
     </div>`;
   }
 
-  return balanceRow + detailHtml;
+  return balanceRow + compRecordsBlock + detailHtml;
 }
 
 async function jumpToLeaveDetail(leaveId) {

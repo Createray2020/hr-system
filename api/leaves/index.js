@@ -246,7 +246,9 @@ async function handleQuotaSummary(req, res) {
       period_end:     annualFull.period_end,
     };
 
-    // 2. 補休 — findActiveCompBalances 已按 expires_at ASC 排、第一筆就是 earliest
+    // 2. 補休 — findActiveCompBalances 已按 expires_at ASC, earned_at ASC 排
+    //   既有摘要欄不動;附帶 records[] 給前端逐筆顯示(leave-admin detail modal 用)。
+    //   records 順序 = repo 內建順序(最早到期在前),只含 active(沿用 findActiveCompBalances 範圍)
     const compBalances = await repo.findActiveCompBalances(employee_id);
     const total_earned_hours = (compBalances || []).reduce(
       (s, b) => s + (Number(b.earned_hours) || 0), 0,
@@ -260,6 +262,15 @@ async function handleQuotaSummary(req, res) {
       total_used_hours,
       total_remaining_hours: total_earned_hours - total_used_hours,
       earliest_expires_at:   compBalances?.[0]?.expires_at || null,
+      records: (compBalances || []).map(b => ({
+        id:              b.id,
+        earned_at:       b.earned_at,
+        earned_hours:    Number(b.earned_hours) || 0,
+        expires_at:      b.expires_at,
+        used_hours:      Number(b.used_hours) || 0,
+        remaining_hours: Number(b.remaining_hours) || 0,
+        status:          b.status,
+      })),
     };
 
     // 3. 累積型(病/事假)— 走 calculateAccumulatingUsage + 接 leave_types meta
