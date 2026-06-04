@@ -34,11 +34,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── CLI ──────────────────────────────────────────────────
 const args = process.argv.slice(2);
-const flags = { apply: false, runner: null };
+const flags = { apply: false, runner: null, json: null };
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--apply') flags.apply = true;
   else if (args[i].startsWith('--runner=')) flags.runner = args[i].slice('--runner='.length);
   else if (args[i] === '--runner' && args[i + 1]) flags.runner = args[++i];
+  else if (args[i].startsWith('--json=')) flags.json = args[i].slice('--json='.length);
+  else if (args[i] === '--json' && args[i + 1]) flags.json = args[++i];
 }
 const RUNNER_EMP = flags.runner || process.env.BACKFILL_RUNNER || 'EMP_01250901';
 const APPLY = flags.apply;
@@ -147,7 +149,9 @@ async function findCompTotalRemaining(emp) {
 }
 
 // ─── 主流程 ───────────────────────────────────────────────
-const JSON_PATH = path.join(__dirname, 'data', 'backfill_2026_05_lianxian.json');
+const JSON_PATH = flags.json
+  ? (path.isAbsolute(flags.json) ? flags.json : path.resolve(process.cwd(), flags.json))
+  : path.join(__dirname, 'data', 'backfill_2026_05_lianxian.json');
 const items = JSON.parse(fs.readFileSync(JSON_PATH, 'utf8'));
 const AUDIT_TODAY = todayTaipeiDate();
 const NOTE_PREFIX_FN = (action) => `[${AUDIT_TODAY} 回灌] ${action} by ${RUNNER_EMP}`;
@@ -370,8 +374,12 @@ async function handleLeavePartial(item, i) {
   } else {
     return { error: `unknown side: ${side}` };
   }
-  const hours = workHoursBetween(lvStartIso, lvEndIso);
-  if (hours <= 0) return { error: `partial 時段 ≤ 0h (side=${side})` };
+  const hours_computed = workHoursBetween(lvStartIso, lvEndIso);
+  if (hours_computed <= 0) return { error: `partial 時段 ≤ 0h (side=${side})` };
+  // 2026-06-05:hours_override(optional)只覆寫假單時數/扣假時數,不改 start_at/end_at
+  const hours = (typeof item.hours_override === 'number' && item.hours_override > 0)
+    ? item.hours_override
+    : hours_computed;
 
   // dup guard:同 leave_type 已 cover 該日 → SKIP insert(attendance 修正仍跑)
   const dupId = await findCoveringApprovedLeave(emp, work_date, leave_type);
