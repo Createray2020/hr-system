@@ -138,6 +138,44 @@ export default async function handler(req, res) {
     }
     // 2026-06-05:total_remaining 是 row remaining 加總,再 round 一次防累加尾數
     for (const eid of Object.keys(byEmp)) byEmp[eid].total_remaining = round2(byEmp[eid].total_remaining);
+
+    // 2026-06-05:enrich records[].source = 對應加班單(IN-query overtime_requests 一次撈)。
+    //   - source_overtime_request_id 查得到 → { id, overtime_date, hours, reason, status }
+    //   - 有 id 但查不到 → { id }(保底)
+    //   - null → null(舊系統匯入/手動)
+    //   守門:無任何非 null id 時略過 IN-query(prod 目前 15/15 NULL、會直接全 null)
+    const otIds = [...new Set(
+      (data || [])
+        .map(r => r.source_overtime_request_id)
+        .filter(id => id != null)
+    )];
+    let otMap = {};
+    if (otIds.length > 0) {
+      const { data: ots } = await supabaseAdmin
+        .from('overtime_requests')
+        .select('id, overtime_date, hours, reason, status')
+        .in('id', otIds);
+      for (const ot of (ots || [])) otMap[ot.id] = ot;
+    }
+    for (const eid of Object.keys(byEmp)) {
+      for (const rec of byEmp[eid].records) {
+        const sid = rec.source_overtime_request_id;
+        if (sid == null) {
+          rec.source = null;
+        } else if (otMap[sid]) {
+          rec.source = {
+            id: otMap[sid].id,
+            overtime_date: otMap[sid].overtime_date,
+            hours: Number(otMap[sid].hours) || 0,
+            reason: otMap[sid].reason,
+            status: otMap[sid].status,
+          };
+        } else {
+          rec.source = { id: sid };
+        }
+      }
+    }
+
     return res.status(200).json({ employees: Object.values(byEmp) });
   } catch (e) {
     return res.status(500).json({ error: e.message });
