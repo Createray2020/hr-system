@@ -436,10 +436,10 @@ function openProxyDeductComp(empId, empName, totalRemaining) {
   document.getElementById('pd-hours').value = '';
   document.getElementById('pd-reason').value = '';
   updateProxyDeductWarn(totalRemaining, 0);
-  document.getElementById('pd-modal').classList.add('show');
+  document.getElementById('pd-modal').classList.add('open');
 }
 function closeProxyDeductComp() {
-  document.getElementById('pd-modal').classList.remove('show');
+  document.getElementById('pd-modal').classList.remove('open');
 }
 function onProxyDeductHoursChange() {
   const total = parseFloat(document.getElementById('pd-emp-label').textContent.match(/餘額 ([-\d.]+)h/)?.[1]) || 0;

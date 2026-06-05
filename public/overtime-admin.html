@@ -532,10 +532,10 @@ async function openProxyCreate(){
   document.getElementById('pc-daytype').value = 'weekday';
   document.getElementById('pc-reason').value = '';
   onProxyCompChange();
-  document.getElementById('proxy-create-modal').classList.add('show');
+  document.getElementById('proxy-create-modal').classList.add('open');
 }
 function closeProxyCreate(){
-  document.getElementById('proxy-create-modal').classList.remove('show');
+  document.getElementById('proxy-create-modal').classList.remove('open');
 }
 function onProxyCompChange(){
   const comp = document.getElementById('pc-comp').value;
