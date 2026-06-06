@@ -8,9 +8,21 @@
 
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
-import { isBackofficeRole } from '../../lib/roles.js';
-import { makeDeptEmpIdsRepo } from '../../lib/auth-scope.js';
+import { isBackofficeRole, isExecutiveRole } from '../../lib/roles.js';
 import { applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
+
+// 2026-06-06:executive(ceo/chairman/admin)排除在「被排班」之外。
+// 撈員工 id 時補 role,組出集合後一律 isExecutiveRole 過濾掉再建 draft period。
+// 不沿用 lib/auth-scope.js findActiveEmployeeIdsByDept(它只回 id、其他 endpoint 共用),
+// 改本檔內 inline 撈含 role 的版本,executive filter 收斂在本檔內。
+async function findSchedulableEmployeeIds(deptId) {
+  let q = supabaseAdmin.from('employees').select('id, role').eq('status', 'active');
+  q = applyExcludeSystemAccountsQuery(q);
+  if (deptId) q = q.eq('dept_id', deptId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data || []).filter(e => !isExecutiveRole(e.role)).map(e => e.id);
+}
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -31,24 +43,18 @@ export default async function handler(req, res) {
   let targetEmpIds;
   const callerIsHR = isBackofficeRole(caller);
 
-  if (callerIsHR) {
-    if (dept_id) {
-      const repo = makeDeptEmpIdsRepo(supabaseAdmin);
-      targetEmpIds = await repo.findActiveEmployeeIdsByDept(dept_id);
+  try {
+    if (callerIsHR) {
+      // HR 有 dept_id → 該部門 active;無 dept_id → 全公司 active
+      targetEmpIds = await findSchedulableEmployeeIds(dept_id || null);
+    } else if (caller.is_manager === true && caller.dept_id) {
+      // 主管強鎖自己部門、忽略 body.dept_id
+      targetEmpIds = await findSchedulableEmployeeIds(caller.dept_id);
     } else {
-      // 全公司 active(排除系統帳號,與 findActiveEmployeeIdsByDept 內部規則一致)
-      const { data, error } = await applyExcludeSystemAccountsQuery(
-        supabaseAdmin.from('employees').select('id').eq('status', 'active')
-      );
-      if (error) return res.status(500).json({ error: error.message });
-      targetEmpIds = (data || []).map(e => e.id);
+      return res.status(403).json({ error: 'NOT_MANAGER_OR_HR' });
     }
-  } else if (caller.is_manager === true && caller.dept_id) {
-    // 主管強鎖自己部門、忽略 body.dept_id
-    const repo = makeDeptEmpIdsRepo(supabaseAdmin);
-    targetEmpIds = await repo.findActiveEmployeeIdsByDept(caller.dept_id);
-  } else {
-    return res.status(403).json({ error: 'NOT_MANAGER_OR_HR' });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
   }
 
   if (!targetEmpIds || targetEmpIds.length === 0) {

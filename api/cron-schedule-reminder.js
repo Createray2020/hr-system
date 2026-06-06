@@ -11,6 +11,7 @@ import { runScheduleReminder } from '../lib/schedule/reminder.js';
 import { sendPushToEmployees, createNotification } from '../lib/push.js';
 import { requireCron } from '../lib/cron-auth.js';
 import { applyExcludeSystemAccountsQuery } from '../lib/salary/system-accounts.js';
+import { isExecutiveRole } from '../lib/roles.js';
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -42,8 +43,9 @@ function supabaseRepo() {
       const draftIds = new Set((drafts || []).map(p => p.employee_id));
 
       // 也找該月「還沒建 period」的活躍員工 — 也要提醒
+      // 2026-06-06:select 補 role、提醒對象排除 executive(executive 不被排班)
       const { data: allEmps, error: eErr } = await applyExcludeSystemAccountsQuery(
-        supabaseAdmin.from('employees').select('id, name').eq('status', 'active')
+        supabaseAdmin.from('employees').select('id, name, role').eq('status', 'active')
       );
       if (eErr) throw eErr;
 
@@ -52,9 +54,10 @@ function supabaseRepo() {
         .eq('period_year', year).eq('period_month', month);
       const existingIds = new Set((existingPeriods || []).map(p => p.employee_id));
 
-      // 提醒對象 = (有 draft 還沒送) ∪ (沒建 period)
+      // 提醒對象 = (有 draft 還沒送) ∪ (沒建 period)、且非 executive
       return (allEmps || []).filter(e =>
-        draftIds.has(e.id) || !existingIds.has(e.id)
+        !isExecutiveRole(e.role) &&
+        (draftIds.has(e.id) || !existingIds.has(e.id))
       );
     },
 

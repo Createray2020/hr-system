@@ -482,7 +482,9 @@ async function load(retries = 0) {
 }
 
 function filterVisibleEmps(emps, user) {
-  const active = (emps || []).filter(e => e.status === 'active');
+  // 2026-06-06:executive(ceo/chairman/admin)排除在「被排班」之外
+  // 不影響 caller 作為 executive 管理別人 period 的能力(那是另一條 path:canManagePeriod L688)
+  const active = (emps || []).filter(e => e.status === 'active' && !window.Roles.isExecutive(e));
   if (['hr','admin','ceo','chairman'].includes(user.role)) return active;
   if (user.is_manager && user.dept_id) {
     return active.filter(e => e.dept_id === user.dept_id);
