@@ -329,6 +329,50 @@ let currentWeekStart = null;     // ISO date string, 週日為起始
 let allEmps = [];                // 役色過濾後的完整 active 員工（HR=全公司、主管=同部門）
 let visibleEmps = [];            // allEmps 再套部門過濾後、實際渲染的員工
 let selectedDeptId = '';         // dept filter（'' = 全部、HR 專屬）
+let primaryManagerByDept = {};   // 2026-06-06:{ dept_id: manager_id } from /api/departments,roster 排序用
+
+// 2026-06-06:roster 部門排序硬編碼(departments 表無 sort_order 欄)
+// 未列出的部門排到 ROSTER_DEPT_ORDER.length 之後、再按 dept_name localeCompare
+const ROSTER_DEPT_ORDER = [
+  'D1777368388132',   // 連線前線部
+  'D1777368423626',   // 倉儲後勤部
+];
+function rosterDeptRank(deptId) {
+  const i = ROSTER_DEPT_ORDER.indexOf(deptId || '');
+  return i === -1 ? ROSTER_DEPT_ORDER.length : i;
+}
+
+// roster comparator:① 部門 → ②/③ 主管(主登優先、其餘按 hire_date→name)→ ④ 非主管按 name
+function rosterCompare(a, b) {
+  // ① 部門順序
+  const ra = rosterDeptRank(a.dept_id);
+  const rb = rosterDeptRank(b.dept_id);
+  if (ra !== rb) return ra - rb;
+  // ①補 兩邊都「未列出部門」時用 dept_name localeCompare
+  if (ra === ROSTER_DEPT_ORDER.length) {
+    const dnA = a.dept_name || a.dept_id || '';
+    const dnB = b.dept_name || b.dept_id || '';
+    const cmp = dnA.localeCompare(dnB);
+    if (cmp !== 0) return cmp;
+  }
+  // ② 主管優先
+  const ma = a.is_manager === true ? 1 : 0;
+  const mb = b.is_manager === true ? 1 : 0;
+  if (ma !== mb) return mb - ma;   // 主管(1)在前
+  // ③ 主管之間:部門主登主管最前;其餘 hire_date ASC、再 name
+  if (ma === 1 && mb === 1) {
+    const pmA = primaryManagerByDept[a.dept_id];
+    const pmB = primaryManagerByDept[b.dept_id];
+    const primA = a.id === pmA ? 1 : 0;
+    const primB = b.id === pmB ? 1 : 0;
+    if (primA !== primB) return primB - primA;   // primary(1)在前
+    const hA = a.hire_date || '9999-12-31';
+    const hB = b.hire_date || '9999-12-31';
+    if (hA !== hB) return hA < hB ? -1 : 1;
+  }
+  // ④ 其餘按 name(對齊 API .order('name') Unicode)
+  return (a.name || '').localeCompare(b.name || '');
+}
 let allSchedules = {};           // { emp_id: [schedules] }
 let allPeriods = {};             // F1:{ `${empId}_${yyyy-mm}`: period } 複合 key、防跨月 race
 let holidayDates = new Set();    // C12-3:該年 holidays（不含 makeup_workday）
@@ -417,7 +461,16 @@ async function load(retries = 0) {
 
   // 員工列表 + 班別清單（pill bar）
   try {
-    const emps = await api('/api/employees');
+    // 2026-06-06:並 fetch departments 拿 manager_id 給 roster 主登主管排序用
+    // /api/departments(api/employees.js?_resource=departments)select('*') 已含 manager_id
+    const [emps, depts] = await Promise.all([
+      api('/api/employees'),
+      api('/api/departments').catch(() => []),
+    ]);
+    primaryManagerByDept = {};
+    for (const d of (depts || [])) {
+      if (d.manager_id) primaryManagerByDept[d.id] = d.manager_id;
+    }
     allEmps = filterVisibleEmps(emps || [], u);
     applyDeptFilter();
   } catch(e) { toast('員工列表載入失敗：' + e.message, 'error'); return; }
@@ -498,6 +551,8 @@ function applyDeptFilter() {
   } else {
     visibleEmps = allEmps.filter(e => (e.dept_id || '') === selectedDeptId);
   }
+  // 2026-06-06:roster 排序 — 部門(ROSTER_DEPT_ORDER)→ 主管(主登優先 hire_date)→ 非主管 name
+  visibleEmps.sort(rosterCompare);
 }
 
 function renderDeptFilter(isHR) {
