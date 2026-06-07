@@ -61,6 +61,7 @@ vi.mock('../lib/auth.js', () => ({
 
 vi.mock('../lib/roles.js', () => ({
   isBackofficeRole: vi.fn(u => !!u && ['hr','ceo','chairman','admin'].includes(u.role)),
+  isExecutiveRole: vi.fn(role => ['admin','chairman','ceo'].includes(role)),
 }));
 
 vi.mock('../lib/schedule/permissions.js', () => ({
@@ -325,5 +326,75 @@ describe('G1 EMPLOYEE_SHIFT_RESTRICTED (PUT 路徑)', () => {
     });
     await handler(req, res);
     expect(res.statusCode).toBe(200);
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// 2026-06-07:主管/executive 改自己的班表 — isSelf 分流加身分判斷
+// 對 api/schedules/[id].js PUT 的覆蓋:
+//   M1 主管(is_manager=true)PUT 自己 published period 的「未來日」ST001 → 200,走 canManagerEditSchedule
+//   M2 主管 PUT 自己 published period 的「今天/過去」ST001 → 403 MANAGER_LATE_DENIED
+//   M3 一般員工(is_manager=false、role=employee)PUT 自己正班 ST001 → 仍 403 EMPLOYEE_SHIFT_RESTRICTED(回歸保護)
+//   M4 executive(role=ceo,is_manager=false)PUT 自己 published 任何日 → 200(HR/exec 不受 late 擋)
+// ════════════════════════════════════════════════════════════
+describe('B 修:主管/executive 改自己的班表(PUT)', () => {
+  it('M1: 主管(is_manager=true)PUT 自己 published 未來日 ST001 → 200,走 canManagerEditSchedule', async () => {
+    overrides.caller = { id: 'EMP_01251001', role: 'employee', is_manager: true, dept_id: 'D1' };
+    setSchedule({ employee_id: 'EMP_01251001', shift_type_id: 'ST001' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'published' };
+    dataByQuery['employees:maybeSingle'] = { dept_id: 'D1' };  // in_same_dept true
+    overrides.managerPerm = { ok: true, isLateChange: false };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST001', start_time: '09:00', end_time: '18:00' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
+    expect(res.body?.error).not.toBe('NOT_DRAFT');
+  });
+
+  it('M2: 主管 PUT 自己 published 今天/過去 ST001 → 403 MANAGER_LATE_DENIED', async () => {
+    overrides.caller = { id: 'EMP_01251001', role: 'employee', is_manager: true, dept_id: 'D1' };
+    setSchedule({ employee_id: 'EMP_01251001', shift_type_id: 'ST001' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'published' };
+    dataByQuery['employees:maybeSingle'] = { dept_id: 'D1' };
+    // canManagerEditSchedule 模擬 published + today 擋
+    overrides.managerPerm = { ok: false, reason: 'MANAGER_LATE_DENIED', isLateChange: false };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST001', start_time: '09:00', end_time: '18:00' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('M3: 一般員工 PUT 自己正班 ST001 → 仍 403 EMPLOYEE_SHIFT_RESTRICTED(回歸保護)', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false, dept_id: 'D1' };
+    setSchedule({ employee_id: 'E1', shift_type_id: 'ST003', note: '__OFF__' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'draft' };
+    overrides.employeePerm = { ok: true };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST001', start_time: '09:00', end_time: '18:00' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+
+  it('M4: executive(role=ceo, is_manager=false)PUT 自己 published 任何日 ST001 → 200', async () => {
+    overrides.caller = { id: 'CEO1', role: 'ceo', is_manager: false, dept_id: 'D_EXEC' };
+    setSchedule({ employee_id: 'CEO1', shift_type_id: 'ST001' });
+    dataByQuery['schedule_periods:maybeSingle'] = { id: 'P1', status: 'published' };
+    overrides.managerPerm = { ok: true, isLateChange: false };
+
+    const [req, res] = makeReqRes({
+      body: { shift_type_id: 'ST001', start_time: '09:00', end_time: '18:00' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
   });
 });

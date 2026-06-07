@@ -15,6 +15,7 @@ const calls = { fromTables: [], inserted: [], action: null };
 const overrides = {
   caller: null,                    // null → 預設 { id: 'HR1' }
   schedulePeriodsResponse: null,   // null → schedule_periods.maybeSingle 回 { data: null }
+  employeesResponse: null,         // null → employees.maybeSingle 回 { data: null }
 };
 
 vi.mock('../lib/supabase.js', () => {
@@ -30,6 +31,10 @@ vi.mock('../lib/supabase.js', () => {
       // 新 describe 可在 beforeEach 注入 schedule_periods 回應
       if (calls._lastTable === 'schedule_periods' && overrides.schedulePeriodsResponse) {
         return Promise.resolve({ data: overrides.schedulePeriodsResponse, error: null });
+      }
+      // 2026-06-07:主管自編路徑會撈 employees 算 in_same_dept,需可注入
+      if (calls._lastTable === 'employees' && overrides.employeesResponse) {
+        return Promise.resolve({ data: overrides.employeesResponse, error: null });
       }
       return Promise.resolve({ data: null, error: null });
     });
@@ -361,5 +366,127 @@ describe('代操作:G1 不誤擋主管/HR 代員工排早晚班 (POST)', () => {
     await handler(req, res);
     expect(res.statusCode).toBe(201);
     expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// 2026-06-07:主管/executive 改自己的班表 — isSelf 分流加身分判斷(POST)
+//   M1 主管 POST 自己 published 「未來日」ST001 → 201,走 canManagerEditSchedule
+//   M2 主管 POST 自己 published 「今天/過去」ST001 → 403 MANAGER_LATE_DENIED
+//   M3 一般員工 POST 自己 published 任何日 ST001 → 仍 403(EMPLOYEE_SHIFT_RESTRICTED 或 NOT_DRAFT,回歸保護)
+//   M4 executive(role=ceo)POST 自己 published 任何日 ST001 → 201(HR/exec 不受 late 擋)
+// 用真實的 lib/schedule/permissions.js + lib/roles.js,只透過 fixture period.status 與 work_date 控
+// ════════════════════════════════════════════════════════════
+describe('B 修:主管/executive 改自己的班表(POST)', () => {
+  afterEach(() => {
+    overrides.caller = null;
+    overrides.schedulePeriodsResponse = null;
+    overrides.employeesResponse = null;
+  });
+
+  it('M1: 主管 POST 自己 published 未來日 ST001 → 201,走 canManagerEditSchedule', async () => {
+    overrides.caller = { id: 'EMP_01251001', role: 'employee', is_manager: true, dept_id: 'D1' };
+    overrides.schedulePeriodsResponse = {
+      id: 'p1', employee_id: 'EMP_01251001', status: 'published',
+      period_year: 2099, period_month: 1,
+      period_start: '2099-01-01', period_end: '2099-01-31',
+    };
+    overrides.employeesResponse = { dept_id: 'D1' };  // self → in_same_dept=true
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'EMP_01251001', work_date: '2099-01-15',
+        shift_type_id: 'ST001', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
+    expect(res.body?.error).not.toBe('NOT_DRAFT');
+  });
+
+  it('M2: 主管 POST 自己 published 過去日 ST001 → 403 MANAGER_LATE_DENIED', async () => {
+    overrides.caller = { id: 'EMP_01251001', role: 'employee', is_manager: true, dept_id: 'D1' };
+    overrides.schedulePeriodsResponse = {
+      id: 'p1', employee_id: 'EMP_01251001', status: 'published',
+      period_year: 2020, period_month: 1,
+      period_start: '2020-01-01', period_end: '2020-01-31',
+    };
+    overrides.employeesResponse = { dept_id: 'D1' };
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'EMP_01251001', work_date: '2020-01-15',
+        shift_type_id: 'ST001', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('MANAGER_LATE_DENIED');
+  });
+
+  it('M3: 一般員工 POST 自己 published ST001 → 仍 403(回歸保護)', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false, dept_id: 'D1' };
+    overrides.schedulePeriodsResponse = {
+      id: 'p1', employee_id: 'E1', status: 'published',
+      period_year: 2099, period_month: 1,
+      period_start: '2099-01-01', period_end: '2099-01-31',
+    };
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E1', work_date: '2099-01-15',
+        shift_type_id: 'ST001', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    // published 非 draft → NOT_DRAFT;若改 draft 則 EMPLOYEE_SHIFT_RESTRICTED;兩種都是擋
+    expect(['NOT_DRAFT', 'EMPLOYEE_SHIFT_RESTRICTED']).toContain(res.body.error);
+  });
+
+  it('M3b: 一般員工 POST 自己 draft ST001 → 仍 403 EMPLOYEE_SHIFT_RESTRICTED', async () => {
+    overrides.caller = { id: 'E1', role: 'employee', is_manager: false, dept_id: 'D1' };
+    overrides.schedulePeriodsResponse = {
+      id: 'p1', employee_id: 'E1', status: 'draft',
+      period_year: 2099, period_month: 1,
+      period_start: '2099-01-01', period_end: '2099-01-31',
+    };
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'E1', work_date: '2099-01-15',
+        shift_type_id: 'ST001', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('EMPLOYEE_SHIFT_RESTRICTED');
+  });
+
+  it('M4: executive(role=ceo, is_manager=false)POST 自己 published 任何日 ST001 → 201', async () => {
+    overrides.caller = { id: 'CEO1', role: 'ceo', is_manager: false, dept_id: 'D_EXEC' };
+    overrides.schedulePeriodsResponse = {
+      id: 'p1', employee_id: 'CEO1', status: 'published',
+      period_year: 2020, period_month: 1,
+      period_start: '2020-01-01', period_end: '2020-01-31',
+    };
+    // executive 不需要 employees query(isHR=true bypass)
+    const [req, res] = makeReqRes({
+      method: 'POST',
+      body: {
+        period_id: 'p1', employee_id: 'CEO1', work_date: '2020-01-15',
+        shift_type_id: 'ST001', segment_no: 1,
+        start_time: '09:00', end_time: '18:00',
+      },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body?.error).not.toBe('EMPLOYEE_SHIFT_RESTRICTED');
+    expect(res.body?.error).not.toBe('MANAGER_LATE_DENIED');
   });
 });

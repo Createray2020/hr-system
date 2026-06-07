@@ -7,7 +7,7 @@
 
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth } from '../../lib/auth.js';
-import { isBackofficeRole } from '../../lib/roles.js';
+import { isBackofficeRole, isExecutiveRole } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule, checkEmployeeShiftRestricted } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
@@ -50,10 +50,12 @@ export default async function handler(req, res) {
   // 權限檢查
   const today = new Date().toISOString().slice(0, 10);
   const isSelf = caller.id && caller.id === existing.employee_id;
+  // 2026-06-07:isSelf 分流加身分判斷 — 對齊 index.js handleNewPost,主管/executive 改自己 → 走主管分支
+  const isManagerActor = caller.is_manager === true || isExecutiveRole(caller.role);
   let actorKind = 'employee';
   let isLateChange = false;
 
-  if (isSelf) {
+  if (isSelf && !isManagerActor) {
     const r = canEmployeeEditSchedule(period, existing.employee_id, today);
     if (!r.ok) return res.status(403).json({ error: r.reason });
 

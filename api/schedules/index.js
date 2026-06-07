@@ -14,7 +14,7 @@
 
 import { supabaseAdmin } from '../../lib/supabase.js';
 import { requireAuth, requireRole } from '../../lib/auth.js';
-import { canAccessBackoffice, isBackofficeRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
+import { canAccessBackoffice, isBackofficeRole, isExecutiveRole, BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { canEmployeeEditSchedule, canManagerEditSchedule, checkEmployeeShiftRestricted } from '../../lib/schedule/permissions.js';
 import { logScheduleChange } from '../../lib/schedule/change-logger.js';
 import { calculateScheduleWorkMinutes } from '../../lib/schedule/work-hours.js';
@@ -292,11 +292,15 @@ async function handleNewPost(req, res) {
   // 權限：員工 vs 主管/HR
   const today = new Date().toISOString().slice(0, 10);
   const isSelf = caller.id && caller.id === employee_id;
+  // 2026-06-07:isSelf 分流加身分判斷 — 主管 / executive(ceo/chairman/admin)改自己 → 走主管分支
+  // (canManagerEditSchedule、未來日可改、published+today/past 擋 MANAGER_LATE_DENIED);
+  // 一般員工改自己 → 維持受限路徑(canEmployeeEditSchedule + checkEmployeeShiftRestricted)
+  const isManagerActor = caller.is_manager === true || isExecutiveRole(caller.role);
   let allowed = false;
   let isLateChange = false;
   let actorKind = 'employee';
 
-  if (isSelf) {
+  if (isSelf && !isManagerActor) {
     const r = canEmployeeEditSchedule(period, employee_id, today);
     allowed = r.ok;
     if (!r.ok) return res.status(403).json({ error: r.reason });
