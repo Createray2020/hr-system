@@ -155,10 +155,11 @@ let period = null;       // schedule_periods row（null = 該月還沒建）
 let schedules = [];      // schedules rows
 let editing  = { date: null };  // G1:員工只能標休假、不再分 mode
 
-// Default：下個月
+// Default：本月
 {
-  const d = new Date(); d.setMonth(d.getMonth()+1);
-  currentYear = d.getFullYear(); currentMonth = d.getMonth()+1;
+  const d = new Date();
+  currentYear = d.getFullYear();
+  currentMonth = d.getMonth() + 1;   // 1-indexed
 }
 
 function changeMonth(delta) {
