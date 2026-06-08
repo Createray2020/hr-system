@@ -43,9 +43,9 @@ describe('getNavGroups - 結構', () => {
       expect(g.headerIcon).toMatch(/^ti-/);
     });
   });
-  it('group items 數對:6/6/4/6/6/3', () => {
+  it('group items 數對:6/6/4/6/6/4', () => {
     const groups = getNavGroups(gatesAllowAll);
-    expect(groups.map(g => g.items.length)).toEqual([6, 6, 4, 6, 6, 3]);
+    expect(groups.map(g => g.items.length)).toEqual([6, 6, 4, 6, 6, 4]);
   });
   it('每個 item 有 ti- 前綴 icon + href + label + page', () => {
     const groups = getNavGroups(gatesAllowAll);
@@ -65,12 +65,12 @@ describe('getNavGroups - 結構', () => {
 });
 
 describe('filterVisibleGroups', () => {
-  it('HR(allow all)→ 全 6 group 可見、總計 31 個 item', () => {
+  it('HR(allow all)→ 全 6 group 可見、總計 32 個 item', () => {
     const groups = getNavGroups(gatesAllowAll);
     const visible = filterVisibleGroups(groups, {});
     expect(visible).toHaveLength(6);
     const total = visible.reduce((s, g) => s + g.items.length, 0);
-    expect(total).toBe(31);
+    expect(total).toBe(32);
   });
 
   it('純員工(deny all)→ 只剩有「全員」項目的 group:我的工作區(6) + 資訊中心(行事曆+通知中心=2)', () => {

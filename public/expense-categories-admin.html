@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>請款類別管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace;display:inline-block}
+  .b-yes{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-no{background:rgba(120,120,120,.15);color:var(--text-dim)}
+  .b-active{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-inactive{background:rgba(248,113,113,.12);color:#F87171}
+  .form-row-inline{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .form-row-inline > label{display:flex;gap:6px;align-items:center;cursor:pointer}
+  .hint{font-size:11px;color:var(--text-dim);margin-top:4px}
+</style>
+</head>
+<body data-page="expense-categories-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">請款類別管理</div>
+        <div class="page-sub">維護「請款核準後併入隔月薪資」用的款項類別</div>
+      </div>
+      <div class="header-actions" style="display:flex;gap:12px;align-items:center">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;color:var(--text-dim)">
+          <input type="checkbox" id="show-inactive" onchange="loadCategories()">
+          <span>顯示已停用</span>
+        </label>
+        <button class="btn btn-primary" onclick="openCreate()">＋ 新增類別</button>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面（限 HR / admin）</div>
+    </div>
+
+    <div id="main-content">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>名稱</th>
+            <th style="text-align:center">計入工資</th>
+            <th style="text-align:center">計入所得稅</th>
+            <th style="text-align:center">排序</th>
+            <th style="text-align:center">狀態</th>
+            <th>備註</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody id="ec-tbody">
+            <tr class="loading-row"><td colspan="7">載入中…</td></tr>
+          </tbody>
+        </table>
+        <div id="ec-empty" class="empty-state" style="display:none">
+          <div class="icon">🏷️</div><div>尚無請款類別</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 新增 / 編輯 Modal -->
+<div class="modal-bg" id="ec-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title" id="modal-title">新增請款類別</div>
+    <input type="hidden" id="f-id">
+
+    <div class="form-row">
+      <label class="form-label">名稱 <span style="color:#F87171">*</span></label>
+      <input type="text" class="form-input" id="f-name" placeholder="例：交通補貼、零用金代墊">
+    </div>
+
+    <div class="form-row form-row-inline" style="margin-top:6px">
+      <label><input type="checkbox" id="f-wage"><span>計入工資 (is_wage)</span></label>
+      <label><input type="checkbox" id="f-taxable" checked><span>計入所得稅 (is_taxable)</span></label>
+      <label id="row-active" style="display:none"><input type="checkbox" id="f-active" checked><span>啟用</span></label>
+    </div>
+    <div class="hint">代墊返還（如零用金）不計稅請取消勾選；定額津貼通常應稅。</div>
+
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+      <div>
+        <label class="form-label">順序（小→大）</label>
+        <input type="number" class="form-input" id="f-sort" min="0" max="999" value="">
+      </div>
+    </div>
+
+    <div class="form-row" style="margin-top:6px">
+      <label class="form-label">備註</label>
+      <textarea class="form-input" id="f-note" rows="2" placeholder="可選填說明"></textarea>
+    </div>
+
+    <div class="modal-actions" style="justify-content:space-between;margin-top:16px">
+      <span style="font-size:11px;color:var(--text-dim)" id="meta-hint"></span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" id="btn-save" onclick="saveCategory()">儲存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+let allCategories = [];
+
+async function loadCategories(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadCategories(retries + 1), 300);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  const showInactive = document.getElementById('show-inactive').checked;
+  try {
+    const r = await api(`/api/expense-categories${showInactive ? '?include_inactive=true' : ''}`);
+    allCategories = r.categories || [];
+    renderCategories();
+  } catch(e) {
+    document.getElementById('ec-tbody').innerHTML =
+      `<tr><td colspan="7" style="color:#F87171">載入失敗：${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderCategories() {
+  const tbody = document.getElementById('ec-tbody');
+  const empty = document.getElementById('ec-empty');
+  if (!allCategories.length) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = allCategories.map(c => {
+    const wageBadge    = c.is_wage    ? '<span class="badge b-yes">是</span>' : '<span class="badge b-no">否</span>';
+    const taxableBadge = c.is_taxable ? '<span class="badge b-yes">是</span>' : '<span class="badge b-no">否</span>';
+    const actBadge     = c.is_active  ? '<span class="badge b-active">啟用</span>' : '<span class="badge b-inactive">停用</span>';
+    return `
+      <tr>
+        <td>${escHtml(c.name)}</td>
+        <td style="text-align:center">${wageBadge}</td>
+        <td style="text-align:center">${taxableBadge}</td>
+        <td style="text-align:center;font-family:'DM Mono',monospace">${c.sort_order ?? ''}</td>
+        <td style="text-align:center">${actBadge}</td>
+        <td style="font-size:12px;color:var(--text-dim)">${escHtml(c.note || '')}</td>
+        <td>
+          <button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(c.id)}')">編輯</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteCategory('${escHtml(c.id)}')">刪除</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openCreate() {
+  document.getElementById('modal-title').textContent = '新增請款類別';
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-wage').checked = false;
+  document.getElementById('f-taxable').checked = true;
+  document.getElementById('f-active').checked = true;
+  document.getElementById('f-sort').value = '';
+  document.getElementById('f-note').value = '';
+  document.getElementById('meta-hint').textContent = '';
+  document.getElementById('row-active').style.display = 'none';  // 新增不顯示啟用 checkbox(預設啟用)
+  document.getElementById('ec-modal').classList.add('open');
+}
+
+function openEdit(id) {
+  const c = allCategories.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('modal-title').textContent = `編輯：${c.name}`;
+  document.getElementById('f-id').value = c.id;
+  document.getElementById('f-name').value = c.name || '';
+  document.getElementById('f-wage').checked    = !!c.is_wage;
+  document.getElementById('f-taxable').checked = !!c.is_taxable;
+  document.getElementById('f-active').checked  = c.is_active !== false;
+  document.getElementById('f-sort').value      = c.sort_order ?? '';
+  document.getElementById('f-note').value      = c.note || '';
+  document.getElementById('meta-hint').textContent = `id: ${c.id}`;
+  document.getElementById('row-active').style.display = '';
+  document.getElementById('ec-modal').classList.add('open');
+}
+
+function closeModal() { document.getElementById('ec-modal').classList.remove('open'); }
+
+async function saveCategory() {
+  const id = document.getElementById('f-id').value;
+  const isEdit = !!id;
+
+  const name = document.getElementById('f-name').value.trim();
+  if (!name) { toast('名稱必填', 'error'); return; }
+
+  const sortInput = document.getElementById('f-sort').value;
+  const payload = {
+    name,
+    is_wage:    document.getElementById('f-wage').checked,
+    is_taxable: document.getElementById('f-taxable').checked,
+    note:       document.getElementById('f-note').value || null,
+  };
+  if (sortInput !== '') payload.sort_order = parseInt(sortInput) || 0;
+  if (isEdit) {
+    payload.is_active = document.getElementById('f-active').checked;
+  }
+
+  document.getElementById('btn-save').disabled = true;
+  try {
+    if (isEdit) {
+      await api(`/api/expense-categories/${encodeURIComponent(id)}`, { method:'PUT', body: JSON.stringify(payload) });
+      toast('已更新');
+    } else {
+      await api('/api/expense-categories', { method:'POST', body: JSON.stringify(payload) });
+      toast('已新增');
+    }
+    closeModal();
+    loadCategories();
+  } catch(e) {
+    toast('儲存失敗：' + e.message, 'error');
+  } finally {
+    document.getElementById('btn-save').disabled = false;
+  }
+}
+
+async function deleteCategory(id) {
+  const c = allCategories.find(x => x.id === id);
+  if (!c) return;
+  if (!confirm(`確定刪除「${c.name}」？\n（如已被請款併薪紀錄引用會失敗，可改為停用）`)) return;
+  try {
+    await api(`/api/expense-categories/${encodeURIComponent(id)}`, { method:'DELETE' });
+    toast('已刪除');
+    loadCategories();
+  } catch(e) {
+    toast('刪除失敗：' + e.message, 'error');
+  }
+}
+
+loadCategories();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

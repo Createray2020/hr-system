@@ -82,9 +82,10 @@ export function getNavGroups(gates = {}) {
       title: '薪資',
       headerIcon: 'ti-coin',
       items: [
-        { page:'salary',         icon:'ti-receipt',          label:'薪資管理', href:'/salary.html',         gate: isHRish },
-        { page:'salary-period',  icon:'ti-calendar-dollar',  label:'薪資期間', href:'/salary-period.html',  gate: isHRish },
-        { page:'insurance',      icon:'ti-shield-check',     label:'勞健保',   href:'/insurance.html',      gate: isHRish },
+        { page:'salary',                    icon:'ti-receipt',          label:'薪資管理',     href:'/salary.html',                    gate: isHRish },
+        { page:'salary-period',             icon:'ti-calendar-dollar',  label:'薪資期間',     href:'/salary-period.html',             gate: isHRish },
+        { page:'insurance',                 icon:'ti-shield-check',     label:'勞健保',       href:'/insurance.html',                 gate: isHRish },
+        { page:'expense-categories-admin',  icon:'ti-tag',              label:'請款類別管理', href:'/expense-categories-admin.html',  gate: isHRish },
       ],
     },
   ];
