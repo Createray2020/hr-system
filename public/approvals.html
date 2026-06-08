@@ -295,6 +295,7 @@ const fmtDT = s => {
 };
 
 let allConfigs = [], myRequests = [], pendingItems = [], allRequests = [];
+let allExpenseCategories = [];  // Phase 5b:expense_reimbursement 表單下拉動態來源(active 類別)
 let currentTab = 'mine', currentConfig = null;
 
 const ROLE_LABELS = { manager:'直屬主管', ceo:'執行長', hr:'人資', admin:'管理員', chairman:'董事長' };
@@ -424,7 +425,10 @@ function onAllTabClick(tab) {
 const FORM_SCHEMA = {
   expense_reimbursement:[
     {id:'expense_date',label:'費用日期',type:'date',required:true},
-    {id:'expense_category',label:'費用類別',type:'select',options:['交通','餐費','材料','住宿','其他'],required:true},
+    // 2026-06:options_source 動態從 /api/expense-categories 抓 active 類別
+    //   selectType render 時若 cache 為空 → fallback ['交通','餐費','材料','住宿','其他']
+    //   form_data.expense_category 仍存類別名稱字串(cascade 走 by-name 解析取 is_wage/is_taxable)
+    {id:'expense_category',label:'費用類別',type:'select',options_source:'expense_categories',required:true},
     {id:'amount',label:'金額（NT$）',type:'number',required:true},
     {id:'description',label:'費用說明',type:'textarea',required:true},
   ],
@@ -565,6 +569,11 @@ window.onload = async () => {
 
 async function loadConfigs() {
   allConfigs = await api('/api/approvals?type=configs');
+  // Phase 5b:同時 cache active expense_categories(失敗 → 空陣列,selectType 走 fallback)
+  try {
+    const r = await api('/api/expense-categories');
+    allExpenseCategories = r?.categories || [];
+  } catch(e) { allExpenseCategories = []; }
   const opts = allConfigs.map(c => `<option value="${c.request_type}">${c.icon} ${c.type_name}</option>`).join('');
   ['mine-type-f','all-type-f'].forEach(id => {
     const el = document.getElementById(id);
@@ -790,7 +799,15 @@ function selectType(requestType) {
     const req = f.required ? '<span style="color:var(--red)"> *</span>' : '';
     let input;
     if (f.type === 'select') {
-      input = `<select class="form-select" id="ff-${f.id}"><option value="">— 請選擇 —</option>${f.options.map(o=>`<option value="${o}">${o}</option>`).join('')}</select>`;
+      // Phase 5b:options_source='expense_categories' → 動態吃 cache;空 → fallback 硬編
+      let opts;
+      if (f.options_source === 'expense_categories') {
+        const names = (allExpenseCategories || []).map(c => c.name);
+        opts = names.length ? names : ['交通','餐費','材料','住宿','其他'];
+      } else {
+        opts = f.options || [];
+      }
+      input = `<select class="form-select" id="ff-${f.id}"><option value="">— 請選擇 —</option>${opts.map(o=>`<option value="${o}">${o}</option>`).join('')}</select>`;
     } else if (f.type === 'textarea') {
       input = `<textarea class="form-input" id="ff-${f.id}" rows="2" style="resize:vertical"${f.placeholder?` placeholder="${f.placeholder}"`:''}></textarea>`;
     } else {
