@@ -169,8 +169,8 @@ describe('SalaryBreakdown.buildSalaryBreakdown', () => {
     expect(r2.grossSubtotal).toBe(0);
   });
 
-  it('GROSS_FIELDS / DEDUCT_FIELDS 順序固定、長度 16 + 12(2026-06-03 加 night_allowance)', () => {
-    expect(SB.GROSS_FIELDS.length).toBe(16);
+  it('GROSS_FIELDS / DEDUCT_FIELDS 順序固定、長度 17 + 12(2026-06 加 expense_reimbursement_total)', () => {
+    expect(SB.GROSS_FIELDS.length).toBe(17);
     expect(SB.DEDUCT_FIELDS.length).toBe(12);
     expect(SB.GROSS_FIELDS[0].key).toBe('__base__');
     expect(SB.GROSS_FIELDS[1].key).toBe('attendance_bonus_actual');
@@ -181,8 +181,52 @@ describe('SalaryBreakdown.buildSalaryBreakdown', () => {
     expect(extraIdx).toBeGreaterThan(-1);
     expect(nightIdx).toBe(extraIdx + 1);
     expect(otIdx).toBe(nightIdx + 1);
+    // 2026-06:expense_reimbursement_total 是最後一條(在 bonus_other 之後)
+    expect(SB.GROSS_FIELDS[16].key).toBe('expense_reimbursement_total');
+    const bonusOtherIdx = SB.GROSS_FIELDS.findIndex(f => f.key === 'bonus_other');
+    const expIdx        = SB.GROSS_FIELDS.findIndex(f => f.key === 'expense_reimbursement_total');
+    expect(expIdx).toBe(bonusOtherIdx + 1);
     expect(SB.DEDUCT_FIELDS[0].key).toBe('deduct_absence');
     expect(SB.DEDUCT_FIELDS[DEDUCT_LAST_IDX()].key).toBe('deduct_other');
+  });
+
+  // ── 2026-06:expense_reimbursement_total 進 gross + note 顯示 ──
+  it('expense_reimbursement_total 進 grossSubtotal、對齊 fixture.gross_salary', () => {
+    const f = makeNormal();
+    f.expense_reimbursement_total = 2300;
+    // 對齊 DB gross_salary GENERATED(migrations/2026_06_08b)同步加進去
+    f.gross_salary = 35000 + 2300;       // 30000 + 2000 + 3000 + 2300
+    f.net_salary   = f.gross_salary - 599 - 500;
+    const r = SB.buildSalaryBreakdown(f);
+    expect(Math.abs(r.grossSubtotal - f.gross_salary)).toBeLessThan(0.01);
+    expect(Math.abs(r.net - f.net_salary)).toBeLessThan(0.01);
+    const item = r.grossItems.find(it => it.key === 'expense_reimbursement_total');
+    expect(item).toBeTruthy();
+    expect(item.value).toBe(2300);
+  });
+
+  it('expense_reimbursement_total 有 note 時、label 多行壓成一行(、分隔)、item.note 保原始多行', () => {
+    const f = makeNormal();
+    f.expense_reimbursement_total = 2300;
+    f.expense_reimbursement_note  = '車資補貼 NT$1500\n零用金代墊 NT$800';
+    f.gross_salary = 35000 + 2300;
+    f.net_salary   = f.gross_salary - 599 - 500;
+    const r = SB.buildSalaryBreakdown(f);
+    const item = r.grossItems.find(it => it.key === 'expense_reimbursement_total');
+    expect(item).toBeTruthy();
+    expect(item.value).toBe(2300);
+    expect(item.note).toBe('車資補貼 NT$1500\n零用金代墊 NT$800');     // 原始多行
+    expect(item.label).toContain('車資補貼 NT$1500');
+    expect(item.label).toContain('零用金代墊 NT$800');
+    expect(item.label).toContain('、');                                  // 多行壓成一行
+    expect(item.label).not.toContain('\n');
+  });
+
+  it('expense_reimbursement_total=0(無資料)→ 不出現在 grossItems', () => {
+    const f = makeNormal();
+    f.expense_reimbursement_total = 0;
+    const r = SB.buildSalaryBreakdown(f);
+    expect(r.grossItems.find(it => it.key === 'expense_reimbursement_total')).toBeUndefined();
   });
 
   // ── buildCompExpiryLines ─────────────────────────────

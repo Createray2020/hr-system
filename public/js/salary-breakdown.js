@@ -19,7 +19,8 @@
 (function (global) {
   'use strict';
 
-  // 應發 16 項(__base__ 是合成欄、實際從 prorata_base / base_salary 動態取值)
+  // 應發 17 項(__base__ 是合成欄、實際從 prorata_base / base_salary 動態取值)
+  // 2026-06:加 expense_reimbursement_total(對齊 migrations/2026_06_08b gross GENERATED 公式)
   const GROSS_FIELDS = [
     { key: '__base__',                label: '本薪' },
     { key: 'attendance_bonus_actual', label: '全勤獎金' },
@@ -37,6 +38,7 @@
     { key: 'bonus_festival',          label: '三節獎金' },
     { key: 'bonus_performance',       label: '績效獎金' },
     { key: 'bonus_other',             label: '其他獎金' },
+    { key: 'expense_reimbursement_total', label: '請款併薪／代墊' },
   ];
 
   // 扣除 12 項(對齊 net_salary GENERATED 公式)
@@ -82,7 +84,15 @@
       if (f.key === '__base__') {
         return { key: '__base__', label: baseLabel, value: baseValue };
       }
-      return { key: f.key, label: f.label, value: n(sal[f.key]) };
+      const item = { key: f.key, label: f.label, value: n(sal[f.key]) };
+      // 2026-06:expense_reimbursement_total 有 note 時、label 附註(對齊 deduct_other note pattern)。
+      // 多行字串(calculator Step 12.5 用 '\n' 串接多類別 audit)壓成一行用「、」分隔、避免拉長 row。
+      // item.note 保留原始多行字串,讓 caller(payslip / employee-salary)若要 sub-line render 可用。
+      if (f.key === 'expense_reimbursement_total' && sal.expense_reimbursement_note) {
+        item.note = String(sal.expense_reimbursement_note);
+        item.label = `${f.label}（${item.note.replace(/\n/g, '、')}）`;
+      }
+      return item;
     });
 
     // 扣除
