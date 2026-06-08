@@ -52,6 +52,7 @@
         <select class="form-select" id="f-month" onchange="load()" style="width:140px"></select>
         <input type="text" class="form-input" id="f-search" placeholder="搜尋員工" oninput="render()" style="flex:1;max-width:240px">
         <button class="btn btn-ghost" onclick="load()">↻ 重新載入</button>
+        <button class="btn btn-ghost" onclick="exportMonthlyExcel()">📊 匯出 Excel</button>
         <button class="btn btn-primary" onclick="batchGenerate()">批次產生(完整重算)</button>
       </div>
 
@@ -627,9 +628,46 @@ async function payRec(){
   }
 }
 
+// ── 月薪資清冊匯出(SheetJS、純前端、純讀 allRows)──
+// builder 在 /js/salary-export/builder.js,純函式 + vitest 抓行為。
+// 對齊 salary-period.html exportAnnualExcel() 寫法。
+async function exportMonthlyExcel(){
+  if (!Array.isArray(allRows) || allRows.length === 0) {
+    toast('請先載入該月資料(點「↻ 重新載入」或選月份)', 'error');
+    return;
+  }
+  if (!window.XLSX) { toast('SheetJS 尚未載入,請稍候', 'error'); return; }
+  const ym = document.getElementById('f-month').value;
+  const [yStr, mStr] = (ym || '').split('-');
+  const year  = parseInt(yStr, 10);
+  const month = parseInt(mStr, 10);
+  try {
+    const mod = await import('/js/salary-export/builder.js');
+    const { aoa, filename, rows } = mod.buildMonthlyPayrollAOA(allRows, { year, month });
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = mod.MONTHLY_EXPORT_COLUMNS.map(c => ({ wch: Math.max(c.label.length * 2 + 4, 12) }));
+    // 金額欄套千分位 #,##0
+    for (let r = 1; r < aoa.length; r++) {
+      for (let c = 0; c < mod.MONTHLY_EXPORT_COLUMNS.length; c++) {
+        if (!mod.MONTHLY_EXPORT_COLUMNS[c].sum) continue;
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (ws[ref] && typeof ws[ref].v === 'number') ws[ref].z = '#,##0';
+      }
+    }
+    const mm = String(month).padStart(2, '0');
+    XLSX.utils.book_append_sheet(wb, ws, `${year}-${mm}薪資清冊`);
+    XLSX.writeFile(wb, filename);
+    toast(`✅ 已匯出 ${rows.length} 位員工`);
+  } catch(e) {
+    toast('匯出失敗:' + e.message, 'error');
+  }
+}
+
 buildMonthOptions();
 load();
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/js/roles.js"></script>
 <script src="/js/layout.js"></script>
 <script src="/js/pwa.js"></script>
