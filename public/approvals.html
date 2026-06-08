@@ -567,6 +567,16 @@ window.onload = async () => {
   }
 };
 
+// Phase 5b helper:select 欄位的選項解析,options_source='expense_categories' → 吃 cache、
+// 空 fallback 硬編 6 類;否則回 f.options。selectType / renderDetail admin-edit 兩處共用。
+function resolveSelectOptions(f) {
+  if (f.options_source === 'expense_categories') {
+    const names = (allExpenseCategories || []).map(c => c.name);
+    return names.length ? names : ['交通','餐費','材料','住宿','零用金','其他'];
+  }
+  return f.options || [];
+}
+
 async function loadConfigs() {
   allConfigs = await api('/api/approvals?type=configs');
   // Phase 5b:同時 cache active expense_categories(失敗 → 空陣列,selectType 走 fallback)
@@ -799,14 +809,8 @@ function selectType(requestType) {
     const req = f.required ? '<span style="color:var(--red)"> *</span>' : '';
     let input;
     if (f.type === 'select') {
-      // Phase 5b:options_source='expense_categories' → 動態吃 cache;空 → fallback 硬編
-      let opts;
-      if (f.options_source === 'expense_categories') {
-        const names = (allExpenseCategories || []).map(c => c.name);
-        opts = names.length ? names : ['交通','餐費','材料','住宿','其他'];
-      } else {
-        opts = f.options || [];
-      }
+      // Phase 5b:選項解析統一走 resolveSelectOptions(options_source / f.options 內含分流)
+      const opts = resolveSelectOptions(f);
       input = `<select class="form-select" id="ff-${f.id}"><option value="">— 請選擇 —</option>${opts.map(o=>`<option value="${o}">${o}</option>`).join('')}</select>`;
     } else if (f.type === 'textarea') {
       input = `<textarea class="form-input" id="ff-${f.id}" rows="2" style="resize:vertical"${f.placeholder?` placeholder="${f.placeholder}"`:''}></textarea>`;
@@ -1064,9 +1068,10 @@ function renderDetail(data) {
     const val = aeFd[f.id] ?? '';
     let input;
     if (f.type === 'select') {
+      // Phase 5b:同走 resolveSelectOptions;先前寫死 f.options.map 對 options_source 欄位會炸
       input = `<select class="form-select" id="ae-${f.id}">
         <option value="">— 請選擇 —</option>
-        ${f.options.map(o=>`<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('')}
+        ${resolveSelectOptions(f).map(o=>`<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('')}
       </select>`;
     } else if (f.type === 'textarea') {
       input = `<textarea class="form-input" id="ae-${f.id}" rows="2" style="resize:vertical">${String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea>`;
