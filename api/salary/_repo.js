@@ -237,6 +237,23 @@ export function makeSalaryRepo() {
       return data || [];
     },
 
+    // ─── salary_expense_entries(請款核準後併薪、Phase 3)─────
+    // 讀 entry 自身 snapshot 欄(category_name_snapshot / is_taxable_snapshot)、
+    // 不 join expense_categories — 類別未來改名 / 改稅性 不會回溯影響已寫入薪資。
+    // 子表為 SoT;calculator Step 12.5 每次重算都從這裡 reduce 重建 3 個 _auto 欄。
+    async fetchExpenseEntries({ employee_id, year, month }) {
+      const { data, error } = await supabaseAdmin
+        .from('salary_expense_entries')
+        .select('id, amount, category_name_snapshot, is_taxable_snapshot')
+        .eq('employee_id', employee_id)
+        .eq('target_year', year)
+        .eq('target_month', month)
+        .eq('status', 'active')
+        .is('deleted_at', null);
+      if (error) throw error;
+      return data || [];
+    },
+
     // attendance-bonus / lib/attendance/bonus.js 需要的
     async findPenaltyRecordsByEmployeeMonth({ employee_id, year, month }) {
       const { data, error } = await supabaseAdmin

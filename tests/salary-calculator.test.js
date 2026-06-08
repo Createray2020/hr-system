@@ -15,13 +15,14 @@ import {
 // ⚠ 任何一邊改了沒同步,以下兩個 case 會 fail。
 
 function refGrossSalary(row) {
-  // 對齊 migrations/2026_05_30_add_salary_grade_manager_allowance.sql:
+  // 對齊 migrations/2026_05_30_add_salary_grade_manager_allowance.sql + Phase 3 expense:
   //   base_salary
   //   + COALESCE(attendance_bonus_actual, 0)
   //   + COALESCE(grade_allowance, 0) + COALESCE(manager_allowance, 0)   ← 2026-05-30 加
   //   + COALESCE(allowance, 0) + COALESCE(extra_allowance, 0)
   //   + COALESCE(overtime_pay_auto + overtime_pay_manual, 0)
   //   + COALESCE(comp_expiry_payout, 0) + COALESCE(holiday_work_pay, 0) + COALESCE(settlement_amount, 0)
+  //   + COALESCE(expense_reimbursement_total, 0)                         ← Phase 3 加
   return r2(
     n(row.base_salary)
     + n(row.attendance_bonus_actual)
@@ -37,11 +38,12 @@ function refGrossSalary(row) {
     + n(row.bonus_festival)
     + n(row.bonus_performance)
     + n(row.bonus_other)
+    + n(row.expense_reimbursement_total)
   );
 }
 
 function refNetSalary(row) {
-  // 對齊 migrations/2026_05_30_add_salary_grade_manager_allowance.sql net 段:
+  // 對齊 migrations/2026_05_30_add_salary_grade_manager_allowance.sql net 段 + Phase 3 expense:
   return r2(
     n(row.base_salary)
     + n(row.attendance_bonus_actual)
@@ -57,6 +59,7 @@ function refNetSalary(row) {
     + n(row.bonus_festival)
     + n(row.bonus_performance)
     + n(row.bonus_other)
+    + n(row.expense_reimbursement_total)
     - n(row.deduct_absence)
     - n(row.deduct_labor_ins)
     - n(row.deduct_health_ins)
@@ -175,6 +178,35 @@ describe('GENERATED column 雙向綁定 — grade_allowance / manager_allowance(
   });
 });
 
+describe('GENERATED column 雙向綁定 — expense_reimbursement_total(Phase 3、2026-06)', () => {
+  it('row 帶 expense_reimbursement_total=1500 → 進 gross / net', () => {
+    const row = {
+      base_salary: 40000, attendance_bonus_actual: 1000,
+      expense_reimbursement_total: 1500,
+      deduct_labor_ins: 800,
+    };
+    // gross = 40000 + 1000 + 1500 = 42500
+    expect(computeGrossSalary(row)).toBe(refGrossSalary(row));
+    expect(computeGrossSalary(row)).toBe(42500);
+    // net = 42500 - 800 = 41700
+    expect(computeNetSalary(row)).toBe(refNetSalary(row));
+    expect(computeNetSalary(row)).toBe(41700);
+  });
+  it('expense_reimbursement_total 為 null/undefined → 視為 0', () => {
+    const row = { base_salary: 30000, expense_reimbursement_total: null };
+    expect(computeGrossSalary(row)).toBe(refGrossSalary(row));
+    expect(computeGrossSalary(row)).toBe(30000);
+  });
+  it('_taxable 不進 gross 公式(只 _total 才進)— 給 _taxable 不影響 gross', () => {
+    const row = {
+      base_salary: 30000,
+      expense_reimbursement_total: 0,         // 反例:total=0 不論 _taxable 多少都不加 gross
+      expense_reimbursement_taxable: 9999,
+    };
+    expect(computeGrossSalary(row)).toBe(30000);
+  });
+});
+
 // ─── 主流程整合 ──────────────────────────────────────────
 
 function makeFullRepo(over = {}) {
@@ -222,6 +254,9 @@ function makeFullRepo(over = {}) {
     findEmployeeInsuranceSettings: vi.fn(async () => null),  // 預設無投保
     findActivePayrollPeriod:       vi.fn(async () => null),  // 預設無 active period
     findYtdAccumulatedBonusBefore: vi.fn(async () => 0),
+
+    // ─── Phase 3:請款併薪 子表(預設空)─────────────────
+    fetchExpenseEntries:            vi.fn(async () => []),
 
     ...over,
   };
@@ -399,6 +434,103 @@ describe('calculateMonthlySalary — 主流程順序', () => {
     await expect(calculateMonthlySalary(repo, { employee_id:'E001', month:4 })).rejects.toThrow(/year/);
     await expect(calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:13 })).rejects.toThrow(/month/);
     await expect(calculateMonthlySalary({}, { employee_id:'E001', year:2026, month:4 })).rejects.toThrow();
+  });
+});
+
+describe('calculateMonthlySalary — Phase 3:請款併薪(salary_expense_entries → expense_reimbursement_*)', () => {
+  it('一筆 is_taxable_snapshot=true → total==amount、_taxable==amount、taxable_income_snapshot 較無 expense 時 +amount', async () => {
+    // 先跑「無 expense」抓 baseline taxable_income_snapshot
+    const repoBaseline = makeFullRepo();
+    const baseline = await calculateMonthlySalary(repoBaseline, { employee_id:'E001', year:2026, month:4 });
+    const baselineTaxable = baseline.record.taxable_income_snapshot;
+
+    const repo = makeFullRepo({
+      fetchExpenseEntries: vi.fn(async () => ([
+        { id: 1, amount: 1500, category_name_snapshot: '交通補貼', is_taxable_snapshot: true },
+      ])),
+    });
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    expect(r.record.expense_reimbursement_total).toBe(1500);
+    expect(r.record.expense_reimbursement_taxable).toBe(1500);
+    expect(r.record.expense_reimbursement_note).toBe('交通補貼 NT$1500');
+    expect(r.record.taxable_income_snapshot).toBe(baselineTaxable + 1500);
+    expect(repo.fetchExpenseEntries).toHaveBeenCalledWith({
+      employee_id: 'E001', year: 2026, month: 4,
+    });
+  });
+
+  it('一筆 is_taxable_snapshot=false → total==amount、_taxable==0、taxable_income_snapshot 不變', async () => {
+    const repoBaseline = makeFullRepo();
+    const baseline = await calculateMonthlySalary(repoBaseline, { employee_id:'E001', year:2026, month:4 });
+    const baselineTaxable = baseline.record.taxable_income_snapshot;
+
+    const repo = makeFullRepo({
+      fetchExpenseEntries: vi.fn(async () => ([
+        { id: 2, amount: 800, category_name_snapshot: '零用金代墊', is_taxable_snapshot: false },
+      ])),
+    });
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    expect(r.record.expense_reimbursement_total).toBe(800);
+    expect(r.record.expense_reimbursement_taxable).toBe(0);
+    expect(r.record.expense_reimbursement_note).toBe('零用金代墊 NT$800');
+    expect(r.record.taxable_income_snapshot).toBe(baselineTaxable);   // 不變
+  });
+
+  it('混合多筆 → total=sum(all)、_taxable=sum(taxable)、_note 多行各含 category_name_snapshot', async () => {
+    const repo = makeFullRepo({
+      fetchExpenseEntries: vi.fn(async () => ([
+        { id: 3, amount: 1500, category_name_snapshot: '交通補貼', is_taxable_snapshot: true },
+        { id: 4, amount: 800,  category_name_snapshot: '零用金代墊', is_taxable_snapshot: false },
+        { id: 5, amount: 250,  category_name_snapshot: '誤餐費',     is_taxable_snapshot: true },
+      ])),
+    });
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    expect(r.record.expense_reimbursement_total).toBe(2550);     // 1500+800+250
+    expect(r.record.expense_reimbursement_taxable).toBe(1750);   // 1500+250
+    // _note 多行
+    const lines = r.record.expense_reimbursement_note.split('\n');
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('交通補貼');
+    expect(lines[0]).toContain('1500');
+    expect(lines[1]).toContain('零用金代墊');
+    expect(lines[1]).toContain('800');
+    expect(lines[2]).toContain('誤餐費');
+    expect(lines[2]).toContain('250');
+  });
+
+  it('空陣列(無 entry)→ total=0、_taxable=0、_note=null', async () => {
+    const repo = makeFullRepo();  // default fetchExpenseEntries=[]
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    expect(r.record.expense_reimbursement_total).toBe(0);
+    expect(r.record.expense_reimbursement_taxable).toBe(0);
+    expect(r.record.expense_reimbursement_note).toBeNull();
+  });
+
+  it('category_name_snapshot 缺值 → _note 用「未分類」', async () => {
+    const repo = makeFullRepo({
+      fetchExpenseEntries: vi.fn(async () => ([
+        { id: 6, amount: 500, category_name_snapshot: null, is_taxable_snapshot: true },
+      ])),
+    });
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    expect(r.record.expense_reimbursement_note).toBe('未分類 NT$500');
+  });
+
+  it('每次重算都從子表重建(子表為 SoT)— mock 第二次回不同資料、結果即覆寫', async () => {
+    let call = 0;
+    const repo = makeFullRepo({
+      fetchExpenseEntries: vi.fn(async () => {
+        call += 1;
+        return call === 1
+          ? [{ id: 7, amount: 1000, category_name_snapshot: '初次', is_taxable_snapshot: true }]
+          : [{ id: 8, amount: 200,  category_name_snapshot: '第二次', is_taxable_snapshot: true }];
+      }),
+    });
+    const r1 = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    expect(r1.record.expense_reimbursement_total).toBe(1000);
+    const r2 = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:4 });
+    expect(r2.record.expense_reimbursement_total).toBe(200);
+    expect(r2.record.expense_reimbursement_note).toBe('第二次 NT$200');
   });
 });
 
