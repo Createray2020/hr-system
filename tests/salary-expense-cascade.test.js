@@ -14,6 +14,8 @@ const state = {
   categoriesByName: {},
   // insurance_settings by employee_id
   insuranceByEmp: {},
+  // Phase 6a:live entries(re-sum 來源、SoT)— 對應 DB 的 salary_expense_entries 表
+  activeEntries: [],
   // capture
   insertedEntries: [],
   updatedSalaryRecords: [],
@@ -65,6 +67,11 @@ vi.mock('../lib/supabase.js', () => {
       // 用於 update 鏈:.update(patch).eq(...).eq(...).then(...)
       if (ctx._updatePatch != null) {
         return doUpdate(name, _filters, ctx._updatePatch).then(resolve, reject);
+      }
+      // Phase 6a:list select 子表 re-sum — salary_expense_entries 按 filter 回 activeEntries
+      if (name === 'salary_expense_entries') {
+        const list = state.activeEntries.filter(e => _matchFilters(e, _filters));
+        return Promise.resolve({ data: list, error: null }).then(resolve, reject);
       }
       // fallback list select(await q):回空陣列
       return Promise.resolve({ data: [], error: null }).then(resolve, reject);
@@ -143,7 +150,11 @@ function doInsert(table, rows) {
       state.insertEntrySecondCallError = null;
       return Promise.resolve({ data: null, error: e });
     }
-    for (const r of rows) state.insertedEntries.push(r);
+    for (const r of rows) {
+      state.insertedEntries.push(r);
+      // Phase 6a:同步加進 activeEntries(re-sum 來源)— 若 row.deleted_at 未提供視為 null
+      state.activeEntries.push({ deleted_at: null, ...r });
+    }
     return Promise.resolve({ data: rows[0], error: null });
   }
   return Promise.resolve({ data: rows[0], error: null });
@@ -168,9 +179,31 @@ function doUpdate(table, filters, patch) {
   }
   if (table === 'salary_expense_entries') {
     state.updatedEntries.push({ filters: { ...filters }, patch });
+    // Phase 6a:同步把 patch 套到 activeEntries 上(re-sum 才會反映 status='voided' 等)
+    for (const e of state.activeEntries) {
+      if (_matchFilters(e, filters)) Object.assign(e, patch);
+    }
     return Promise.resolve({ data: null, error: null });
   }
   return Promise.resolve({ data: null, error: null });
+}
+
+// Phase 6a:filter matcher;.eq → 直接 ===;.is(col, null) → 存 col + '__is'
+function _matchFilters(row, filters) {
+  for (const [col, val] of Object.entries(filters || {})) {
+    if (col.endsWith('__is')) {
+      const realCol = col.slice(0, -4);
+      const rowVal = row[realCol];
+      if (val === null) {
+        if (rowVal != null) return false;
+      } else if (rowVal !== val) {
+        return false;
+      }
+    } else {
+      if (row[col] !== val) return false;
+    }
+  }
+  return true;
 }
 
 // roles:真正用 isExecutiveRole 邏輯
@@ -204,6 +237,7 @@ const {
   inferNextPayrollPeriod,
   isSettledStatus,
   isUnsettledStatus,
+  reflectExpenseEntriesToSalary,
 } = await import('../lib/salary/expense-cascade.js');
 
 // ─── 共用 fixture helpers ─────────────────────────────────────
@@ -224,6 +258,21 @@ function setSalaryRecord(employee_id, year, month, over = {}) {
     admin_audit_note: null,
     ...over,
   };
+}
+
+// Phase 6a:helper for seeding pre-existing active entries(模擬 DB 既有資料)
+function seedEntry(over = {}) {
+  state.activeEntries.push({
+    employee_id: 'EMP_X',
+    target_year: 2026,
+    target_month: 7,
+    status: 'active',
+    deleted_at: null,
+    amount: 100,
+    is_taxable_snapshot: true,
+    category_name_snapshot: '既有類別',
+    ...over,
+  });
 }
 
 function makeRequest(over = {}) {
@@ -248,6 +297,7 @@ beforeEach(() => {
   state.categoriesById = {};
   state.categoriesByName = {};
   state.insuranceByEmp = {};
+  state.activeEntries = [];
   state.insertedEntries = [];
   state.updatedSalaryRecords = [];
   state.updatedEntries = [];
@@ -381,6 +431,9 @@ describe('mode=force(approved + executive)外科 UPDATE', () => {
       expense_reimbursement_taxable: 100,
       expense_reimbursement_note: '舊一筆 NT$200',
     });
+    // Phase 6a:seed 兩筆既有 active entries 對應 sr 既有 total=200/taxable=100
+    seedEntry({ amount: 100, is_taxable_snapshot: true,  category_name_snapshot: '舊類別應稅' });
+    seedEntry({ amount: 100, is_taxable_snapshot: false, category_name_snapshot: '舊類別非稅' });
     state.categoriesByName['交通'] = { id: 'EC1', name: '交通', is_wage: false, is_taxable: true };
     state.insuranceByEmp['EMP_X'] = { health_ins_dependents: 1, has_insurance: true };
 
@@ -394,11 +447,13 @@ describe('mode=force(approved + executive)外科 UPDATE', () => {
     expect(state.updatedSalaryRecords).toHaveLength(1);
     const upd = state.updatedSalaryRecords[0];
     expect(upd.id).toBe('S_EMP_X_2026_07');
-    expect(upd.patch.expense_reimbursement_total).toBe(1200);   // 200+1000
-    expect(upd.patch.expense_reimbursement_taxable).toBe(1100); // 100+1000
-    expect(upd.patch.expense_reimbursement_note).toContain('舊一筆 NT$200');
+    expect(upd.patch.expense_reimbursement_total).toBe(1200);   // 100+100+1000
+    expect(upd.patch.expense_reimbursement_taxable).toBe(1100); // 100+0+1000
+    // note 來源改為 re-sum 子表(舊類別應稅 + 舊類別非稅 + 新交通)
+    expect(upd.patch.expense_reimbursement_note).toContain('舊類別應稅 NT$100');
+    expect(upd.patch.expense_reimbursement_note).toContain('舊類別非稅 NT$100');
     expect(upd.patch.expense_reimbursement_note).toContain('交通 NT$1000');
-    expect(upd.patch.taxable_income_snapshot).toBe(51000);      // 50000+1000
+    expect(upd.patch.taxable_income_snapshot).toBe(51000);      // 50000-100+1100
     expect(upd.patch.deduct_tax).toBe(Math.round(51000 * 0.06));// mock = monthlyPayment*0.06
     expect(upd.patch.admin_audit_note).toMatch(/^\[FORCE 併薪 /);
     expect(upd.patch.admin_audit_note).toContain('交通 NT$1000');
@@ -440,7 +495,7 @@ describe('mode=force(approved + executive)外科 UPDATE', () => {
     expect(upd.patch).not.toHaveProperty('deduct_tax');         // 沒動
   });
 
-  it('非稅類別 force → expense_taxable 不增 / taxable_snapshot 不變 / deduct_tax 不變(deltaTaxable=0 跳過)', async () => {
+  it('非稅類別 force → expense_taxable 不增 / taxable_snapshot 不變;deduct_tax 仍重算(Phase 6a 一律算)', async () => {
     setPeriod(2026, 7, 'approved');
     setSalaryRecord('EMP_X', 2026, 7, {
       status: 'approved',
@@ -459,8 +514,9 @@ describe('mode=force(approved + executive)外科 UPDATE', () => {
     const upd = state.updatedSalaryRecords[0];
     expect(upd.patch.expense_reimbursement_total).toBe(500);
     expect(upd.patch.expense_reimbursement_taxable).toBe(0);
-    expect(upd.patch.taxable_income_snapshot).toBe(50000);   // 沒動(deltaTaxable=0)
-    expect(upd.patch).not.toHaveProperty('deduct_tax');      // deltaTaxable=0 → 跳過
+    expect(upd.patch.taxable_income_snapshot).toBe(50000);   // 沒動(taxable 沒增)
+    // Phase 6a bug fix:非 manual_override 一律重算 deduct_tax(taxable 沒動 → 數字相同但欄位存在)
+    expect(upd.patch.deduct_tax).toBe(Math.round(50000 * 0.06));
   });
 
   it('force 目標無 salary_records → 退回 defer、UPDATE entry 改 mode=defer', async () => {
@@ -580,5 +636,245 @@ describe('冪等 + best-effort', () => {
 
     await expect(applyExpenseReimbursement(makeRequest(), { id: 'HR1', role: 'hr' })).resolves.toBeUndefined();
     expect(state.approvalAuditPrepended.some(s => /併薪失敗/.test(s))).toBe(true);
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// Phase 6a:reflectExpenseEntriesToSalary 純單元測試
+// ════════════════════════════════════════════════════════════
+describe('reflectExpenseEntriesToSalary 純單元', () => {
+  it('未結算(draft)+ record 存在 → 呼叫 calculateMonthlySalary、action=recomputed', async () => {
+    setPeriod(2026, 6, 'draft');
+    setSalaryRecord('EMP_X', 2026, 6, { status: 'draft' });
+    state.activeEntries.push({
+      employee_id: 'EMP_X', target_year: 2026, target_month: 6,
+      status: 'active', deleted_at: null,
+      amount: 500, is_taxable_snapshot: true, category_name_snapshot: '車資',
+    });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: false,
+      callerId: 'HR1', callerRole: 'hr', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: true, action: 'recomputed' });
+    expect(mockCalc).toHaveBeenCalledTimes(1);
+    expect(state.calcCalls[0]).toMatchObject({ employee_id: 'EMP_X', year: 2026, month: 6 });
+  });
+
+  it('未結算 + record 不存在 → action=entry_only、不呼叫 calculator', async () => {
+    setPeriod(2026, 6, 'draft');
+    state.activeEntries.push({
+      employee_id: 'EMP_X', target_year: 2026, target_month: 6,
+      status: 'active', deleted_at: null,
+      amount: 500, is_taxable_snapshot: true, category_name_snapshot: '車資',
+    });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: false,
+      callerId: 'HR1', callerRole: 'hr', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: true, action: 'entry_only' });
+    expect(mockCalc).not.toHaveBeenCalled();
+  });
+
+  it('period 不存在(null)視為未結算', async () => {
+    // 不 setPeriod
+    setSalaryRecord('EMP_X', 2026, 6, { status: 'draft' });
+    state.activeEntries.push({
+      employee_id: 'EMP_X', target_year: 2026, target_month: 6,
+      status: 'active', deleted_at: null,
+      amount: 300, is_taxable_snapshot: true, category_name_snapshot: '車資',
+    });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: false,
+      callerId: 'HR1', callerRole: 'hr', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: true, action: 'recomputed' });
+    expect(mockCalc).toHaveBeenCalledTimes(1);
+  });
+
+  it('approved + force + executive → 外科 UPDATE、action=surgical', async () => {
+    setPeriod(2026, 6, 'approved');
+    setSalaryRecord('EMP_X', 2026, 6, {
+      status: 'approved',
+      taxable_income_snapshot: 50000,
+      deduct_tax: 3000,
+      deduct_tax_manual_override: false,
+      expense_reimbursement_taxable: 100,         // 舊應稅貢獻
+      expense_reimbursement_total: 200,
+      admin_audit_note: 'old audit',
+    });
+    state.activeEntries.push(
+      { employee_id:'EMP_X', target_year:2026, target_month:6, status:'active', deleted_at:null,
+        amount: 100, is_taxable_snapshot: true,  category_name_snapshot: '舊應稅' },
+      { employee_id:'EMP_X', target_year:2026, target_month:6, status:'active', deleted_at:null,
+        amount: 100, is_taxable_snapshot: false, category_name_snapshot: '舊非稅' },
+      { employee_id:'EMP_X', target_year:2026, target_month:6, status:'active', deleted_at:null,
+        amount: 1000, is_taxable_snapshot: true, category_name_snapshot: '新交通' },
+    );
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: true,
+      callerId: 'CEO1', callerRole: 'ceo', auditLabel: '[FORCE test]',
+    });
+
+    expect(res).toEqual({ ok: true, action: 'surgical' });
+    expect(mockCalc).not.toHaveBeenCalled();
+    expect(state.updatedSalaryRecords).toHaveLength(1);
+    const upd = state.updatedSalaryRecords[0];
+    expect(upd.id).toBe('S_EMP_X_2026_06');
+    expect(upd.patch.expense_reimbursement_total).toBe(1200);
+    expect(upd.patch.expense_reimbursement_taxable).toBe(1100);
+    expect(upd.patch.expense_reimbursement_note).toContain('舊應稅 NT$100');
+    expect(upd.patch.expense_reimbursement_note).toContain('舊非稅 NT$100');
+    expect(upd.patch.expense_reimbursement_note).toContain('新交通 NT$1000');
+    // newTaxableSnap = 50000 - 100 + 1100 = 51000
+    expect(upd.patch.taxable_income_snapshot).toBe(51000);
+    expect(upd.patch.deduct_tax).toBe(Math.round(51000 * 0.06));
+    // audit prepend
+    expect(upd.patch.admin_audit_note).toMatch(/^\[FORCE test\]/);
+    expect(upd.patch.admin_audit_note).toContain('old audit');
+  });
+
+  it('approved + force + 非 executive → { ok:false, reason:NEEDS_EXECUTIVE }', async () => {
+    setPeriod(2026, 6, 'approved');
+    setSalaryRecord('EMP_X', 2026, 6, { status: 'approved' });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: true,
+      callerId: 'HR1', callerRole: 'hr', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: false, reason: 'NEEDS_EXECUTIVE' });
+    expect(state.updatedSalaryRecords).toHaveLength(0);
+  });
+
+  it('approved + 無 force → { ok:false, reason:NEEDS_FORCE }', async () => {
+    setPeriod(2026, 6, 'approved');
+    setSalaryRecord('EMP_X', 2026, 6, { status: 'approved' });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: false,
+      callerId: 'CEO1', callerRole: 'ceo', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: false, reason: 'NEEDS_FORCE' });
+    expect(state.updatedSalaryRecords).toHaveLength(0);
+  });
+
+  it('approved + force + executive 但 sr 不存在 → { ok:false, reason:NO_SALARY_RECORD }', async () => {
+    setPeriod(2026, 6, 'approved');
+    // 不 setSalaryRecord
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: true,
+      callerId: 'CEO1', callerRole: 'ceo', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: false, reason: 'NO_SALARY_RECORD' });
+    expect(state.updatedSalaryRecords).toHaveLength(0);
+  });
+
+  it('paid → { ok:false, reason:PERIOD_LOCKED }', async () => {
+    setPeriod(2026, 6, 'paid');
+    setSalaryRecord('EMP_X', 2026, 6, { status: 'paid' });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: true,
+      callerId: 'CEO1', callerRole: 'ceo', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: false, reason: 'PERIOD_LOCKED' });
+    expect(state.updatedSalaryRecords).toHaveLength(0);
+  });
+
+  it('locked → { ok:false, reason:PERIOD_LOCKED }', async () => {
+    setPeriod(2026, 6, 'locked');
+    setSalaryRecord('EMP_X', 2026, 6, { status: 'locked' });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: true,
+      callerId: 'CEO1', callerRole: 'ceo', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: false, reason: 'PERIOD_LOCKED' });
+  });
+
+  it('作廢情境:re-sum 下降 → expense 欄 + taxable_snap + deduct_tax 都下降(Phase 6a bug fix)', async () => {
+    setPeriod(2026, 6, 'approved');
+    setSalaryRecord('EMP_X', 2026, 6, {
+      status: 'approved',
+      taxable_income_snapshot: 51000,           // 已含 1000 應稅 expense 貢獻
+      deduct_tax: Math.round(51000 * 0.06),     // 3060
+      deduct_tax_manual_override: false,
+      expense_reimbursement_total: 1500,        // 既有總額
+      expense_reimbursement_taxable: 1000,
+    });
+    // 作廢後子表只剩 500 非稅
+    state.activeEntries.push({
+      employee_id:'EMP_X', target_year:2026, target_month:6, status:'active', deleted_at:null,
+      amount: 500, is_taxable_snapshot: false, category_name_snapshot: '剩餘非稅',
+    });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: true,
+      callerId: 'CEO1', callerRole: 'ceo', auditLabel: '[作廢 test]',
+    });
+
+    expect(res).toEqual({ ok: true, action: 'surgical' });
+    const upd = state.updatedSalaryRecords[0];
+    expect(upd.patch.expense_reimbursement_total).toBe(500);          // 下降
+    expect(upd.patch.expense_reimbursement_taxable).toBe(0);          // 下降到 0
+    // newTaxableSnap = 51000 - 1000 + 0 = 50000
+    expect(upd.patch.taxable_income_snapshot).toBe(50000);
+    // Bug fix:稅金 also 下降(50000 * 0.06 = 3000、不是維持 3060)
+    expect(upd.patch.deduct_tax).toBe(Math.round(50000 * 0.06));
+    expect(upd.patch.deduct_tax).toBeLessThan(3060);
+  });
+
+  it('deduct_tax_manual_override=true → 不動 deduct_tax、只動 taxable_snap + expense 欄', async () => {
+    setPeriod(2026, 6, 'approved');
+    setSalaryRecord('EMP_X', 2026, 6, {
+      status: 'approved',
+      taxable_income_snapshot: 60000,
+      deduct_tax: 4500,
+      deduct_tax_manual_override: true,
+      expense_reimbursement_total: 0,
+      expense_reimbursement_taxable: 0,
+    });
+    state.activeEntries.push({
+      employee_id:'EMP_X', target_year:2026, target_month:6, status:'active', deleted_at:null,
+      amount: 1000, is_taxable_snapshot: true, category_name_snapshot: '應稅',
+    });
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: true,
+      callerId: 'CEO1', callerRole: 'ceo', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: true, action: 'surgical' });
+    const upd = state.updatedSalaryRecords[0];
+    expect(upd.patch.expense_reimbursement_total).toBe(1000);
+    expect(upd.patch.expense_reimbursement_taxable).toBe(1000);
+    expect(upd.patch.taxable_income_snapshot).toBe(61000);
+    expect(upd.patch).not.toHaveProperty('deduct_tax');     // override 鎖住、不動
+  });
+
+  it('空子表 → newExpTotal=0、newExpTaxable=0、newNote=null;未結算 + sr unsettled 仍 recompute', async () => {
+    setPeriod(2026, 6, 'draft');
+    setSalaryRecord('EMP_X', 2026, 6, { status: 'draft' });
+    // 不 push 任何 activeEntries → 空
+
+    const res = await reflectExpenseEntriesToSalary({
+      employee_id: 'EMP_X', year: 2026, month: 6, force: false,
+      callerId: 'HR1', callerRole: 'hr', auditLabel: '[test]',
+    });
+
+    expect(res).toEqual({ ok: true, action: 'recomputed' });
+    expect(mockCalc).toHaveBeenCalledTimes(1);
   });
 });
