@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>併薪明細管理 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .filter-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace;display:inline-block}
+  .b-yes{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-no{background:rgba(120,120,120,.15);color:var(--text-dim)}
+  .b-active{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-voided{background:rgba(248,113,113,.12);color:#F87171}
+  .b-draft{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-approved{background:rgba(251,191,36,.18);color:#FBBF24}
+  .b-paid{background:rgba(120,120,120,.15);color:var(--text-dim)}
+  .b-locked{background:rgba(120,120,120,.20);color:var(--text-dim)}
+  .row-void{opacity:.55;text-decoration:line-through}
+  .num{font-family:'DM Mono',monospace}
+  .totals{display:flex;gap:18px;margin-top:10px;padding:10px 12px;background:rgba(91,141,239,.06);border:1px solid rgba(91,141,239,.18);border-radius:6px;font-size:13px}
+  .totals .k{color:var(--text-dim);font-family:'DM Mono',monospace;font-size:11px}
+  .totals .v{font-family:'DM Mono',monospace;font-weight:600}
+  .hint{font-size:11px;color:var(--text-dim);margin-top:4px}
+</style>
+</head>
+<body data-page="salary-expense-entries-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">併薪明細管理</div>
+        <div class="page-sub">逐筆查看 / 調整 / 作廢併薪請款,寫入會反映到薪資紀錄</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面（限 HR / admin / ceo / chairman)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="filter-row">
+        <select class="form-select" id="f-emp" style="min-width:240px"><option value="">— 選擇員工 —</option></select>
+        <select class="form-select" id="f-month" style="width:140px"></select>
+        <button class="btn btn-primary" onclick="reload()">查詢</button>
+        <span id="period-badge" style="margin-left:8px"></span>
+        <span style="flex:1"></span>
+        <button class="btn btn-primary" id="btn-add" onclick="openAdd()" style="display:none">＋ 新增明細</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="ct-tbl" id="entries-table" style="display:none">
+          <thead><tr>
+            <th>類別</th>
+            <th style="text-align:right">金額</th>
+            <th style="text-align:center">應稅</th>
+            <th style="text-align:center">狀態</th>
+            <th>費用日期</th>
+            <th>說明</th>
+            <th>備註</th>
+            <th>建立者</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody id="entries-tbody"></tbody>
+        </table>
+        <div id="entries-empty" class="empty-state" style="display:none">
+          <div class="icon">🧾</div><div>本期無明細</div>
+        </div>
+        <div id="entries-prompt" class="empty-state">
+          <div class="icon">🔍</div><div>請先選員工 + 月份按「查詢」</div>
+        </div>
+      </div>
+
+      <div id="totals" class="totals" style="display:none">
+        <div><span class="k">active 列數</span> <span class="v" id="t-count">0</span></div>
+        <div><span class="k">總金額</span> <span class="v" id="t-total">NT$ 0</span></div>
+        <div><span class="k">應稅合計</span> <span class="v" id="t-taxable">NT$ 0</span></div>
+        <div><span class="k">不計稅合計</span> <span class="v" id="t-nontax">NT$ 0</span></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 新增 Modal -->
+<div class="modal-bg" id="add-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title">＋ 新增併薪明細</div>
+    <div class="form-row">
+      <label class="form-label">類別 <span style="color:#F87171">*</span></label>
+      <select class="form-select" id="add-cat"><option value="">— 載入中 —</option></select>
+    </div>
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div>
+        <label class="form-label">金額 (NT$) <span style="color:#F87171">*</span></label>
+        <input type="number" class="form-input" id="add-amount" step="1" min="1" placeholder="0">
+      </div>
+      <div>
+        <label class="form-label">費用日期</label>
+        <input type="date" class="form-input" id="add-date">
+      </div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">說明</label>
+      <input type="text" class="form-input" id="add-desc" placeholder="例:6/8 計程車車資">
+    </div>
+    <div class="form-row">
+      <label class="form-label">備註</label>
+      <textarea class="form-input" id="add-note" rows="2" placeholder="可空;空則自動填「[手動新增 ... by HR]」"></textarea>
+    </div>
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:6px">
+      <button class="btn btn-ghost" onclick="closeModal('add-modal')">取消</button>
+      <button class="btn btn-primary" id="add-save" onclick="submitAdd()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 調整 Modal -->
+<div class="modal-bg" id="edit-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title">⚙ 調整明細</div>
+    <input type="hidden" id="edit-id">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" id="edit-meta"></div>
+    <div class="form-row">
+      <label class="form-label">類別</label>
+      <select class="form-select" id="edit-cat"></select>
+    </div>
+    <div class="form-row">
+      <label class="form-label">金額 (NT$)</label>
+      <input type="number" class="form-input" id="edit-amount" step="1" min="1">
+    </div>
+    <div class="form-row">
+      <label class="form-label">說明</label>
+      <input type="text" class="form-input" id="edit-desc">
+    </div>
+    <div class="form-row">
+      <label class="form-label">備註(會自動追加「[調整 ... by HR]」軌跡)</label>
+      <textarea class="form-input" id="edit-note" rows="2"></textarea>
+    </div>
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:6px">
+      <button class="btn btn-ghost" onclick="closeModal('edit-modal')">取消</button>
+      <button class="btn btn-primary" id="edit-save" onclick="submitEdit()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),5500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+function fmt$(v){ return 'NT$ ' + (Number(v)||0).toLocaleString('zh-TW'); }
+function fmtDate(s){ return s ? String(s).slice(0,10) : ''; }
+
+// ── State ──
+let empList = [];                  // 員工下拉
+let allExpenseCategories = [];     // 類別下拉(active only)
+let currentEmpId = '';
+let currentYearMonth = '';
+let currentEntries = [];
+let currentPeriodStatus = null;    // 'draft'/'approved'/'paid'/'locked'/null(未建)
+
+// ── Filter parsing(對齊 salary.html parseFilterFromQuery)──
+function parseFilterFromQuery(search) {
+  const params = new URLSearchParams(search || '');
+  const year = parseInt(params.get('year'), 10);
+  const month = parseInt(params.get('month'), 10);
+  const employee_id = params.get('employee_id');
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return employee_id ? { employee_id } : null;
+  }
+  return { employee_id: employee_id || null, year, month, value: `${year}-${String(month).padStart(2,'0')}` };
+}
+
+// ── Month options(對齊 salary.html buildMonthOptions)──
+function buildMonthOptions(){
+  const sel = document.getElementById('f-month');
+  const d = new Date(); const out = [];
+  for (let i = 0; i < 12; i++) {
+    const v = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    out.push(`<option value="${v}"${i===0?' selected':''}>${v}</option>`);
+    d.setMonth(d.getMonth()-1);
+  }
+  sel.innerHTML = out.join('');
+  // ?year=&month= override
+  const fromQuery = parseFilterFromQuery(window.location.search);
+  if (fromQuery && fromQuery.value) {
+    if (![...sel.options].some(o => o.value === fromQuery.value)) {
+      const opt = document.createElement('option');
+      opt.value = fromQuery.value; opt.textContent = fromQuery.value;
+      sel.insertBefore(opt, sel.firstChild);
+    }
+    sel.value = fromQuery.value;
+  }
+}
+
+// ── 員工下拉(對齊 overtime-admin.html ensureProxyEmpList)──
+async function loadEmpList(){
+  try {
+    const emps = await api('/api/employees?status=active');
+    empList = (emps || []).filter(e => e.id !== 'EMP_99999999');
+    const sel = document.getElementById('f-emp');
+    sel.innerHTML = '<option value="">— 選擇員工 —</option>' +
+      empList.map(e => `<option value="${escHtml(e.id)}">${escHtml(e.name || e.id)} (${escHtml(e.id)})</option>`).join('');
+    // query 預選
+    const fromQuery = parseFilterFromQuery(window.location.search);
+    if (fromQuery?.employee_id && empList.some(e => e.id === fromQuery.employee_id)) {
+      sel.value = fromQuery.employee_id;
+    }
+  } catch(e) { toast('員工清單載入失敗:' + e.message, 'error'); }
+}
+
+// ── 類別下拉(對齊 approvals.html Phase 5b)──
+async function loadCategories(){
+  try {
+    const r = await api('/api/expense-categories');
+    allExpenseCategories = r?.categories || [];
+  } catch(e) {
+    allExpenseCategories = [];
+  }
+}
+function renderCategorySelect(selectEl, currentValue) {
+  if (!allExpenseCategories.length) {
+    selectEl.innerHTML = '<option value="">(無 active 類別、請先到「請款類別管理」建立)</option>';
+    return;
+  }
+  selectEl.innerHTML = '<option value="">— 請選擇 —</option>' +
+    allExpenseCategories.map(c => {
+      const sel = currentValue && c.id === currentValue ? ' selected' : '';
+      const taxTag = c.is_taxable ? '應稅' : '不計稅';
+      return `<option value="${escHtml(c.id)}"${sel}>${escHtml(c.name)} (${taxTag})</option>`;
+    }).join('');
+}
+
+// ── 期間 badge ──
+async function loadPeriodBadge(year, mm) {
+  const pid = `PP_${year}_${mm}`;
+  const el = document.getElementById('period-badge');
+  try {
+    const p = await api(`/api/salary/periods/${pid}`);
+    currentPeriodStatus = p?.status || null;
+    if (!currentPeriodStatus) {
+      el.innerHTML = `<span class="badge b-draft">未建立</span>`;
+      return;
+    }
+    const cls = `b-${currentPeriodStatus}`;
+    el.innerHTML = `<span class="badge ${cls}">${escHtml(currentPeriodStatus)}</span>`;
+  } catch(e) {
+    // 404 視為未建立(未結算)
+    currentPeriodStatus = null;
+    el.innerHTML = `<span class="badge b-draft">未建立</span>`;
+  }
+}
+
+// ── Reload(查詢按鈕)──
+async function reload(){
+  const empId = document.getElementById('f-emp').value;
+  const ym = document.getElementById('f-month').value;
+  if (!empId) { toast('請選員工', 'error'); return; }
+  if (!ym)    { toast('請選月份', 'error'); return; }
+  currentEmpId = empId;
+  currentYearMonth = ym;
+  const [y, m] = ym.split('-').map(Number);
+  await loadPeriodBadge(y, String(m).padStart(2,'0'));
+  await loadEntries(empId, y, m);
+  document.getElementById('btn-add').style.display = '';
+}
+
+async function loadEntries(empId, year, month) {
+  document.getElementById('entries-prompt').style.display = 'none';
+  document.getElementById('entries-table').style.display = '';
+  document.getElementById('entries-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;padding:14px;color:var(--text-dim)">載入中…</td></tr>';
+  try {
+    const r = await api(`/api/salary-expense-entries?employee_id=${encodeURIComponent(empId)}&year=${year}&month=${month}`);
+    currentEntries = r.entries || [];
+    renderEntries();
+  } catch(e) {
+    document.getElementById('entries-tbody').innerHTML = `<tr><td colspan="9" style="color:#F87171;padding:12px">載入失敗:${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderEntries(){
+  const tbody = document.getElementById('entries-tbody');
+  const table = document.getElementById('entries-table');
+  const empty = document.getElementById('entries-empty');
+  if (!currentEntries.length) {
+    tbody.innerHTML = '';
+    table.style.display = 'none';
+    empty.style.display = '';
+    document.getElementById('totals').style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  table.style.display = '';
+
+  tbody.innerHTML = currentEntries.map(e => {
+    const isVoid = e.status === 'voided';
+    const rowCls = isVoid ? 'row-void' : '';
+    const taxBadge = e.is_taxable_snapshot ? '<span class="badge b-yes">應稅</span>' : '<span class="badge b-no">不計稅</span>';
+    const statusBadge = isVoid ? '<span class="badge b-voided">voided</span>' : '<span class="badge b-active">active</span>';
+    const ops = isVoid
+      ? '<span style="color:var(--text-dim);font-size:11px">已作廢</span>'
+      : `<button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(e.id)}')">調整</button>
+         <button class="btn btn-danger btn-sm" onclick="voidEntry('${escHtml(e.id)}')">作廢</button>`;
+    return `<tr class="${rowCls}">
+      <td>${escHtml(e.category_name_snapshot || '—')}</td>
+      <td class="num" style="text-align:right">${fmt$(e.amount)}</td>
+      <td style="text-align:center">${taxBadge}</td>
+      <td style="text-align:center">${statusBadge}</td>
+      <td>${escHtml(fmtDate(e.expense_date))}</td>
+      <td style="font-size:12px;max-width:200px">${escHtml(e.description || '')}</td>
+      <td style="font-size:11px;color:var(--text-dim);max-width:240px;white-space:pre-wrap">${escHtml(e.note || '')}</td>
+      <td style="font-size:11px;color:var(--text-dim)">${escHtml(e.created_by || '')}</td>
+      <td>${ops}</td>
+    </tr>`;
+  }).join('');
+
+  // 合計(只算 active)
+  const active = currentEntries.filter(e => e.status === 'active');
+  const total = active.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const taxable = active.filter(e => e.is_taxable_snapshot).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  document.getElementById('t-count').textContent = active.length;
+  document.getElementById('t-total').textContent = fmt$(total);
+  document.getElementById('t-taxable').textContent = fmt$(taxable);
+  document.getElementById('t-nontax').textContent = fmt$(total - taxable);
+  document.getElementById('totals').style.display = '';
+}
+
+// ── 新增 ──
+function openAdd(){
+  if (!currentEmpId || !currentYearMonth) { toast('請先選員工 + 月份', 'error'); return; }
+  document.getElementById('add-amount').value = '';
+  document.getElementById('add-date').value = '';
+  document.getElementById('add-desc').value = '';
+  document.getElementById('add-note').value = '';
+  renderCategorySelect(document.getElementById('add-cat'), '');
+  document.getElementById('add-modal').classList.add('open');
+}
+
+async function submitAdd(){
+  const category_id = document.getElementById('add-cat').value;
+  const amountRaw   = document.getElementById('add-amount').value;
+  const amount      = parseFloat(amountRaw);
+  const expense_date = document.getElementById('add-date').value || null;
+  const description  = document.getElementById('add-desc').value || null;
+  const note         = document.getElementById('add-note').value || null;
+
+  if (!category_id)            { toast('請選類別', 'error'); return; }
+  if (!Number.isFinite(amount) || amount <= 0) { toast('金額需 > 0', 'error'); return; }
+
+  const [y, m] = currentYearMonth.split('-').map(Number);
+  const body = {
+    employee_id: currentEmpId,
+    target_year: y, target_month: m,
+    category_id, amount, expense_date, description, note,
+  };
+
+  const btn = document.getElementById('add-save'); btn.disabled = true;
+  try {
+    const r = await postWithForceRetry('POST', '/api/salary-expense-entries', body);
+    if (!r) return;
+    toast(`✓ 已新增(reflect: ${r.reflect})`);
+    closeModal('add-modal');
+    await refreshAll();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── 調整 ──
+function openEdit(id){
+  const e = currentEntries.find(x => x.id === id);
+  if (!e) return;
+  document.getElementById('edit-id').value = e.id;
+  document.getElementById('edit-meta').textContent = `id: ${e.id}  ·  ${e.category_name_snapshot} ·  NT$${e.amount}`;
+  renderCategorySelect(document.getElementById('edit-cat'), e.category_id);
+  document.getElementById('edit-amount').value = e.amount;
+  document.getElementById('edit-desc').value = e.description || '';
+  document.getElementById('edit-note').value = e.note || '';
+  document.getElementById('edit-modal').classList.add('open');
+}
+
+async function submitEdit(){
+  const id = document.getElementById('edit-id').value;
+  const e = currentEntries.find(x => x.id === id);
+  if (!e) return;
+  const newCat = document.getElementById('edit-cat').value;
+  const newAmt = parseFloat(document.getElementById('edit-amount').value);
+  const newDesc = document.getElementById('edit-desc').value;
+  const newNote = document.getElementById('edit-note').value;
+
+  const body = {};
+  if (newCat && newCat !== e.category_id) body.category_id = newCat;
+  if (Number.isFinite(newAmt) && newAmt > 0 && newAmt !== Number(e.amount)) body.amount = newAmt;
+  if (newDesc !== (e.description || '')) body.description = newDesc || null;
+  if (newNote !== (e.note || '')) body.note = newNote || null;
+  if (Object.keys(body).length === 0) { toast('沒實際改動', 'error'); return; }
+
+  const btn = document.getElementById('edit-save'); btn.disabled = true;
+  try {
+    const r = await postWithForceRetry('PATCH', `/api/salary-expense-entries/${encodeURIComponent(id)}`, body);
+    if (!r) return;
+    toast(`✓ 已調整(reflect: ${r.reflect})`);
+    closeModal('edit-modal');
+    await refreshAll();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── 作廢 ──
+async function voidEntry(id){
+  const e = currentEntries.find(x => x.id === id);
+  if (!e) return;
+  if (!confirm(`確定作廢這筆明細?\n${e.category_name_snapshot} NT$${e.amount}\n作廢後無法復原。`)) return;
+  // DELETE 用 ?force= query
+  await postWithForceRetry('DELETE', `/api/salary-expense-entries/${encodeURIComponent(id)}`, null, /*useQueryForce=*/true);
+  await refreshAll();
+}
+
+// ── 共用:呼叫 mutation,接 reason 分流 force confirm ──
+// useQueryForce=true 表示 force 用 ?force=true(DELETE);false 用 body.force=true(POST/PATCH)
+async function postWithForceRetry(method, path, body, useQueryForce) {
+  const init = { method };
+  if (body) init.body = JSON.stringify(body);
+  let r = await apiRaw(path, init);
+  if (r.ok) return r.body;
+
+  const reason = r.body?.reason;
+  if (r.status === 409 && reason === 'NEEDS_FORCE') {
+    if (!window.Roles?.isExecutive?.(window.currentUser)) {
+      toast(r.body?.error || '需主管權限才能寫入已核准期間', 'error');
+      return null;
+    }
+    if (!confirm('此期間已核准結算,強制寫入會在薪資紀錄留下 [FORCE] 軌跡,確定?')) return null;
+    // 重送帶 force
+    let path2 = path;
+    const init2 = { method };
+    if (useQueryForce) {
+      const sep = path2.includes('?') ? '&' : '?';
+      path2 = path2 + sep + 'force=true';
+    } else {
+      init2.body = JSON.stringify({ ...(body || {}), force: true });
+    }
+    const r2 = await apiRaw(path2, init2);
+    if (r2.ok) return r2.body;
+    toast(r2.body?.error || '強制寫入失敗', 'error');
+    return null;
+  }
+
+  toast(r.body?.error || `${r.status} 操作失敗`, 'error');
+  return null;
+}
+
+// ── refreshAll:reload period badge + entries ──
+async function refreshAll() {
+  if (!currentEmpId || !currentYearMonth) return;
+  const [y, m] = currentYearMonth.split('-').map(Number);
+  await loadPeriodBadge(y, String(m).padStart(2,'0'));
+  await loadEntries(currentEmpId, y, m);
+}
+
+// ── 啟動 ──
+async function init(retries = 0) {
+  if (!window.api || !window.apiRaw || !window.currentUser) {
+    if (retries < 25) return setTimeout(() => init(retries + 1), 200);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  if (!allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  buildMonthOptions();
+  await Promise.all([loadEmpList(), loadCategories()]);
+  // 若 ?employee_id=&year=&month= 都齊 → 自動查詢
+  const fromQuery = parseFilterFromQuery(window.location.search);
+  if (fromQuery?.employee_id && fromQuery?.value) {
+    document.getElementById('f-emp').value = fromQuery.employee_id;
+    document.getElementById('f-month').value = fromQuery.value;
+    reload();
+  }
+}
+
+init();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

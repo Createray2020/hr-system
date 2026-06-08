@@ -86,6 +86,7 @@ export function getNavGroups(gates = {}) {
         { page:'salary-period',             icon:'ti-calendar-dollar',  label:'薪資期間',     href:'/salary-period.html',             gate: isHRish },
         { page:'insurance',                 icon:'ti-shield-check',     label:'勞健保',       href:'/insurance.html',                 gate: isHRish },
         { page:'expense-categories-admin',  icon:'ti-tag',              label:'請款類別管理', href:'/expense-categories-admin.html',  gate: isHRish },
+        { page:'salary-expense-entries-admin', icon:'ti-receipt-2',     label:'併薪明細管理', href:'/salary-expense-entries-admin.html', gate: isHRish },
       ],
     },
   ];
