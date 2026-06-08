@@ -260,6 +260,15 @@
   </div>
 </div>
 
+<!-- Phase 4b: 隔月薪資已結算 → defer / force 選擇 -->
+<div class="modal-bg" id="settlement-modal">
+  <div class="modal">
+    <div class="modal-title">隔月薪資已結算</div>
+    <div id="settlement-body" style="padding:8px 0;line-height:1.7;"></div>
+    <div class="modal-actions" id="settlement-actions"></div>
+  </div>
+</div>
+
 <!-- Modal: 申請詳情 -->
 <div class="modal-bg" id="detail-modal">
   <div class="modal modal-lg">
@@ -1103,18 +1112,77 @@ function renderDetail(data) {
   document.getElementById('detail-actions').innerHTML = actions;
 }
 
-async function approveStep(requestId, stepNumber) {
-  const note = document.getElementById('approve-note')?.value || '';
+// Phase 4b:把實際 POST 抽成 _doApprove,讓 approveStep 變 router(expense_reimbursement
+// 最後一步先預檢隔月薪資期間 status;已結算跳 settlement modal,帶 settlement_mode 送出)。
+async function _doApprove(requestId, stepNumber, note, settlementMode) {
   try {
-    await api('/api/approvals', { method:'POST', body: JSON.stringify({
+    const body = {
       action:'approve', request_id:requestId, step_number:parseInt(stepNumber),
       approver_id: window.currentUser?.id, note,
-    })});
+    };
+    if (settlementMode) body.settlement_mode = settlementMode;
+    await api('/api/approvals', { method:'POST', body: JSON.stringify(body) });
     closeModal('detail-modal');
     await Promise.all([loadMyRequests(), loadPendingApprovals()]);
     if (currentTab === 'all') loadAllRequests();
     toast('✅ 已審批通過', 'success');
   } catch(e) { toast('操作失敗：'+e.message, 'error'); }
+}
+
+let _pendingApprove = null;
+
+function openSettlementModal({ requestId, stepNumber, note, ym, status }) {
+  _pendingApprove = { requestId, stepNumber, note };
+  const isExec = !!window.Roles?.isExecutive?.(window.currentUser);
+  const fd = (currentDetailData && currentDetailData.form_data) || {};
+  const cat = fd.expense_category || '請款';
+  const amt = Number(fd.amount) || 0;
+  const statusZh = { approved:'已審批', paid:'已發薪', locked:'已鎖定' }[status] || status;
+  let bodyHtml =
+    `隔月（${ym}）薪資期間目前為「${statusZh}」。<br>` +
+    `本筆「${cat}」NT$${amt.toLocaleString()} 要如何處理？`;
+  const acts = [];
+  acts.push(`<button class="btn btn-primary" onclick="confirmSettlement('defer')">遞延到下一個未結算月份</button>`);
+  if (isExec && status === 'approved') {
+    acts.push(`<button class="btn btn-reject" onclick="confirmSettlement('force')">強制併入本期（${ym}）[FORCE]</button>`);
+  } else if (status !== 'approved') {
+    bodyHtml += `<br><small style="color:#888">本期已發薪/鎖定,僅能遞延。</small>`;
+  }
+  acts.push(`<button class="btn btn-ghost" onclick="closeModal('settlement-modal')">取消</button>`);
+  document.getElementById('settlement-body').innerHTML = bodyHtml;
+  document.getElementById('settlement-actions').innerHTML = acts.join('');
+  document.getElementById('settlement-modal').classList.add('open');
+}
+
+function confirmSettlement(mode) {
+  const c = _pendingApprove; _pendingApprove = null;
+  closeModal('settlement-modal');
+  if (c) _doApprove(c.requestId, c.stepNumber, c.note, mode);
+}
+
+async function approveStep(requestId, stepNumber) {
+  const note = document.getElementById('approve-note')?.value || '';
+  const d = currentDetailData || {};
+  const isLast = parseInt(stepNumber) === Number(d.total_steps);
+  if (d.request_type === 'expense_reimbursement' && isLast) {
+    // 算隔月 period id(Taipei、12 月跨年)
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' });
+    const [yy, mm] = today.split('-').map(Number);
+    const ny = mm === 12 ? yy + 1 : yy;
+    const nm = mm === 12 ? 1 : mm + 1;
+    const pid = `PP_${ny}_${String(nm).padStart(2,'0')}`;
+    const ym  = `${ny}-${String(nm).padStart(2,'0')}`;
+    try {
+      const p = await api(`/api/salary/periods/${pid}`);
+      if (['approved','paid','locked'].includes(p.status)) {
+        openSettlementModal({ requestId, stepNumber, note, ym, status: p.status });
+        return;
+      }
+    } catch(e) {
+      // 404(期間未建)/ 403(權限不足)/ 網路 → fallback 直接核准,後端 defer
+    }
+  }
+  _doApprove(requestId, stepNumber, note);
 }
 
 async function rejectStep(requestId, stepNumber) {
