@@ -23,6 +23,7 @@ import { addDeptNameNested, addDeptNameSingle } from '../lib/dept-name-mapper.js
 // B13:GET 5 個 path 加 dept-scope / 本人 / HR-only 守門
 import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from '../lib/auth-scope.js';
 import { isBackofficeRole, canDeleteRecord } from '../lib/roles.js';
+import { applyExpenseReimbursement } from '../lib/salary/expense-cascade.js';
 
 // ─────────────────────────────────────────────────────────────────
 // 離職檢核表 MVP 預設 46 項(對應 migrations/2026_05_26_resignation_checklist.sql)
@@ -423,6 +424,11 @@ export default async function handler(req, res) {
         // 不 cascade 的話 HR 還要手動按「離職」button、容易漏(EMP_01251101 incident 根因)
         if (request.request_type === 'resignation') {
           await applyResignation(request, caller);
+        }
+        // Phase 4a:請款核准 → cascade 寫 salary_expense_entries(target=隔月)+ 兩段式結算
+        // best-effort,失敗只 audit、不擋 approval
+        if (request.request_type === 'expense_reimbursement') {
+          await applyExpenseReimbursement(request, caller, req.body?.settlement_mode);
         }
 
         // 通知申請人:審批完成
