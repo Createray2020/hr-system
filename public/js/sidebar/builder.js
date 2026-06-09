@@ -73,6 +73,7 @@ export function getNavGroups(gates = {}) {
       headerIcon: 'ti-clipboard-check',
       items: [
         { page:'leave-admin',              icon:'ti-checkbox',     label:'請假審批', href:'/leave-admin.html',              gate: isMgrOrHR },
+        { page:'leave-overview-admin',     icon:'ti-calendar-stats', label:'請假總覽', href:'/leave-overview-admin.html',     gate: isHRish },
         { page:'overtime-review',          icon:'ti-user-check',   label:'加班審核', href:'/overtime-review.html',          gate: isMgrOrCEO },
         { page:'annual-leave-admin',       icon:'ti-umbrella',     label:'特休管理', href:'/annual-leave-admin.html',       gate: isHRish },
         { page:'comp-time-admin',          icon:'ti-sun',          label:'補休管理', href:'/comp-time-admin.html',          gate: isHRish },

@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>請假總覽 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .warning-banner{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#FBBF24;display:flex;gap:8px;align-items:flex-start}
+  .warning-banner i{font-style:normal;font-size:14px}
+  .summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+  .summary-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px}
+  .summary-card .label{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.4px}
+  .summary-card .value{font-size:20px;font-weight:600;font-family:'DM Mono',monospace;margin-top:2px}
+  .summary-card .sub{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;margin-top:2px}
+  .filter-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace;display:inline-block;white-space:nowrap}
+  .b-fullpaid{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-halfpaid{background:rgba(168,85,247,.15);color:#C084FC}
+  .b-unpaid{background:rgba(248,113,113,.12);color:#F87171}
+  .b-pending{background:rgba(251,191,36,.18);color:#FBBF24}
+  .b-status-approved{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-status-archived{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .b-status-pending_mgr,.b-status-pending_ceo,.b-status-pending{background:rgba(251,191,36,.18);color:#FBBF24}
+  .b-status-rejected,.b-status-cancelled,.b-status-terminated{background:rgba(120,120,120,.15);color:var(--text-dim)}
+  .num{font-family:'DM Mono',monospace;font-size:12px}
+  .emp-card{margin-bottom:18px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .emp-header{background:rgba(91,141,239,.06);padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+  .emp-name{font-weight:600;font-size:14px}
+  .emp-meta{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace}
+  .emp-totals{display:flex;gap:8px;flex-wrap:wrap}
+  .leave-row{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.03);display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
+  .leave-row:last-child{border-bottom:none}
+  .leave-row.r-pending-pay{background:rgba(251,191,36,.04)}
+  .leave-info{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .leave-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .leave-dates{font-size:12px;color:var(--text-dim);font-family:'DM Mono',monospace}
+  .leave-qty{font-family:'DM Mono',monospace;font-size:12px}
+  .leave-qty .sep{color:var(--text-dim);margin:0 4px}
+  .leave-reason{font-size:11px;color:var(--text-dim);max-width:100%;word-break:break-word}
+  .leave-actions{display:flex;gap:6px}
+  .emp-link{color:#7FBBFF;text-decoration:none}
+  .emp-link:hover{text-decoration:underline}
+  .form-row-inline{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  th{white-space:nowrap}
+</style>
+</head>
+<body data-page="leave-overview-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">請假總覽</div>
+        <div class="page-sub">指定年月顯示全體員工該月所有請假狀況、可修正並留稽核軌跡</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin / ceo / chairman)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="warning-banner">
+        <i>⚠</i>
+        <div>
+          <strong>此頁可修正請假紀錄並留稽核軌跡(寫入 <code>leave_request_change_logs</code>);
+          不會變更審核狀態、也不會自動重算薪資。</strong>
+          扣薪實際套用以後續計算為準。pay_rate=null 的假別標「待設定」,請至「假別設定」補完。
+        </div>
+      </div>
+
+      <div class="filter-row">
+        <input type="month" class="form-input" id="f-month" onchange="loadOverview()" style="width:160px">
+        <span style="flex:1"></span>
+        <select class="form-select" id="f-dept" onchange="render()" style="width:180px">
+          <option value="">— 全部部門 —</option>
+        </select>
+        <input type="text" class="form-input" id="f-search" placeholder="搜尋員工 / 編號" oninput="render()" style="width:200px">
+        <select class="form-select" id="f-type" onchange="render()" style="width:160px">
+          <option value="">— 全部假別 —</option>
+        </select>
+        <select class="form-select" id="f-status" onchange="render()" style="width:140px">
+          <option value="active">未撤回/未退回</option>
+          <option value="all">全部狀態</option>
+          <option value="pending_mgr">待主管審</option>
+          <option value="pending_ceo">待 CEO 審</option>
+          <option value="approved">已核准</option>
+          <option value="archived">已歸檔</option>
+          <option value="rejected">已退回</option>
+          <option value="cancelled">已撤回</option>
+          <option value="terminated">已終止</option>
+        </select>
+      </div>
+
+      <div id="summary" class="summary-row" style="display:none"></div>
+
+      <div id="employees-container">
+        <div class="empty-state" style="padding:24px"><div class="icon">⏳</div><div>載入中…</div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-bg" id="edit-modal">
+  <div class="modal" style="max-width:560px;width:95vw">
+    <div class="modal-title">修正請假紀錄</div>
+    <input type="hidden" id="m-id">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" id="m-meta"></div>
+
+    <div class="form-row">
+      <label class="form-label">假別 leave_type <span style="color:#F87171">*</span></label>
+      <select class="form-select" id="m-type"></select>
+    </div>
+
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div>
+        <label class="form-label">days(天數)</label>
+        <input type="number" class="form-input num" id="m-days" step="0.01" min="0">
+      </div>
+      <div>
+        <label class="form-label">hours(時數)</label>
+        <input type="number" class="form-input num" id="m-hours" step="0.01" min="0">
+      </div>
+      <div>
+        <label class="form-label">finalized_hours</label>
+        <input type="number" class="form-input num" id="m-fhours" step="0.01" min="0">
+      </div>
+    </div>
+    <div id="m-balance-warn" style="display:none;font-size:12px;color:#F87171;background:rgba(248,113,113,.06);border:1px solid rgba(248,113,113,.25);border-radius:6px;padding:8px 10px;margin-top:6px">
+      ⚠ 此假別有餘額帳本(特休/補休),數量欄位已鎖定。數量更正請至「特休管理 / 補休管理」頁面,避免帳本 drift。
+    </div>
+    <div id="m-no-balance-hint" class="hint" style="font-size:11px;color:var(--text-dim)">特休扣餘額以 days 為主、補休以 hours 為主;finalized_hours 為決算時數 audit。三者請手動保持邏輯一致。</div>
+
+    <div class="form-row" style="margin-top:10px">
+      <label class="form-label">修改理由 admin_audit_note <span style="color:#F87171">*</span></label>
+      <textarea class="form-input" id="m-reason" rows="2" placeholder="必填、例:申請時 hours 填錯應為 4 不是 8"></textarea>
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" id="m-save" onclick="saveLeave()">儲存修正</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function closeModal(){ document.getElementById('edit-modal').classList.remove('open'); }
+
+// ── State ──
+let cur = { year: null, month: null, employees: [], summary: null, leave_types: [] };
+let allLeaves = [];   // flatten for filtering
+
+// 預設值:當月
+function initMonthInput() {
+  const sel = document.getElementById('f-month');
+  const d = new Date();
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0');
+  sel.value = `${y}-${m}`;
+}
+
+const PAY_CAT_LABEL = {
+  full_paid: '全薪',
+  half_paid: '半薪',
+  unpaid:    '不支薪',
+  pending:   '待設定',
+};
+const PAY_CAT_CLS = {
+  full_paid: 'b-fullpaid',
+  half_paid: 'b-halfpaid',
+  unpaid:    'b-unpaid',
+  pending:   'b-pending',
+};
+function payBadge(cat, rate) {
+  const label = PAY_CAT_LABEL[cat] || cat;
+  const rateStr = rate == null ? '—' : Number(rate).toFixed(2);
+  return `<span class="badge ${PAY_CAT_CLS[cat] || 'b-pending'}">${label}(${rateStr})</span>`;
+}
+function statusBadge(s) {
+  return `<span class="badge b-status-${escHtml(s)}">${escHtml(s)}</span>`;
+}
+
+async function loadOverview(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadOverview(retries + 1), 300);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+
+  const mv = document.getElementById('f-month').value;
+  if (!mv) return;
+  const [y, m] = mv.split('-').map(Number);
+  if (!y || !m) return;
+
+  document.getElementById('employees-container').innerHTML =
+    `<div class="empty-state" style="padding:24px"><div class="icon">⏳</div><div>載入中…</div></div>`;
+  document.getElementById('summary').style.display = 'none';
+
+  try {
+    const r = await api(`/api/leave-overview?year=${y}&month=${m}`);
+    cur = { year: r.year, month: r.month, employees: r.employees || [], summary: r.summary, leave_types: r.leave_types || [] };
+    // flatten leaves for filter convenience
+    allLeaves = [];
+    for (const emp of cur.employees) for (const l of emp.leaves) allLeaves.push({ ...l, _emp: emp });
+    renderSummary();
+    buildFilters();
+    render();
+  } catch (e) {
+    document.getElementById('employees-container').innerHTML =
+      `<div class="empty-state" style="padding:24px;color:#F87171">載入失敗:${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderSummary() {
+  const s = cur.summary; if (!s) return;
+  const box = document.getElementById('summary'); box.style.display = '';
+  const c = s.by_category;
+  box.innerHTML = `
+    <div class="summary-card"><div class="label">請假人數</div><div class="value">${s.employees_count}</div></div>
+    <div class="summary-card"><div class="label">總筆數</div><div class="value">${s.total_leaves}</div></div>
+    <div class="summary-card"><div class="label">總天數</div><div class="value">${s.total_days.toFixed(2)}</div><div class="sub">${s.total_hours.toFixed(2)} h</div></div>
+    <div class="summary-card"><div class="label">全薪</div><div class="value">${c.full_paid.days.toFixed(2)} d</div><div class="sub">${c.full_paid.count} 筆 / ${c.full_paid.hours.toFixed(2)} h</div></div>
+    <div class="summary-card"><div class="label">半薪</div><div class="value">${c.half_paid.days.toFixed(2)} d</div><div class="sub">${c.half_paid.count} 筆 / ${c.half_paid.hours.toFixed(2)} h</div></div>
+    <div class="summary-card"><div class="label">不支薪</div><div class="value">${c.unpaid.days.toFixed(2)} d</div><div class="sub">${c.unpaid.count} 筆 / ${c.unpaid.hours.toFixed(2)} h</div></div>
+    <div class="summary-card"><div class="label">⚠ 待設定</div><div class="value">${c.pending.days.toFixed(2)} d</div><div class="sub">${c.pending.count} 筆</div></div>
+  `;
+}
+
+function buildFilters() {
+  // 部門
+  const sel = document.getElementById('f-dept');
+  const depts = new Map();
+  for (const e of cur.employees) if (e.dept_id && e.dept_name && !depts.has(e.dept_id)) depts.set(e.dept_id, e.dept_name);
+  const sorted = [...depts.entries()].sort((a,b) => a[1].localeCompare(b[1], 'zh-Hant'));
+  sel.innerHTML = '<option value="">— 全部部門 —</option>' +
+    sorted.map(([id, name]) => `<option value="${escHtml(id)}">${escHtml(name)}</option>`).join('');
+  // 假別
+  const tsel = document.getElementById('f-type');
+  const types = (cur.leave_types || []).map(t => `<option value="${escHtml(t.code)}">${escHtml(t.name_zh)} (${escHtml(t.code)})</option>`).join('');
+  tsel.innerHTML = '<option value="">— 全部假別 —</option>' + types;
+}
+
+function filterLeaves() {
+  const deptId = document.getElementById('f-dept').value;
+  const search = document.getElementById('f-search').value.trim().toLowerCase();
+  const ltype  = document.getElementById('f-type').value;
+  const stat   = document.getElementById('f-status').value;
+
+  return allLeaves.filter(l => {
+    if (deptId && l._emp.dept_id !== deptId) return false;
+    if (ltype && l.leave_type !== ltype) return false;
+    if (search) {
+      const hay = `${l._emp.name || ''} ${l._emp.employee_id || ''}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    if (stat === 'all') return true;
+    if (stat === 'active') {
+      // 預設:排除 rejected / cancelled / terminated
+      return !['rejected','cancelled','terminated'].includes(l.status);
+    }
+    return l.status === stat;
+  });
+}
+
+function render() {
+  const filtered = filterLeaves();
+  const container = document.getElementById('employees-container');
+  if (!filtered.length) {
+    container.innerHTML = `<div class="empty-state" style="padding:24px"><div class="icon">🗒️</div><div>沒有符合篩選的請假</div></div>`;
+    return;
+  }
+  // 重新依員工分組
+  const groups = new Map();
+  for (const l of filtered) {
+    const eid = l._emp.employee_id;
+    if (!groups.has(eid)) groups.set(eid, { emp: l._emp, leaves: [] });
+    groups.get(eid).leaves.push(l);
+  }
+  // 重算 totals(只算 filtered)— UX:讓 small subtotal 反映目前可見的列
+  for (const g of groups.values()) {
+    g.totals = {
+      full_paid: { days:0, hours:0, count:0 },
+      half_paid: { days:0, hours:0, count:0 },
+      unpaid:    { days:0, hours:0, count:0 },
+      pending:   { days:0, hours:0, count:0 },
+      total:     { days:0, hours:0, count:0 },
+    };
+    for (const l of g.leaves) {
+      const c = l.pay_category;
+      const d = Number(l.days) || 0, h = Number(l.hours) || 0;
+      g.totals[c].days += d; g.totals[c].hours += h; g.totals[c].count++;
+      g.totals.total.days += d; g.totals.total.hours += h; g.totals.total.count++;
+    }
+  }
+  // render
+  const html = [...groups.values()].map(({ emp, leaves, totals }) => {
+    const totalBadges = ['full_paid','half_paid','unpaid','pending'].map(c => {
+      const t = totals[c];
+      if (t.count === 0) return '';
+      return `<span class="badge ${PAY_CAT_CLS[c]}">${PAY_CAT_LABEL[c]} ${t.days.toFixed(2)}d / ${t.hours.toFixed(2)}h</span>`;
+    }).filter(Boolean).join(' ');
+    return `
+      <div class="emp-card">
+        <div class="emp-header">
+          <div>
+            <div class="emp-name"><a class="emp-link" href="/employee-profile.html?id=${encodeURIComponent(emp.employee_id)}">${escHtml(emp.name || emp.employee_id)}</a></div>
+            <div class="emp-meta">${escHtml(emp.employee_id)} · ${escHtml(emp.dept_name || '—')} · ${escHtml(emp.employment_type || 'full_time')}</div>
+          </div>
+          <div class="emp-totals">${totalBadges}</div>
+        </div>
+        ${leaves.map(l => leaveRow(l)).join('')}
+      </div>`;
+  }).join('');
+  container.innerHTML = html;
+}
+
+function leaveRow(l) {
+  const rangeStr = l.start_date === l.end_date
+    ? `${l.start_date}`
+    : `${l.start_date} ~ ${l.end_date}`;
+  const qty = `${(Number(l.days)||0).toFixed(2)} d <span class="sep">/</span> ${(Number(l.hours)||0).toFixed(2)} h${l.finalized_hours != null ? ` <span class="sep">(final ${Number(l.finalized_hours).toFixed(2)})</span>` : ''}`;
+  const rowCls = l.pay_category === 'pending' ? 'r-pending-pay' : '';
+  return `
+    <div class="leave-row ${rowCls}">
+      <div class="leave-info">
+        <div class="leave-meta">
+          <strong>${escHtml(l.leave_type_name)}</strong>
+          ${payBadge(l.pay_category, l.pay_rate)}
+          ${statusBadge(l.status)}
+        </div>
+        <div class="leave-dates">${escHtml(rangeStr)}  ·  <span class="leave-qty">${qty}</span></div>
+        ${l.reason ? `<div class="leave-reason">${escHtml(l.reason)}</div>` : ''}
+        ${l.admin_audit_note ? `<div class="leave-reason" style="color:#FBBF24">📝 ${escHtml(String(l.admin_audit_note).slice(0,140))}</div>` : ''}
+      </div>
+      <div class="leave-actions">
+        <button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(l.leave_request_id)}')">修正</button>
+      </div>
+    </div>`;
+}
+
+function openEdit(id) {
+  const l = allLeaves.find(x => x.leave_request_id === id);
+  if (!l) return;
+  document.getElementById('m-id').value = id;
+  document.getElementById('m-meta').textContent = `${l._emp.name || ''} (${l._emp.employee_id}) · ${l.start_date}~${l.end_date} · 目前狀態 ${l.status}`;
+  const tsel = document.getElementById('m-type');
+  tsel.innerHTML = (cur.leave_types || []).map(t => `<option value="${escHtml(t.code)}"${t.code === l.leave_type ? ' selected' : ''}>${escHtml(t.name_zh)} (${escHtml(t.code)})</option>`).join('');
+  document.getElementById('m-days').value   = l.days   == null ? '' : l.days;
+  document.getElementById('m-hours').value  = l.hours  == null ? '' : l.hours;
+  document.getElementById('m-fhours').value = l.finalized_hours == null ? '' : l.finalized_hours;
+  document.getElementById('m-reason').value = '';
+
+  // Phase 2 #3 補強護欄:has_balance 假別鎖定數量欄位、顯示提示
+  const blocked = !!l.has_balance;
+  for (const fid of ['m-days', 'm-hours', 'm-fhours']) {
+    document.getElementById(fid).disabled = blocked;
+  }
+  document.getElementById('m-balance-warn').style.display    = blocked ? '' : 'none';
+  document.getElementById('m-no-balance-hint').style.display = blocked ? 'none' : '';
+
+  document.getElementById('edit-modal').classList.add('open');
+}
+
+async function saveLeave() {
+  const id = document.getElementById('m-id').value;
+  const reason = document.getElementById('m-reason').value.trim();
+  if (!reason) { toast('修改理由必填', 'error'); return; }
+
+  const daysInp   = document.getElementById('m-days');
+  const hoursInp  = document.getElementById('m-hours');
+  const fhoursInp = document.getElementById('m-fhours');
+  const blocked = daysInp.disabled;   // 三個欄位同步 disabled
+
+  const payload = {
+    leave_type:        document.getElementById('m-type').value,
+    admin_audit_note:  reason,
+  };
+  // 護欄假別:不送量化欄位,前後端雙重防呆
+  if (!blocked) {
+    const daysRaw   = daysInp.value.trim();
+    const hoursRaw  = hoursInp.value.trim();
+    const fhoursRaw = fhoursInp.value.trim();
+    payload.days            = daysRaw   === '' ? null : Number(daysRaw);
+    payload.hours           = hoursRaw  === '' ? null : Number(hoursRaw);
+    payload.finalized_hours = fhoursRaw === '' ? null : Number(fhoursRaw);
+  }
+
+  const btn = document.getElementById('m-save'); btn.disabled = true;
+  try {
+    const r = await api(`/api/leave-overview/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body:   JSON.stringify(payload),
+    });
+    const n = r.change_logs_inserted ?? 0;
+    if (n === 0) toast('無實際變更');
+    else         toast(`✓ 已修正(${n} 欄變動已記錄)`);
+    closeModal();
+    loadOverview();
+  } catch (e) {
+    toast('儲存失敗:' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+initMonthInput();
+loadOverview();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

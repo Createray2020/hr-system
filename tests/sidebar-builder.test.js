@@ -43,9 +43,9 @@ describe('getNavGroups - 結構', () => {
       expect(g.headerIcon).toMatch(/^ti-/);
     });
   });
-  it('group items 數對:6/6/6/6/7/6', () => {
+  it('group items 數對:6/6/6/6/8/6', () => {
     const groups = getNavGroups(gatesAllowAll);
-    expect(groups.map(g => g.items.length)).toEqual([6, 6, 6, 6, 7, 6]);
+    expect(groups.map(g => g.items.length)).toEqual([6, 6, 6, 6, 8, 6]);
   });
   it('每個 item 有 ti- 前綴 icon + href + label + page', () => {
     const groups = getNavGroups(gatesAllowAll);
@@ -65,12 +65,12 @@ describe('getNavGroups - 結構', () => {
 });
 
 describe('filterVisibleGroups', () => {
-  it('HR(allow all)→ 全 6 group 可見、總計 37 個 item', () => {
+  it('HR(allow all)→ 全 6 group 可見、總計 38 個 item', () => {
     const groups = getNavGroups(gatesAllowAll);
     const visible = filterVisibleGroups(groups, {});
     expect(visible).toHaveLength(6);
     const total = visible.reduce((s, g) => s + g.items.length, 0);
-    expect(total).toBe(37);
+    expect(total).toBe(38);
   });
 
   it('併薪明細管理 nav 出現在 isHRish 視角、不出現在員工視角', () => {
@@ -88,6 +88,16 @@ describe('filterVisibleGroups', () => {
     const leaveGroup = hr.find(g => g.title === '假勤管理');
     expect(leaveGroup).toBeDefined();
     expect(leaveGroup.items.map(it => it.page)).toContain('leave-types-admin');
+
+    const emp = filterVisibleGroups(getNavGroups(gatesEmployeeOnly), {});
+    expect(emp.find(g => g.title === '假勤管理')).toBeUndefined();
+  });
+
+  it('請假總覽 nav 出現在 isHRish 視角的「假勤管理」、不出現在員工視角', () => {
+    const hr = filterVisibleGroups(getNavGroups(gatesAllowAll), {});
+    const leaveGroup = hr.find(g => g.title === '假勤管理');
+    expect(leaveGroup).toBeDefined();
+    expect(leaveGroup.items.map(it => it.page)).toContain('leave-overview-admin');
 
     const emp = filterVisibleGroups(getNavGroups(gatesEmployeeOnly), {});
     expect(emp.find(g => g.title === '假勤管理')).toBeUndefined();
