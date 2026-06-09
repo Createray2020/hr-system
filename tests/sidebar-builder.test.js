@@ -43,9 +43,9 @@ describe('getNavGroups - 結構', () => {
       expect(g.headerIcon).toMatch(/^ti-/);
     });
   });
-  it('group items 數對:6/6/5/6/7/6', () => {
+  it('group items 數對:6/6/6/6/7/6', () => {
     const groups = getNavGroups(gatesAllowAll);
-    expect(groups.map(g => g.items.length)).toEqual([6, 6, 5, 6, 7, 6]);
+    expect(groups.map(g => g.items.length)).toEqual([6, 6, 6, 6, 7, 6]);
   });
   it('每個 item 有 ti- 前綴 icon + href + label + page', () => {
     const groups = getNavGroups(gatesAllowAll);
@@ -65,12 +65,12 @@ describe('getNavGroups - 結構', () => {
 });
 
 describe('filterVisibleGroups', () => {
-  it('HR(allow all)→ 全 6 group 可見、總計 36 個 item', () => {
+  it('HR(allow all)→ 全 6 group 可見、總計 37 個 item', () => {
     const groups = getNavGroups(gatesAllowAll);
     const visible = filterVisibleGroups(groups, {});
     expect(visible).toHaveLength(6);
     const total = visible.reduce((s, g) => s + g.items.length, 0);
-    expect(total).toBe(36);
+    expect(total).toBe(37);
   });
 
   it('併薪明細管理 nav 出現在 isHRish 視角、不出現在員工視角', () => {
@@ -108,6 +108,20 @@ describe('filterVisibleGroups', () => {
     const empGroup = hr.find(g => g.title === '員工管理');
     expect(empGroup).toBeDefined();
     expect(empGroup.items.map(it => it.page)).toContain('salary-grades-admin');
+
+    const emp = filterVisibleGroups(getNavGroups(gatesEmployeeOnly), {});
+    expect(emp.find(g => g.title === '員工管理')).toBeUndefined();
+  });
+
+  it('職等稽核 nav 出現在 isHRish 視角的「員工管理」、緊接「職等級距」之後', () => {
+    const hr = filterVisibleGroups(getNavGroups(gatesAllowAll), {});
+    const empGroup = hr.find(g => g.title === '員工管理');
+    expect(empGroup).toBeDefined();
+    const pages = empGroup.items.map(it => it.page);
+    const gradesIdx = pages.indexOf('salary-grades-admin');
+    const auditIdx  = pages.indexOf('salary-grade-audit');
+    expect(gradesIdx).toBeGreaterThanOrEqual(0);
+    expect(auditIdx).toBe(gradesIdx + 1);
 
     const emp = filterVisibleGroups(getNavGroups(gatesEmployeeOnly), {});
     expect(emp.find(g => g.title === '員工管理')).toBeUndefined();

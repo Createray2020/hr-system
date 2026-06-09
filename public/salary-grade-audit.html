@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>職等稽核 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .warning-banner{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#FBBF24;display:flex;gap:8px;align-items:flex-start}
+  .warning-banner i{font-style:normal;font-size:14px}
+  .summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .summary-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px}
+  .summary-card .label{font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;letter-spacing:.4px}
+  .summary-card .value{font-size:20px;font-weight:600;font-family:'DM Mono',monospace;margin-top:2px}
+  .summary-card.warn .value{color:#FBBF24}
+  .summary-card.bad  .value{color:#F87171}
+  .filter-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace;display:inline-block;white-space:nowrap}
+  .b-fulltime{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .b-parttime{background:rgba(168,85,247,.15);color:#C084FC}
+  .b-manager{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-unassigned{background:rgba(251,191,36,.18);color:#FBBF24}
+  .b-no-grade{background:rgba(248,113,113,.12);color:#F87171}
+  .b-conflict{background:rgba(248,113,113,.12);color:#F87171}
+  .b-extra{background:rgba(91,141,239,.12);color:#7FBBFF}
+  .num{font-family:'DM Mono',monospace;font-size:12px}
+  .cell-ok{color:var(--text-dim)}
+  .cell-mismatch{background:rgba(248,113,113,.10);color:#F87171;font-weight:600;border-radius:4px;padding:2px 4px;display:inline-block}
+  .cell-mismatch .arrow{color:#FBBF24;margin:0 4px}
+  .cell-mismatch .expected{color:#7FBBFF}
+  .row-mismatch{background:rgba(248,113,113,.04)}
+  .row-flag{background:rgba(251,191,36,.04)}
+  .emp-link{color:#7FBBFF;text-decoration:none}
+  .emp-link:hover{text-decoration:underline}
+  .small{font-size:11px;color:var(--text-dim)}
+  th{white-space:nowrap}
+</style>
+</head>
+<body data-page="salary-grade-audit">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">職等稽核</div>
+        <div class="page-sub">對照在職同仁實發 vs 職等級距應發,標示不一致欄位</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin / ceo / chairman)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="warning-banner">
+        <i>⚠</i>
+        <div>
+          <strong>此頁為唯讀稽核,標示員工實發與職等應發的差異;修改請至員工資料頁,本頁不會變更任何資料。</strong>
+          extra_allowance(額外加給、個別例外)以藍標標示、永遠不算差異。
+        </div>
+      </div>
+
+      <div id="summary" class="summary-row" style="display:none"></div>
+
+      <div class="filter-row">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px">
+          <input type="radio" name="filter-view" value="all" checked onchange="render()">
+          <span>全部</span>
+        </label>
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px">
+          <input type="radio" name="filter-view" value="mismatch" onchange="render()">
+          <span>僅顯示有差異 / 有 flag</span>
+        </label>
+        <span style="margin-left:auto"></span>
+        <select class="form-select" id="f-dept" onchange="render()" style="width:200px">
+          <option value="">— 全部部門 —</option>
+        </select>
+      </div>
+
+      <div class="table-wrap" style="overflow-x:auto">
+        <table id="audit-table" style="display:none">
+          <thead><tr>
+            <th>員工</th>
+            <th>部門</th>
+            <th>職稱</th>
+            <th style="white-space:nowrap">職等級距</th>
+            <th>型態</th>
+            <th style="text-align:right">本薪</th>
+            <th style="text-align:right">全勤</th>
+            <th style="text-align:right">職等加給</th>
+            <th style="text-align:right">主管加給</th>
+            <th style="text-align:right">額外加給</th>
+            <th style="text-align:right">兼職時薪</th>
+            <th>狀態</th>
+          </tr></thead>
+          <tbody id="audit-tbody"></tbody>
+        </table>
+        <div id="audit-empty" class="empty-state" style="display:none">
+          <div class="icon">🔎</div><div>沒有符合篩選的列</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// 一→二→三 中文職等排序
+const GRADE_ORDER = { '一等': 1, '二等': 2, '三等': 3 };
+
+let allRows = [], summary = null;
+
+function fmtMoney(n) {
+  if (n == null) return '<span class="num cell-ok">—</span>';
+  const num = Number(n);
+  return `<span class="num">${num.toLocaleString('zh-TW')}</span>`;
+}
+function mismatchCell(actual, expected) {
+  return `<span class="cell-mismatch">${escHtml(Number(actual ?? 0).toLocaleString('zh-TW'))}<span class="arrow">→</span><span class="expected">${escHtml(Number(expected ?? 0).toLocaleString('zh-TW'))}</span></span>`;
+}
+function typeBadge(t) {
+  return t === 'part_time'
+    ? '<span class="badge b-parttime">兼職</span>'
+    : '<span class="badge b-fulltime">正職</span>';
+}
+function flagBadges(flags) {
+  if (!flags || !flags.length) return '';
+  return flags.map(f => {
+    const map = {
+      unassigned:             ['b-unassigned', '⚠ 未指派職等'],
+      no_grade_match:         ['b-no-grade',   '⚠ 無對應級距'],
+      part_time:              ['b-parttime',   '兼職'],
+      manager_grade_conflict: ['b-conflict',   '⚠ 主管級距衝突'],
+    };
+    const [cls, label] = map[f] || ['b-unassigned', f];
+    return `<span class="badge ${cls}" style="margin:1px 2px">${label}</span>`;
+  }).join('');
+}
+
+async function loadAudit(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadAudit(retries + 1), 300);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  try {
+    const r = await api('/api/salary-grade-audit');
+    allRows = r.rows || [];
+    summary = r.summary || null;
+    renderSummary();
+    buildDeptFilter();
+    render();
+  } catch (e) {
+    document.getElementById('audit-tbody').innerHTML = '';
+    document.getElementById('audit-empty').style.display = '';
+    document.getElementById('audit-empty').innerHTML = `<div style="color:#F87171;padding:20px">載入失敗:${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderSummary() {
+  if (!summary) return;
+  const s = summary;
+  document.getElementById('summary').style.display = '';
+  document.getElementById('summary').innerHTML = `
+    <div class="summary-card"><div class="label">在職總數</div><div class="value">${s.total}</div></div>
+    <div class="summary-card ${s.with_mismatch ? 'bad' : ''}"><div class="label">有差異</div><div class="value">${s.with_mismatch}</div></div>
+    <div class="summary-card ${s.unassigned ? 'warn' : ''}"><div class="label">未指派職等</div><div class="value">${s.unassigned}</div></div>
+    <div class="summary-card ${s.no_grade_match ? 'bad' : ''}"><div class="label">無對應級距</div><div class="value">${s.no_grade_match}</div></div>
+    <div class="summary-card"><div class="label">兼職人數</div><div class="value">${s.part_time}</div></div>
+    <div class="summary-card ${s.manager_grade_conflict ? 'bad' : ''}"><div class="label">主管級距衝突</div><div class="value">${s.manager_grade_conflict}</div></div>
+  `;
+}
+
+function buildDeptFilter() {
+  const sel = document.getElementById('f-dept');
+  const depts = new Map();
+  for (const r of allRows) {
+    if (r.dept_id && r.dept_name && !depts.has(r.dept_id)) depts.set(r.dept_id, r.dept_name);
+  }
+  const sorted = [...depts.entries()].sort((a, b) => a[1].localeCompare(b[1], 'zh-Hant'));
+  sel.innerHTML = '<option value="">— 全部部門 —</option>' +
+    sorted.map(([id, name]) => `<option value="${escHtml(id)}">${escHtml(name)}</option>`).join('');
+}
+
+function applyFilter() {
+  const view = document.querySelector('input[name="filter-view"]:checked').value;
+  const deptId = document.getElementById('f-dept').value;
+  let rows = allRows.slice();
+  if (deptId) rows = rows.filter(r => r.dept_id === deptId);
+  if (view === 'mismatch') {
+    rows = rows.filter(r => r.mismatches.length > 0 || r.flags.length > 0);
+  }
+  // 排序:先依職等(一→二→三)、再 level、再 employee_id
+  rows.sort((a, b) => {
+    const ag = GRADE_ORDER[a.grade] || 99;
+    const bg = GRADE_ORDER[b.grade] || 99;
+    if (ag !== bg) return ag - bg;
+    const al = a.grade_level ?? 99;
+    const bl = b.grade_level ?? 99;
+    if (al !== bl) return al - bl;
+    return String(a.employee_id).localeCompare(String(b.employee_id));
+  });
+  return rows;
+}
+
+function fieldCell(actual, mismatch) {
+  if (mismatch) return mismatchCell(mismatch.actual, mismatch.expected);
+  return fmtMoney(actual);
+}
+
+function render() {
+  const rows = applyFilter();
+  const table = document.getElementById('audit-table');
+  const empty = document.getElementById('audit-empty');
+  if (!rows.length) {
+    table.style.display = 'none';
+    empty.style.display = '';
+    empty.innerHTML = `<div class="icon">🔎</div><div>沒有符合篩選的列</div>`;
+    return;
+  }
+  empty.style.display = 'none';
+  table.style.display = '';
+
+  const tbody = document.getElementById('audit-tbody');
+  tbody.innerHTML = rows.map(r => {
+    const mismatchMap = {};
+    for (const m of r.mismatches) mismatchMap[m.field] = m;
+    const rowCls = r.mismatches.length > 0 ? 'row-mismatch' : (r.flags.length > 0 ? 'row-flag' : '');
+    const grade = r.grade ? `${escHtml(r.grade)} ${escHtml(r.grade_level)}` : '<span class="small">未指派</span>';
+    const extra = Number(r.actual.extra_allowance ?? 0);
+    const extraCell = extra > 0
+      ? `<span class="badge b-extra">${extra.toLocaleString('zh-TW')}</span>`
+      : '<span class="num cell-ok">—</span>';
+
+    return `<tr class="${rowCls}">
+      <td>
+        <a class="emp-link" href="/employee-profile.html?id=${encodeURIComponent(r.employee_id)}">${escHtml(r.name || r.employee_id)}</a>
+        <div class="small">${escHtml(r.employee_id)}</div>
+      </td>
+      <td>${escHtml(r.dept_name || '—')}</td>
+      <td>${escHtml(r.position || '')}</td>
+      <td>${grade}</td>
+      <td>${typeBadge(r.employment_type)}${r.is_manager ? ' <span class="badge b-manager">主管</span>' : ''}</td>
+      <td style="text-align:right">${fieldCell(r.actual.base_salary,       mismatchMap.base_salary)}</td>
+      <td style="text-align:right">${fieldCell(r.actual.attendance_bonus,  mismatchMap.attendance_bonus)}</td>
+      <td style="text-align:right">${fieldCell(r.actual.grade_allowance,   mismatchMap.grade_allowance)}</td>
+      <td style="text-align:right">${fieldCell(r.actual.manager_allowance, mismatchMap.manager_allowance)}</td>
+      <td style="text-align:right">${extraCell}</td>
+      <td style="text-align:right">${fieldCell(r.actual.hourly_rate,       mismatchMap.hourly_rate)}</td>
+      <td>${flagBadges(r.flags) || '<span class="small">—</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+loadAudit();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

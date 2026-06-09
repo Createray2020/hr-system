@@ -52,6 +52,7 @@ export function getNavGroups(gates = {}) {
         { page:'orgchart',           icon:'ti-sitemap',         label:'組織圖',       href:'/orgchart.html',           gate: isMgrOrHR },
         { page:'departments',        icon:'ti-building',        label:'部門管理',     href:'/departments.html',        gate: isHRish },
         { page:'salary-grades-admin',icon:'ti-stairs',          label:'職等級距',     href:'/salary-grades-admin.html',gate: isHRish },
+        { page:'salary-grade-audit', icon:'ti-checklist',       label:'職等稽核',     href:'/salary-grade-audit.html', gate: isHRish },
         { page:'resigned-archive',   icon:'ti-archive',         label:'離職員工檔案', href:'/resigned-archive.html',   gate: isHRish },
       ],
     },
