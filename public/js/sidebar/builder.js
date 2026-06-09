@@ -76,6 +76,7 @@ export function getNavGroups(gates = {}) {
         { page:'comp-time-admin',          icon:'ti-sun',          label:'補休管理', href:'/comp-time-admin.html',          gate: isHRish },
         { page:'overtime-admin',           icon:'ti-settings',     label:'加班管理', href:'/overtime-admin.html',           gate: isHRish },
         { page:'attendance-penalty-admin', icon:'ti-scale',        label:'出勤獎懲', href:'/attendance-penalty-admin.html', gate: isHRish },
+        { page:'leave-types-admin',        icon:'ti-list-details', label:'假別設定', href:'/leave-types-admin.html',        gate: isHRish },
       ],
     },
     {
