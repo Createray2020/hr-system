@@ -258,6 +258,9 @@ function makeFullRepo(over = {}) {
     // ─── Phase 3:請款併薪 子表(預設空)─────────────────
     fetchExpenseEntries:            vi.fn(async () => []),
 
+    // ─── Phase 3A:費率中央表(預設空 Map、各 step 走 hardcoded fallback)─
+    getEffectiveParameters:         vi.fn(async () => new Map()),
+
     ...over,
   };
 }
@@ -1541,6 +1544,122 @@ describe('calculateMonthlySalary — 離職月自動推導(existing 旗標未設
     expect(record.worked_days).toBe(10);
     // prorata_base 走 part_time pt_basePay = 200 × 80 = 16000(不是 base × ratio)
     expect(record.prorata_base).toBe(16000);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════
+// Phase 3A:費率中央表接線中性 / override 驗證
+// ═════════════════════════════════════════════════════════════
+describe('Phase 3A — 費率中央表接線(中性 + override)', () => {
+  // 用「投保員工 + 月獎金 > 健保門檻」的 fixture 才能讓 sup_health rate 影響輸出
+  function repoForSupplementaryHealth(paramMap) {
+    return makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 50000, attendance_bonus: 0, employment_type: 'full_time',
+      })),
+      // 投保 30,000 → 健保門檻 = 4 × 30000 = 120,000;給 monthBonus 200,000 → 80,000 超過
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 30000,
+        health_ins_bracket: 30000,
+        labor_ins_employee: null,    // 走 fallback rate
+        health_ins_employee: null,
+        pension_voluntary_rate: 0,
+        labor_ins_company: 0, health_ins_company: 0,
+      })),
+      // existing 有 bonus_yearend 200000 → monthlyBonusSum=200000、超過 health 投保 4×=120000
+      findSalaryRecord:        vi.fn(async () => ({
+        id: 'S_E001_2026_05', bonus_yearend: 200000,
+        bonus_festival: 0, bonus_performance: 0, bonus_other: 0,
+      })),
+      findYtdAccumulatedBonusBefore: vi.fn(async () => 0),
+      ...(paramMap ? { getEffectiveParameters: vi.fn(async () => paramMap) } : {}),
+    });
+  }
+
+  it('中性:paramMap 帶「等於 hardcoded const 的值」→ deduct_supplementary_health 跟空 Map 一致', async () => {
+    const repoEmpty = repoForSupplementaryHealth(new Map());
+    const r1 = await calculateMonthlySalary(repoEmpty, { employee_id:'E001', year:2026, month:5 });
+
+    const equalMap = new Map([
+      ['supplementary_health:rate',                 0.0211],
+      ['supplementary_health:threshold_multiplier', 4],
+      ['supplementary_health:cap_per_payment',      1_000_000],
+      ['labor_insurance:employee_rate',             0.023],
+      ['health_insurance:employee_rate',            0.01551],
+      ['pension:employer_mandatory_rate',           0.06],
+      ['pension:employee_voluntary_max',            0.06],
+      ['night_allowance:per_hour_ntd',              50],
+    ]);
+    const repoEq = repoForSupplementaryHealth(equalMap);
+    const r2 = await calculateMonthlySalary(repoEq, { employee_id:'E001', year:2026, month:5 });
+
+    expect(r2.record.deduct_supplementary_health).toBe(r1.record.deduct_supplementary_health);
+    expect(r2.record.deduct_labor_ins).toBe(r1.record.deduct_labor_ins);
+    expect(r2.record.deduct_health_ins).toBe(r1.record.deduct_health_ins);
+    expect(r2.record.employer_cost_pension).toBe(r1.record.employer_cost_pension);
+  });
+
+  it('override:paramMap 帶不同的 supplementary_health.rate → deduct 跟 fallback 不同', async () => {
+    const repoEmpty = repoForSupplementaryHealth(new Map());
+    const r1 = await calculateMonthlySalary(repoEmpty, { employee_id:'E001', year:2026, month:5 });
+
+    // rate 從 0.0211 改成 0.05 → 應扣金額會明顯變大
+    const overrideMap = new Map([
+      ['supplementary_health:rate', 0.05],
+    ]);
+    const repoOverride = repoForSupplementaryHealth(overrideMap);
+    const r2 = await calculateMonthlySalary(repoOverride, { employee_id:'E001', year:2026, month:5 });
+
+    expect(r2.record.deduct_supplementary_health).not.toBe(r1.record.deduct_supplementary_health);
+    // 0.05/0.0211 ≈ 2.37 倍
+    expect(r2.record.deduct_supplementary_health).toBeGreaterThan(r1.record.deduct_supplementary_health);
+  });
+
+  it('override:paramMap 帶不同的 pension.employer_mandatory_rate → employer_cost_pension 跟 fallback 不同', async () => {
+    const repoEmpty = repoForSupplementaryHealth(new Map());
+    const r1 = await calculateMonthlySalary(repoEmpty, { employee_id:'E001', year:2026, month:5 });
+
+    // 0.06 → 0.08 → employer_cost_pension 應該變大(投保 30000 × 0.02 差 = 600)
+    const overrideMap = new Map([['pension:employer_mandatory_rate', 0.08]]);
+    const repoOverride = repoForSupplementaryHealth(overrideMap);
+    const r2 = await calculateMonthlySalary(repoOverride, { employee_id:'E001', year:2026, month:5 });
+
+    expect(r2.record.employer_cost_pension).not.toBe(r1.record.employer_cost_pension);
+    expect(r2.record.employer_cost_pension).toBeGreaterThan(r1.record.employer_cost_pension);
+  });
+
+  it('override:paramMap 帶不同的 labor_insurance.employee_rate → deduct_labor_ins 跟 fallback 不同', async () => {
+    const repoEmpty = repoForSupplementaryHealth(new Map());
+    const r1 = await calculateMonthlySalary(repoEmpty, { employee_id:'E001', year:2026, month:5 });
+
+    // 0.023 → 0.05 → 員工自付明顯變大
+    const overrideMap = new Map([['labor_insurance:employee_rate', 0.05]]);
+    const repoOverride = repoForSupplementaryHealth(overrideMap);
+    const r2 = await calculateMonthlySalary(repoOverride, { employee_id:'E001', year:2026, month:5 });
+
+    expect(r2.record.deduct_labor_ins).not.toBe(r1.record.deduct_labor_ins);
+    expect(r2.record.deduct_labor_ins).toBeGreaterThan(r1.record.deduct_labor_ins);
+  });
+
+  it('asOfDate 是月最後一天:6 月呼叫應傳 2026-06-30 給 getEffectiveParameters', async () => {
+    const repo = repoForSupplementaryHealth(new Map());
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(repo.getEffectiveParameters).toHaveBeenCalledWith('2026-06-30');
+
+    const repoFeb = repoForSupplementaryHealth(new Map());
+    await calculateMonthlySalary(repoFeb, { employee_id:'E001', year:2026, month:2 });
+    // 2026 非閏年、2 月最後一天 28
+    expect(repoFeb.getEffectiveParameters).toHaveBeenCalledWith('2026-02-28');
+  });
+
+  it('repo 沒實作 getEffectiveParameters method → 仍能跑(走 hardcoded fallback)', async () => {
+    const repo = repoForSupplementaryHealth(undefined);
+    // 把 getEffectiveParameters 從 mock 中拿掉
+    delete repo.getEffectiveParameters;
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    // 跑完沒 throw + 有 supplementary_health 計算
+    expect(r.record.deduct_supplementary_health).toBeGreaterThan(0);
   });
 });
 

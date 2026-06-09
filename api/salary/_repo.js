@@ -450,5 +450,37 @@ export function makeSalaryRepo() {
       if (error) throw error;
       return data;
     },
+
+    // Phase 3A:撈在 asOfDate 生效中的費率參數,回 Map<"category:parameter_name", Number>。
+    // 選版邏輯:
+    //   - WHERE effective_from <= asOfDate AND (effective_to IS NULL OR effective_to >= asOfDate)
+    //   - 同 (category, parameter_name) 可能撈到多 row(舊 effective_to 未及時截斷),
+    //     JS 端用 effective_from desc 排序後第一筆取勝(等同 SQL DISTINCT ON 的效果)
+    //   - 失敗 / 表不存在:return new Map()(caller 端 fallback 到 hardcoded const)
+    async getEffectiveParameters(asOfDate) {
+      if (!asOfDate) return new Map();
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('salary_parameter_definitions')
+          .select('category, parameter_name, parameter_value, effective_from, effective_to')
+          .lte('effective_from', asOfDate)
+          .or(`effective_to.is.null,effective_to.gte.${asOfDate}`)
+          .order('effective_from', { ascending: false });
+        if (error) {
+          // 表不存在 / 連不到 → fallback 空 Map(caller 走 hardcoded const)
+          console.warn('[getEffectiveParameters] supabase error, falling back to empty map:', error.message);
+          return new Map();
+        }
+        const m = new Map();
+        for (const row of (data || [])) {
+          const key = `${row.category}:${row.parameter_name}`;
+          if (!m.has(key)) m.set(key, Number(row.parameter_value));
+        }
+        return m;
+      } catch (e) {
+        console.warn('[getEffectiveParameters] threw, falling back to empty map:', e.message);
+        return new Map();
+      }
+    },
   };
 }
