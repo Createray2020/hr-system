@@ -25,6 +25,9 @@ const ALLOWED_PUT = new Set([
   'settlement_note',
   // 階段 2.6.1 / 3.3:讓 HR 鎖定 deduct_tax 不被 calculator 覆蓋
   'deduct_tax_manual_override',
+  // Phase 3C:整列鎖(取代失效的 [FORCE] 字串)
+  // manual_locked_by / manual_locked_at 由 server 自動寫,不在白名單
+  'manual_lock', 'manual_lock_reason',
   // 不接受:gross_salary / net_salary(GENERATED)、
   //         overtime_pay_auto / attendance_penalty_total / attendance_bonus_actual /
   //         comp_expiry_payout / settlement_amount / holiday_work_pay (_auto)、
@@ -37,8 +40,8 @@ const NUMERIC_FIELDS = new Set([
   'deduct_absence', 'deduct_labor_ins', 'deduct_health_ins', 'deduct_tax',
   'overtime_pay_manual',
 ]);
-const TEXT_FIELDS = new Set(['note', 'overtime_pay_note', 'settlement_note']);
-const BOOL_FIELDS = new Set(['deduct_tax_manual_override']);
+const TEXT_FIELDS = new Set(['note', 'overtime_pay_note', 'settlement_note', 'manual_lock_reason']);
+const BOOL_FIELDS = new Set(['deduct_tax_manual_override', 'manual_lock']);
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -103,6 +106,19 @@ export default async function handler(req, res) {
       admin_audit_note: result.auditNote,
       updated_at: new Date().toISOString(),
     };
+
+    // Phase 3C 整列鎖 side-effect:manual_lock 變動時同步寫/清 manual_locked_by/at
+    // (white-list 不含這兩欄、由 server 自動寫;reason 走 callerPatch 自然帶入)
+    if ('manual_lock' in callerPatch) {
+      if (callerPatch.manual_lock === true) {
+        update.manual_locked_by = caller.id;
+        update.manual_locked_at = new Date().toISOString();
+      } else if (callerPatch.manual_lock === false) {
+        update.manual_locked_by = null;
+        update.manual_locked_at = null;
+      }
+    }
+
     const { error } = await supabaseAdmin.from('salary_records').update(update).eq('id', id);
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json({ message: '已更新', audit: result.auditLine });

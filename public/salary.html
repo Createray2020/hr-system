@@ -118,6 +118,18 @@
         🔒 鎖定扣稅(下次月結 batch 不被 calculator 覆蓋、若不勾下次重算會回到自動值)
       </label>
     </div>
+
+    <!-- Phase 3C 整列鎖(取代失效的 [FORCE] 字串):勾選後任何重算路徑都跳過此列 -->
+    <div class="form-row" style="display:flex;flex-direction:column;gap:6px;background:rgba(248,113,113,.06);border:1px solid rgba(248,113,113,.3);border-radius:6px;padding:10px 12px;margin-top:6px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
+        <input type="checkbox" id="f-manual-lock" style="margin:0">
+        <span style="font-size:13px;color:#F87171;font-weight:600">🔒 鎖定此筆,不再自動重算(手動結算)</span>
+      </label>
+      <input type="text" class="form-input" id="f-manual-lock-reason" placeholder="鎖定理由(例:§9-1 病假特別精算、5/27 手調)" style="font-size:12px">
+      <div id="manual-lock-meta" style="font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace;display:none"></div>
+      <div style="font-size:11px;color:var(--text-dim)">勾選後,batch_v2 / scoped recalc / 請款 cascade 都不會動此列。要重算須先取消勾選後儲存。</div>
+    </div>
+
     <div class="form-row"><label class="form-label">加班備註</label><input type="text" class="form-input" id="m-otn"></div>
     <div class="form-row"><label class="form-label">結算備註</label><input type="text" class="form-input" id="m-sn"></div>
 
@@ -220,7 +232,7 @@ function render(){
   }
   tbody.innerHTML = rows.map(r => `
     <tr data-row-id="${escHtml(r.id)}" data-detail-open="0" style="cursor:pointer" onclick="toggleDetailRow(event, '${escHtml(r.id)}')" title="點任一格(除按鈕外)展開完整明細">
-      <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div>${r.is_final_month ? '<span class="pill" style="margin-top:3px;display:inline-block;background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)">✦ 離職月</span>' : ''}<span class="detail-caret" id="caret-${escHtml(r.id)}" style="margin-left:6px;color:var(--text-dim);font-size:11px">▸</span></td>
+      <td style="text-align:left">${escHtml(r.emp_name||r.employee_id)}${r.manual_lock ? `<span title="此筆已鎖定、batch/recalc 跳過" style="margin-left:4px;cursor:help">🔒</span>` : ''}<div style="font-size:11px;color:var(--text-dim)">${escHtml(r.employee_id)}</div>${r.is_final_month ? '<span class="pill" style="margin-top:3px;display:inline-block;background:rgba(248,113,113,.12);color:#F87171;border:1px solid rgba(248,113,113,.25)">✦ 離職月</span>' : ''}<span class="detail-caret" id="caret-${escHtml(r.id)}" style="margin-left:6px;color:var(--text-dim);font-size:11px">▸</span></td>
       <td class="num">${(() => {
         // 兼職時薪制(hourly_rate>0 && work_hours>0)→ 主值 prorata_base(=時薪×工時)、下方小字拆解
         const isHourlyMode = n0(r.hourly_rate) > 0 && n0(r.work_hours) > 0;
@@ -480,6 +492,17 @@ function openEdit(id){
   document.getElementById('m-otn').value   = currentRow.overtime_pay_note ?? '';
   document.getElementById('m-sn').value    = currentRow.settlement_note ?? '';
 
+  // Phase 3C 整列鎖 modal 狀態
+  document.getElementById('f-manual-lock').checked = currentRow.manual_lock === true;
+  document.getElementById('f-manual-lock-reason').value = currentRow.manual_lock_reason ?? '';
+  const lockMeta = document.getElementById('manual-lock-meta');
+  if (currentRow.manual_lock === true && currentRow.manual_locked_at) {
+    lockMeta.textContent = `🔒 已鎖定:${String(currentRow.manual_locked_at).slice(0,16).replace('T',' ')} by ${currentRow.manual_locked_by || '—'}`;
+    lockMeta.style.display = '';
+  } else {
+    lockMeta.style.display = 'none';
+  }
+
   document.getElementById('btn-pay').style.display = currentRow.status === 'confirmed' ? '' : 'none';
 
   ['m-otm','m-allow','m-extra','m-li','m-hi','m-tax'].forEach(id => {
@@ -572,6 +595,9 @@ async function saveManual(){
     deduct_tax_manual_override: document.getElementById('f-deduct-tax-lock').checked,
     overtime_pay_note:   document.getElementById('m-otn').value || null,
     settlement_note:     document.getElementById('m-sn').value || null,
+    // Phase 3C 整列鎖
+    manual_lock:         document.getElementById('f-manual-lock').checked,
+    manual_lock_reason:  document.getElementById('f-manual-lock-reason').value || null,
   };
   // P6.2:force flag(撞到 locked 時、HR 主動勾才送)
   const force = document.getElementById('f-force-override').checked;

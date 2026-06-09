@@ -106,6 +106,8 @@ vi.mock('../api/salary/_repo.js', () => ({
     findActivePayrollPeriod: vi.fn(async () => null),
     updatePayrollPeriod: vi.fn(async () => undefined),
     listSalaryRecords: vi.fn(async () => []),
+    // Phase 3C 重算防護:recalculate / handleNewBatch 在 call calculator 前會先 findSalaryRecord 走 shouldSkipBatchRecalc
+    findSalaryRecord: vi.fn(async () => null),
   })),
 }));
 

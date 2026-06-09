@@ -6,6 +6,7 @@ import { requireRole } from '../../lib/auth.js';
 import { BACKOFFICE_ROLES } from '../../lib/roles.js';
 import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { isSystemAccount } from '../../lib/salary/system-accounts.js';
+import { shouldSkipBatchRecalc } from '../../lib/salary/recompute-guard.js';
 import { makeSalaryRepo } from './_repo.js';
 
 export default async function handler(req, res) {
@@ -28,6 +29,21 @@ export default async function handler(req, res) {
 
   try {
     const repo = makeSalaryRepo();
+
+    // Phase 3C 重算防護:manual_lock / paid / locked 直接跳過
+    const recordId = `S_${employee_id}_${y}_${String(m).padStart(2, '0')}`;
+    const existing = await repo.findSalaryRecord(recordId);
+    const guard = shouldSkipBatchRecalc({ existing });
+    if (guard.skip) {
+      return res.status(200).json({
+        ok:       true,
+        skipped:  true,
+        reason:   guard.reason,
+        record:   existing,
+        message:  `已跳過重算(${guard.reason});要動鎖請至 admin_edit PATCH manual_lock=false`,
+      });
+    }
+
     const r = await calculateMonthlySalary(repo, {
       employee_id, year: y, month: m,
       callerId: caller.id,

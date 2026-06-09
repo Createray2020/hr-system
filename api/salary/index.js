@@ -24,6 +24,7 @@ import { calculateMonthlySalary } from '../../lib/salary/calculator.js';
 import { canExecuteTransition } from '../../lib/salary/period-state.js';
 import { reconcilePeriodStats } from '../../lib/salary/period-stats.js';
 import { isSystemAccount, excludeSystemAccounts, applyExcludeSystemAccountsQuery } from '../../lib/salary/system-accounts.js';
+import { shouldSkipBatchRecalc } from '../../lib/salary/recompute-guard.js';
 import { makeSalaryRepo } from './_repo.js';
 import { addDeptName, addDeptNameNested } from '../../lib/dept-name-mapper.js';
 
@@ -308,9 +309,25 @@ async function handleNewBatch(req, res) {
     }
 
     const results = [];
-    let success = 0, failed = 0;
+    let success = 0, failed = 0, skipped = 0;
     for (const emp of targets) {
       try {
+        // Phase 3C 重算防護:manual_lock / paid / locked 直接跳過、不呼叫 calculator
+        const recordId = `S_${emp.id}_${y}_${String(m).padStart(2, '0')}`;
+        const existing = await repo.findSalaryRecord(recordId);
+        const guard = shouldSkipBatchRecalc({ existing });
+        if (guard.skip) {
+          results.push({
+            employee_id: emp.id,
+            ok:          true,
+            skipped:     true,
+            reason:      guard.reason,
+            record_id:   existing?.id || null,
+          });
+          skipped += 1;
+          continue;
+        }
+
         const r = await calculateMonthlySalary(repo, {
           employee_id: emp.id, year: y, month: m,
           callerId: caller.id,
@@ -351,7 +368,7 @@ async function handleNewBatch(req, res) {
     }
 
     return res.status(200).json({
-      ok: true, year: y, month: m, success, failed, results,
+      ok: true, year: y, month: m, success, failed, skipped, results,
       period_warning: periodWarning,
     });
   } catch (e) {
