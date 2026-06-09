@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#5B8DEF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CHUWA HR">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>費率參數 — HR System</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .warning-banner{background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:12px;color:#FBBF24;display:flex;gap:8px;align-items:flex-start}
+  .warning-banner i{font-style:normal;font-size:14px}
+  .category-card{margin-bottom:18px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .category-title{background:rgba(91,141,239,.06);padding:10px 14px;font-size:12px;font-family:'DM Mono',monospace;color:var(--text-dim);letter-spacing:.6px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+  .badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;font-family:'DM Mono',monospace;display:inline-block}
+  .b-rate{background:rgba(91,141,239,.15);color:#7FBBFF}
+  .b-multiplier{background:rgba(168,85,247,.15);color:#C084FC}
+  .b-NTD{background:rgba(74,222,128,.15);color:#4ADE80}
+  .b-unit{background:rgba(120,120,120,.12);color:var(--text-dim)}
+  .num{font-family:'DM Mono',monospace}
+  .pct{font-size:11px;color:var(--text-dim);margin-left:4px}
+  .history-row td{background:rgba(255,255,255,.02);font-size:11px;color:var(--text-dim);padding:6px 14px}
+  .history-row .num{color:var(--text-dim)}
+  .legal{font-size:11px;color:var(--text-dim);max-width:280px}
+</style>
+</head>
+<body data-page="salary-parameters-admin">
+<div class="shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">費率參數</div>
+        <div class="page-sub">薪資相關費率/門檻/常數中央表(帶生效日期版本化)</div>
+      </div>
+    </div>
+
+    <div id="gate-blocked" class="empty-state" style="display:none">
+      <div class="icon">🔒</div><div>無權限存取此頁面(限 HR / admin / ceo / chairman)</div>
+    </div>
+
+    <div id="main-content">
+      <div class="warning-banner">
+        <i>⚠</i>
+        <div>
+          <strong>此頁設定的費率將於後續接入薪資計算引擎;目前調整不影響任何已產生的薪資。</strong>
+          新增生效版本會自動截斷當前版本的 <code>effective_to</code>。描述性欄位(label/法源/備註)
+          可獨立修改、不會建立新版本。
+        </div>
+      </div>
+
+      <div id="categories">
+        <div class="empty-state" style="padding:24px"><div class="icon">⏳</div><div>載入中…</div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal: 調整費率(POST 新版本)-->
+<div class="modal-bg" id="version-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title" id="version-title">調整費率</div>
+    <input type="hidden" id="v-category">
+    <input type="hidden" id="v-parameter-name">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" id="v-meta"></div>
+
+    <div class="form-row">
+      <label class="form-label">新值 <span style="color:#F87171">*</span></label>
+      <input type="number" class="form-input num" id="v-value" step="any" placeholder="例:0.023 或 50">
+      <div class="hint" id="v-value-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px"></div>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">生效日(YYYY-MM-DD) <span style="color:#F87171">*</span></label>
+      <input type="date" class="form-input" id="v-effective-from">
+      <div class="hint" style="font-size:11px;color:var(--text-dim);margin-top:4px">
+        當前版本的 <code>effective_to</code> 會自動設為「生效日 - 1 天」。
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">備註</label>
+      <textarea class="form-input" id="v-note" rows="2" placeholder="可空,例:應 2026 政府公告調整"></textarea>
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal('version-modal')">取消</button>
+      <button class="btn btn-primary" id="v-save" onclick="saveVersion()">新增生效版本</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 編輯描述(PATCH label_zh / regulation_basis / note)-->
+<div class="modal-bg" id="meta-modal">
+  <div class="modal" style="max-width:520px;width:95vw">
+    <div class="modal-title">編輯描述</div>
+    <input type="hidden" id="m-id">
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px" id="m-meta"></div>
+
+    <div class="form-row">
+      <label class="form-label">中文標籤 label_zh <span style="color:#F87171">*</span></label>
+      <input type="text" class="form-input" id="m-label">
+    </div>
+    <div class="form-row">
+      <label class="form-label">法源 regulation_basis</label>
+      <input type="text" class="form-input" id="m-basis" placeholder="例:勞工保險條例 §15">
+    </div>
+    <div class="form-row">
+      <label class="form-label">備註 note</label>
+      <textarea class="form-input" id="m-note" rows="3"></textarea>
+    </div>
+
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal('meta-modal')">取消</button>
+      <button class="btn btn-primary" id="m-save" onclick="saveMeta()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: 歷史(read-only)-->
+<div class="modal-bg" id="history-modal">
+  <div class="modal" style="max-width:640px;width:95vw">
+    <div class="modal-title" id="history-title">歷史版本</div>
+    <div id="history-body" style="max-height:60vh;overflow:auto"></div>
+    <div class="modal-actions" style="justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeModal('history-modal')">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toast(msg, type='success') {
+  let wrap = document.getElementById('toast-wrap');
+  if (!wrap) { wrap = document.createElement('div'); wrap.id='toast-wrap'; wrap.style.cssText='position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px'; document.body.appendChild(wrap); }
+  const el = document.createElement('div'); el.className='toast toast-'+type; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>el.remove(),3500);
+}
+function escHtml(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+// ── State ──
+let allParams = [];        // 全 row(含歷史版本)、依 category + parameter_name + effective_from desc 排
+let groupedByParam = {};   // `${category}::${parameter_name}` → [versions desc]
+
+// ── Helpers ──
+function formatValue(value, unit) {
+  const v = Number(value);
+  if (unit === 'rate') {
+    const pct = (v * 100).toFixed(2);
+    return `<span class="num">${v.toFixed(4)}</span><span class="pct">(${pct}%)</span>`;
+  }
+  if (unit === 'multiplier') return `<span class="num">× ${v}</span>`;
+  if (unit === 'NTD')        return `<span class="num">NT$ ${v.toLocaleString('zh-TW')}</span>`;
+  return `<span class="num">${escHtml(v)}</span>`;
+}
+function unitBadge(unit) {
+  const cls = `b-${unit}`;
+  return `<span class="badge ${cls.match(/^b-(rate|multiplier|NTD)$/) ? cls : 'b-unit'}">${escHtml(unit)}</span>`;
+}
+function fmtDate(s) { return s ? String(s).slice(0,10) : ''; }
+function valueHint(unit) {
+  if (unit === 'rate') return '輸入小數比例(0.023 = 2.3%)。';
+  if (unit === 'multiplier') return '輸入倍數(例:4)。';
+  if (unit === 'NTD')  return '輸入新台幣金額(整數、例:50 或 1000000)。';
+  return '';
+}
+
+// ── Load ──
+async function loadParams(retries = 0) {
+  if (!window.api) {
+    if (retries < 20) setTimeout(() => loadParams(retries + 1), 300);
+    return;
+  }
+  const u = window.currentUser;
+  const allowed = u && ['hr','admin','ceo','chairman'].includes(u.role);
+  if (u && !allowed) {
+    document.getElementById('main-content').style.display = 'none';
+    document.getElementById('gate-blocked').style.display = '';
+    return;
+  }
+  try {
+    const r = await api('/api/salary-parameters');
+    allParams = r.parameters || [];
+    // group by (category, parameter_name)
+    groupedByParam = {};
+    for (const p of allParams) {
+      const key = `${p.category}::${p.parameter_name}`;
+      if (!groupedByParam[key]) groupedByParam[key] = [];
+      groupedByParam[key].push(p);
+    }
+    // 每個 key 內已由 API ORDER BY effective_from DESC
+    render();
+  } catch (e) {
+    document.getElementById('categories').innerHTML =
+      `<div class="empty-state" style="color:#F87171;padding:24px">載入失敗:${escHtml(e.message)}</div>`;
+  }
+}
+
+function render() {
+  const container = document.getElementById('categories');
+  if (!allParams.length) {
+    container.innerHTML = `<div class="empty-state" style="padding:24px"><div class="icon">📐</div><div>尚無費率參數</div></div>`;
+    return;
+  }
+  // 用當前版本(effective_to IS NULL)的順序、依 category 分組
+  const byCategory = {};
+  for (const key of Object.keys(groupedByParam)) {
+    const versions = groupedByParam[key];
+    const current = versions.find(v => v.effective_to === null) || versions[0];
+    if (!byCategory[current.category]) byCategory[current.category] = [];
+    byCategory[current.category].push({ key, current, versions });
+  }
+  container.innerHTML = Object.entries(byCategory).map(([cat, rows]) => {
+    return `
+      <div class="category-card">
+        <div class="category-title">類別:${escHtml(cat)}</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>參數</th>
+              <th style="text-align:right">當前值</th>
+              <th style="text-align:center">單位</th>
+              <th style="text-align:center">生效日</th>
+              <th>法源</th>
+              <th>備註</th>
+              <th>操作</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => renderRow(r)).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderRow({ key, current, versions }) {
+  const hasHistory = versions.length > 1;
+  return `
+    <tr>
+      <td>
+        <div style="font-weight:500">${escHtml(current.label_zh)}</div>
+        <div style="font-size:11px;color:var(--text-dim);font-family:'DM Mono',monospace">${escHtml(current.parameter_name)}</div>
+      </td>
+      <td style="text-align:right;white-space:nowrap">${formatValue(current.parameter_value, current.unit)}</td>
+      <td style="text-align:center">${unitBadge(current.unit)}</td>
+      <td style="text-align:center;font-family:'DM Mono',monospace;font-size:12px">${escHtml(fmtDate(current.effective_from))} 起</td>
+      <td class="legal">${escHtml(current.regulation_basis || '')}</td>
+      <td style="font-size:11px;color:var(--text-dim);max-width:240px">${escHtml(current.note || '')}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-primary btn-sm" onclick="openVersionModal('${escHtml(current.category)}','${escHtml(current.parameter_name)}')">調整費率</button>
+        <button class="btn btn-ghost btn-sm" onclick="openMetaModal(${current.id})">編輯描述</button>
+        <button class="btn btn-ghost btn-sm"${hasHistory ? '' : ' disabled'} onclick="openHistoryModal('${escHtml(current.category)}','${escHtml(current.parameter_name)}')">歷史(${versions.length})</button>
+      </td>
+    </tr>`;
+}
+
+// ── 調整費率(POST 新版本)──
+function openVersionModal(category, parameter_name) {
+  const key = `${category}::${parameter_name}`;
+  const versions = groupedByParam[key] || [];
+  const current = versions.find(v => v.effective_to === null) || versions[0];
+  if (!current) { toast('找不到當前版本', 'error'); return; }
+
+  document.getElementById('version-title').textContent = `調整費率:${current.label_zh}`;
+  document.getElementById('v-category').value       = category;
+  document.getElementById('v-parameter-name').value = parameter_name;
+  document.getElementById('v-meta').textContent = `${category}.${parameter_name} · 目前值 ${current.parameter_value} (${current.unit}) · 自 ${fmtDate(current.effective_from)} 起生效`;
+  document.getElementById('v-value').value = '';
+  document.getElementById('v-effective-from').value = '';
+  document.getElementById('v-note').value = '';
+  document.getElementById('v-value-hint').textContent = valueHint(current.unit);
+  document.getElementById('version-modal').classList.add('open');
+}
+
+async function saveVersion() {
+  const category       = document.getElementById('v-category').value;
+  const parameter_name = document.getElementById('v-parameter-name').value;
+  const rawValue       = document.getElementById('v-value').value.trim();
+  const effective_from = document.getElementById('v-effective-from').value;
+  const note           = document.getElementById('v-note').value.trim() || null;
+
+  if (rawValue === '' || !Number.isFinite(Number(rawValue))) {
+    toast('新值必須是數字', 'error'); return;
+  }
+  if (!effective_from) {
+    toast('請填生效日', 'error'); return;
+  }
+
+  const btn = document.getElementById('v-save'); btn.disabled = true;
+  try {
+    const r = await api('/api/salary-parameters', {
+      method: 'POST',
+      body: JSON.stringify({ category, parameter_name, parameter_value: Number(rawValue), effective_from, note }),
+    });
+    toast(`✓ 新版本 id=${r.parameter.id} 已建立(當前版本 id=${r.closed_id} 已截斷)`);
+    closeModal('version-modal');
+    await loadParams();
+  } catch (e) {
+    toast('新增失敗:' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── 編輯描述(PATCH)──
+function openMetaModal(id) {
+  const p = allParams.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('m-id').value    = String(p.id);
+  document.getElementById('m-meta').textContent = `${p.category}.${p.parameter_name} · 生效 ${fmtDate(p.effective_from)} ~ ${fmtDate(p.effective_to) || '(無、當前)'}`;
+  document.getElementById('m-label').value = p.label_zh || '';
+  document.getElementById('m-basis').value = p.regulation_basis || '';
+  document.getElementById('m-note').value  = p.note || '';
+  document.getElementById('meta-modal').classList.add('open');
+}
+
+async function saveMeta() {
+  const id    = document.getElementById('m-id').value;
+  const label = document.getElementById('m-label').value.trim();
+  const basis = document.getElementById('m-basis').value.trim();
+  const note  = document.getElementById('m-note').value.trim();
+  if (!label) { toast('中文標籤必填', 'error'); return; }
+
+  const btn = document.getElementById('m-save'); btn.disabled = true;
+  try {
+    await api(`/api/salary-parameters/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        label_zh:         label,
+        regulation_basis: basis || null,
+        note:             note  || null,
+      }),
+    });
+    toast('✓ 已更新描述');
+    closeModal('meta-modal');
+    await loadParams();
+  } catch (e) {
+    toast('更新失敗:' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── 歷史(read-only)──
+function openHistoryModal(category, parameter_name) {
+  const key = `${category}::${parameter_name}`;
+  const versions = (groupedByParam[key] || []).slice();
+  if (!versions.length) return;
+  const current = versions[0];
+  document.getElementById('history-title').textContent = `歷史版本:${current.label_zh}`;
+  const body = document.getElementById('history-body');
+  body.innerHTML = `
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px;font-family:'DM Mono',monospace">${escHtml(category)}.${escHtml(parameter_name)}</div>
+    <table>
+      <thead><tr>
+        <th>值</th>
+        <th>生效區間</th>
+        <th>備註</th>
+        <th>更新者 / 時間</th>
+      </tr></thead>
+      <tbody>
+        ${versions.map(v => `
+          <tr ${v.effective_to === null ? 'style="background:rgba(91,141,239,.06)"' : ''}>
+            <td style="text-align:right">${formatValue(v.parameter_value, v.unit)}</td>
+            <td style="font-family:'DM Mono',monospace;font-size:12px">${escHtml(fmtDate(v.effective_from))} ~ ${escHtml(fmtDate(v.effective_to) || '(當前)')}</td>
+            <td style="font-size:11px;color:var(--text-dim);max-width:200px">${escHtml(v.note || '')}</td>
+            <td style="font-size:11px;color:var(--text-dim)">${escHtml(v.updated_by || v.created_by || '')}<br>${escHtml(String(v.updated_at || v.created_at || '').slice(0,16).replace('T',' '))}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+  document.getElementById('history-modal').classList.add('open');
+}
+
+loadParams();
+</script>
+
+<script src="/js/roles.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/pwa.js"></script>
+<script>PWA.init();</script>
+</body>
+</html>

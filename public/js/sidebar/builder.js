@@ -88,6 +88,7 @@ export function getNavGroups(gates = {}) {
         { page:'insurance',                 icon:'ti-shield-check',     label:'勞健保',       href:'/insurance.html',                 gate: isHRish },
         { page:'expense-categories-admin',  icon:'ti-tag',              label:'請款類別管理', href:'/expense-categories-admin.html',  gate: isHRish },
         { page:'salary-expense-entries-admin', icon:'ti-receipt-2',     label:'併薪明細管理', href:'/salary-expense-entries-admin.html', gate: isHRish },
+        { page:'salary-parameters-admin',   icon:'ti-adjustments',      label:'費率參數',     href:'/salary-parameters-admin.html',   gate: isHRish },
       ],
     },
   ];
