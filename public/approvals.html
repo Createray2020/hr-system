@@ -775,9 +775,14 @@ function renderAll() {
 }
 
 /* ── New request ─────────────────────────────────────────────────────────── */
+// Batch 7 收尾(2026-06-09):加班類 picker 過濾掉,改走 /overtime.html;
+// 配合 api/approvals.js OVERTIME_TYPES_BLOCKED + migrations/20260609_disable_overtime_approval_configs.sql 三層守門
+const APPROVAL_PICKER_BLOCKLIST = ['overtime', 'overtime_pay'];
 function renderTypeCategories() {
   const groups = {};
-  allConfigs.forEach(c => { if (!groups[c.category]) groups[c.category] = []; groups[c.category].push(c); });
+  allConfigs
+    .filter(c => !APPROVAL_PICKER_BLOCKLIST.includes(c.request_type))
+    .forEach(c => { if (!groups[c.category]) groups[c.category] = []; groups[c.category].push(c); });
   document.getElementById('type-categories').innerHTML = Object.entries(groups).map(([cat, items]) => `
     <div class="category-group">
       <div class="category-label">${CAT_ICONS[cat]||'📌'} ${cat}</div>

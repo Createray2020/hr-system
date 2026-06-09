@@ -25,6 +25,11 @@ import { resolveAuthScopeWithDeptIds, makeDeptEmpIdsRepo, canSeeEmployee } from 
 import { isBackofficeRole, canDeleteRecord } from '../lib/roles.js';
 import { applyExpenseReimbursement } from '../lib/salary/expense-cascade.js';
 
+// Batch 7 收尾(2026-06-09):加班申請禁入 approval_requests,改走 /overtime.html → overtime_requests。
+// 守門三層:approval_flow_configs.is_active=false(DB)+ 本黑名單(server)+ approvals.html renderTypeCategories filter(前端)。
+// migration:migrations/20260609_disable_overtime_approval_configs.sql
+const OVERTIME_TYPES_BLOCKED = ['overtime', 'overtime_pay'];
+
 // ─────────────────────────────────────────────────────────────────
 // 離職檢核表 MVP 預設 46 項(對應 migrations/2026_05_26_resignation_checklist.sql)
 // 由 applyResignation cascade 在離職核准完成後 bulk insert。
@@ -209,7 +214,9 @@ export default async function handler(req, res) {
       if (request_type) q = q.eq('request_type', request_type);
       const { data, error } = await q;
       if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json(data);
+      // Batch 7 收尾:approval_requests 不再顯示加班類(歷史殘留 row 過濾掉、未來也不會新增)
+      const filtered = (data || []).filter(r => !OVERTIME_TYPES_BLOCKED.includes(r.request_type));
+      return res.status(200).json(filtered);
     }
 
     // ── 待我審批（依角色取對應步驟） ──────────────────────────────────────────
@@ -275,6 +282,11 @@ export default async function handler(req, res) {
       const realApplicantId = caller.id;
       if (applicant_id && applicant_id !== caller.id) {
         return res.status(403).json({ error: '不可代他人提出申請' });
+      }
+
+      // Batch 7 收尾:加班類禁入 approval_requests(走 /overtime.html → overtime_requests)
+      if (OVERTIME_TYPES_BLOCKED.includes(request_type)) {
+        return res.status(400).json({ error: '加班申請請改走 /overtime.html' });
       }
 
       const { data: config, error: cfgErr } = await supabaseAdmin
