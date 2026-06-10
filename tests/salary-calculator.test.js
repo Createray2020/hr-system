@@ -592,8 +592,9 @@ describe('calculateMonthlySalary — 階段 2.5.2 新欄位寫入', () => {
     const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
     expect(r.deduct_pension_voluntary).toBe(2748);  // 45800 × 0.06
     expect(r.employer_cost_pension).toBe(2748);     // 雇主強制 6%
-    expect(r.employer_cost_labor).toBe(3490);       // direct premium
-    expect(r.employer_cost_health).toBe(1410);
+    // 2026 法規(insurance-bracket.js)— direct premium 不再讀、一律依 bracket × 法定費率
+    expect(r.employer_cost_labor).toBe(3687);       // 45800 × 0.0805 = 3686.9
+    expect(r.employer_cost_health).toBe(2216);      // 45800 × 0.03102 × 1.56 = 2216.32
     expect(r.pension_wage_snapshot).toBe(45800);
     expect(r.insured_salary_labor_snapshot).toBe(45800);
     expect(r.insured_salary_health_snapshot).toBe(45800);
@@ -885,12 +886,18 @@ describe('calculateMonthlySalary — 階段 2.6.2 deduct_tax _auto / _manual ove
 describe('calculateMonthlySalary — 階段 2.7.8 員工自付勞健保 _auto', () => {
   // 對應 prod bug: 全 24 員工 deduct_labor_ins / deduct_health_ins 全 0、
   // 實發每月多發 ~27,000(全公司加總)。calculator 員工端漏讀、雇主端 employer_cost_* 是對的。
+  //
+  // 2026 法規 (insurance-bracket.js) 重寫後:_employee / _company direct premium 全部忽略,
+  // 員工端 = bracket × (2.3% 勞保 + 0.2% 就保) 分項 round 相加;
+  // 健保員工 = bracket × 1.551% round × (眷屬+1)、上限 3 口;
+  // 雇主端拆 3 欄:labor 勞保普通(×0.0805)、employment 就保(×0.007)、occupational 職災(現 0)。
 
-  it('ins.labor_ins_employee = 653 → row.deduct_labor_ins = 653(EMP_01191201 鄭昭君 case)', async () => {
+  it('bracket 31800 + 適格 + 0 眷屬 → 員工 795/493、雇主拆欄(EMP_01191201 鄭昭君 case)', async () => {
     const repo = makeFullRepo({
       findEmployeeInsuranceSettings: vi.fn(async () => ({
         has_insurance: true,
-        labor_ins_employee:  653,    // direct premium、應直接寫入
+        // 保留舊版 _employee/_company 直接金額、新邏輯應全 ignore、依 bracket 重算
+        labor_ins_employee:  653,
         labor_ins_company:   2285,
         labor_ins_bracket:   31800,
         health_ins_employee: 545,
@@ -901,18 +908,26 @@ describe('calculateMonthlySalary — 階段 2.7.8 員工自付勞健保 _auto', 
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
     const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
-    expect(r.deduct_labor_ins).toBe(653);
-    expect(r.deduct_health_ins).toBe(545);
-    // 雇主端對齊比較(原本就對、本 case 為 regression guard)
-    expect(r.employer_cost_labor).toBe(2285);
-    expect(r.employer_cost_health).toBe(1089);
+    // 員工:31800×0.023=731.4→731 + 31800×0.002=63.6→64 = 795
+    expect(r.deduct_labor_ins).toBe(795);
+    // 健保:31800×0.01551=493.218→493 × (0+1) = 493
+    expect(r.deduct_health_ins).toBe(493);
+    // 雇主拆 3 欄 + 健保:
+    //   labor 勞保普通 31800×0.0805=2559.9→2560
+    //   employment 就保 31800×0.007=222.6→223
+    //   occupational 職災 31800×0=0
+    //   health      31800×0.03102×1.56=1538.84→1539
+    expect(r.employer_cost_labor).toBe(2560);
+    expect(r.employer_cost_employment).toBe(223);
+    expect(r.employer_cost_occupational).toBe(0);
+    expect(r.employer_cost_health).toBe(1539);
   });
 
-  it('labor_ins_employee = NULL + bracket = 45800 → fallback = 45800 × 2.3% = 1053', async () => {
+  it('labor_ins_employee = NULL + bracket = 45800 → 一律走 bracket 計算 = 1145', async () => {
     const repo = makeFullRepo({
       findEmployeeInsuranceSettings: vi.fn(async () => ({
         has_insurance: true,
-        // labor_ins_employee / health_ins_employee 故意 NULL、測 fallback
+        // labor_ins_employee / health_ins_employee NULL;新邏輯不再有「優先 / fallback」之分、一律 bracket
         labor_ins_bracket:  45800,
         labor_ins_company:  3490,
         health_ins_bracket: 45800,
@@ -921,26 +936,30 @@ describe('calculateMonthlySalary — 階段 2.7.8 員工自付勞健保 _auto', 
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
     const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
-    // 45800 × 0.023 = 1053.4 → round 1053
-    expect(r.deduct_labor_ins).toBe(1053);
-    // 45800 × 0.01551 = 710.358 → round 710
+    // 45800 × 0.023 = 1053.4 → 1053;就保 45800 × 0.002 = 91.6 → 92;合計 1145
+    expect(r.deduct_labor_ins).toBe(1145);
+    // 45800 × 0.01551 = 710.358 → 710 × (0+1) = 710
     expect(r.deduct_health_ins).toBe(710);
   });
 
-  it('labor_ins_employee = 0(明確設零、離職 / waived)→ 不 fallback、寫 0', async () => {
+  it('labor_ins_employee = 0 也被新邏輯 ignore、一律依 bracket 計算(語意契約改變)', async () => {
+    // 舊邏輯:_employee=0 視為「合法零值(waived/離職)」、不 fallback 到 bracket。
+    // 新邏輯:_employee/_company 完全不讀,凡有 has_insurance + bracket → 一律計算。
+    // 「真正不扣」的契約改成 has_insurance=false(見下一個 it),或在 DB 端把 has_insurance 設 false。
     const repo = makeFullRepo({
       findEmployeeInsuranceSettings: vi.fn(async () => ({
         has_insurance: true,
-        labor_ins_employee:  0,        // 明確 0、不 fallback
-        labor_ins_bracket:   45800,    // bracket 有值、若誤 fallback 會變 1053
-        health_ins_employee: 0,
+        labor_ins_employee:  0,        // 新邏輯不讀;不再代表 waived
+        labor_ins_bracket:   45800,
+        health_ins_employee: 0,        // 新邏輯不讀
         health_ins_bracket:  45800,
       })),
     });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
     const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
-    expect(r.deduct_labor_ins).toBe(0);
-    expect(r.deduct_health_ins).toBe(0);
+    // 跟「bracket 45800 NULL fallback」case 相同數值,證明 _employee=0 不再短路
+    expect(r.deduct_labor_ins).toBe(1145);
+    expect(r.deduct_health_ins).toBe(710);
   });
 
   it('has_insurance = false → 不論 ins 怎麼設都 0', async () => {
@@ -1179,11 +1198,12 @@ describe('calculateMonthlySalary — 階段 2.7.9 UPSERT idempotency', () => {
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
     await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
     const r = getLast();
-    // _auto 欄位每次都從 insurance_settings 重算
-    expect(r.deduct_labor_ins).toBe(653);
-    expect(r.deduct_health_ins).toBe(545);
-    expect(r.employer_cost_labor).toBe(2285);
-    expect(r.employer_cost_health).toBe(1089);
+    // _auto 欄位每次都依 bracket × 2026 法規費率重算 (insurance-bracket.js)
+    expect(r.deduct_labor_ins).toBe(795);          // 31800×0.023→731 + 31800×0.002→64
+    expect(r.deduct_health_ins).toBe(493);         // 31800×0.01551 round
+    expect(r.employer_cost_labor).toBe(2560);      // 31800×0.0805 (只勞保普通)
+    expect(r.employer_cost_employment).toBe(223);  // 31800×0.007  (就保拆出)
+    expect(r.employer_cost_health).toBe(1539);     // 31800×0.03102×1.56
   });
 });
 
@@ -1247,16 +1267,17 @@ describe('calculateMonthlySalary — B26 批次 4 離職月 pro-rata', () => {
     expect(record.comp_expiry_payout).toBe(1340);
 
     // 各 deduction × proRataRatio (13/31 = 0.4193548...)
-    // Math.round(690 × 13/31) = Math.round(289.355) = 289
-    expect(record.deduct_labor_ins).toBe(289);
-    // Math.round(465 × 13/31) = Math.round(194.999) = 195
+    // 2026 法規 (insurance-bracket.js):bracket 30000 全月員工自付 = round(30000×0.023)+round(30000×0.002) = 690+60 = 750
+    // Math.round(750 × 13/31) = Math.round(314.516) = 315
+    expect(record.deduct_labor_ins).toBe(315);
+    // round(30000 × 0.01551) = 465;Math.round(465 × 13/31) = Math.round(194.999) = 195
     expect(record.deduct_health_ins).toBe(195);
 
-    // employer_cost × ratio
-    // Math.round(2100 × 13/31) = Math.round(880.645) = 881
-    expect(record.employer_cost_labor).toBe(881);
-    // Math.round(1050 × 13/31) = Math.round(440.323) = 440
-    expect(record.employer_cost_health).toBe(440);
+    // employer_cost × ratio (30000 bracket、新邏輯)
+    // labor 勞保普通 30000×0.0805=2415;round(2415 × 13/31) = round(1012.74) = 1013
+    expect(record.employer_cost_labor).toBe(1013);
+    // health 30000×0.03102×1.56=1451.736→1452;round(1452 × 13/31) = round(608.90) = 609
+    expect(record.employer_cost_health).toBe(609);
   });
 
   it('B26.6 is_final_month=false 回歸:prorata_base=NULL、deduct_* 不 pro-rata', async () => {
@@ -1283,10 +1304,11 @@ describe('calculateMonthlySalary — B26 批次 4 離職月 pro-rata', () => {
     expect(record.daily_wage_settlement).toBe(1000);
 
     // deduct_* 跟 employer_cost_* 完全等於整月值(× ratio=1、零回歸)
-    expect(record.deduct_labor_ins).toBe(690);
+    // 2026 法規 (bracket 30000):員工 750/465、雇主 labor 2415、health 1452
+    expect(record.deduct_labor_ins).toBe(750);
     expect(record.deduct_health_ins).toBe(465);
-    expect(record.employer_cost_labor).toBe(2100);
-    expect(record.employer_cost_health).toBe(1050);
+    expect(record.employer_cost_labor).toBe(2415);
+    expect(record.employer_cost_health).toBe(1452);
   });
 
   it('B26.8 step 11 勞健保 pro-rata:4 個欄位 deduct + employer_cost 都 × ratio', async () => {
@@ -1296,12 +1318,12 @@ describe('calculateMonthlySalary — B26 批次 4 離職月 pro-rata', () => {
     });
 
     const ratio = 13 / 31;
-    // 員工負擔
-    expect(record.deduct_labor_ins).toBe(Math.round(690 * ratio));
+    // 員工負擔 — 2026 法規 (bracket 30000):laborFull=750, healthFull=465
+    expect(record.deduct_labor_ins).toBe(Math.round(750 * ratio));
     expect(record.deduct_health_ins).toBe(Math.round(465 * ratio));
-    // 雇主負擔
-    expect(record.employer_cost_labor).toBe(Math.round(2100 * ratio));
-    expect(record.employer_cost_health).toBe(Math.round(1050 * ratio));
+    // 雇主負擔 — labor 勞保普通 2415、health 含眷屬倍數 1452(pre-rounded inside computeHealthEmployer)
+    expect(record.employer_cost_labor).toBe(Math.round(2415 * ratio));
+    expect(record.employer_cost_health).toBe(Math.round(1452 * ratio));
   });
 });
 
@@ -1427,9 +1449,12 @@ describe('calculateMonthlySalary — 離職月自動推導(existing 旗標未設
     expect(record.prorata_base).toBe(10000);         // round2(31000 × 10/31) = 10000
     expect(record.grade_allowance).toBe(967.74);     // round2(3000 × 10/31)
     expect(record.manager_allowance).toBe(322.58);   // round2(1000 × 10/31)
-    expect(record.deduct_labor_ins).toBe(Math.round(690 * 10 / 31));   // 223
-    expect(record.deduct_health_ins).toBe(Math.round(465 * 10 / 31));  // 150
-    expect(record.employer_cost_labor).toBe(Math.round(2100 * 10 / 31)); // 677
+    // 2026 法規 (bracket 31000):laborFull=round(31000×0.023)+round(31000×0.002)=713+62=775
+    //                            healthFull=round(31000×0.01551)=481
+    //                            rawLaborEr=31000×0.0805=2495.5
+    expect(record.deduct_labor_ins).toBe(Math.round(775 * 10 / 31));     // 250
+    expect(record.deduct_health_ins).toBe(Math.round(481 * 10 / 31));    // 155
+    expect(record.employer_cost_labor).toBe(Math.round(2495.5 * 10 / 31)); // 805
   });
 
   it('回歸:active 員工(status=active、resigned_at=null)→ proRataRatio=1、prorata_base=null', async () => {
@@ -1460,8 +1485,11 @@ describe('calculateMonthlySalary — 離職月自動推導(existing 旗標未設
     // ratio=1 → 全額不縮水
     expect(record.grade_allowance).toBe(3000);
     expect(record.manager_allowance).toBe(1000);
-    expect(record.deduct_labor_ins).toBe(690);
-    expect(record.deduct_health_ins).toBe(465);
+    // 2026 法規 (bracket 31000、ratio=1):
+    //   勞保自付 = 31000×0.023→713 + 31000×0.002→62 = 775
+    //   健保自付 = round(31000×0.01551=480.81) = 481
+    expect(record.deduct_labor_ins).toBe(775);
+    expect(record.deduct_health_ins).toBe(481);
   });
 
   it('既有值優先:existing.is_final_month=true + worked_days=11(HR 手動)→ 不被推導覆寫', async () => {
@@ -1784,6 +1812,109 @@ describe('Phase 3B — 無薪/半薪請假扣薪 deduct_unpaid_leave', () => {
     delete repo.findApprovedLeavesForDeduction;
     const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
     expect(r.record.deduct_unpaid_leave).toBe(0);
+  });
+});
+
+describe('calculateMonthlySalary — 2026 法規勞健保整合(insurance-bracket.js)', () => {
+  // 對應 prod bug: bracket 表存的是 9% 勞保 / 5% 健保時代金額、insurance_settings.{labor,health}_ins_employee
+  // 跟著舊版、calculator 直接吃 direct premium → 全公司每人每月少扣勞保 ~230、健保 ~24。
+  // 修正:一律從 bracket × 2026 法規費率算、員工含就保、健保含眷屬乘數。
+
+  it('投保 36300、眷屬 0、適格、has_insurance 兩端 true、整月 → deduct_labor_ins=908, deduct_health_ins=563', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket:  36300,
+        health_ins_bracket: 36300,
+        health_ins_dependents: 0,
+        pension_wage: 36300,
+        // 故意保留舊版 direct premium、確認新邏輯一律不讀
+        labor_ins_employee: 653, labor_ins_company: 2285,
+        health_ins_employee: 545, health_ins_company: 1089,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // 員工端 2026 法規(分項 round 後相加):
+    //   勞保 36300×0.023=834.9→835、就保 36300×0.002=72.6→73、合計 908
+    //   健保 36300×0.01551=562.953→563、×(0+1)=563
+    expect(r.deduct_labor_ins).toBe(908);
+    expect(r.deduct_health_ins).toBe(563);
+    // 雇主端 2026 法規:
+    //   勞保 36300×0.0805=2922.15→2922
+    //   就保 36300×0.007=254.1→254
+    //   職災 0
+    //   健保 36300×0.03102×1.56=1756.6006→1757
+    expect(r.employer_cost_labor).toBe(2922);
+    expect(r.employer_cost_employment).toBe(254);
+    expect(r.employer_cost_occupational).toBe(0);
+    expect(r.employer_cost_health).toBe(1757);
+  });
+
+  it('has_insurance=false(任一端)→ 員工扣項 + 雇主成本 全 0', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: false,
+        labor_ins_bracket: 45800, health_ins_bracket: 45800,
+        health_ins_dependents: 2,        // 即使有眷屬也忽略
+        labor_ins_employee: 1145, health_ins_employee: 711,  // 即使有 direct premium 也忽略
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    expect(r.deduct_labor_ins).toBe(0);
+    expect(r.deduct_health_ins).toBe(0);
+    expect(r.employer_cost_labor).toBe(0);
+    expect(r.employer_cost_health).toBe(0);
+    expect(r.employer_cost_employment).toBe(0);
+    expect(r.employer_cost_occupational).toBe(0);
+    expect(r.employer_cost_pension).toBe(0);
+  });
+
+  it('就保不適格(employment_ins_eligible=false)→ 員工端與雇主端就保部分皆 0、勞保普通仍計', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 45800, health_ins_bracket: 45800,
+        health_ins_dependents: 0, pension_wage: 45800,
+        employment_ins_eligible: false,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // 員工只扣勞保普通:45800×0.023=1053.4→1053
+    expect(r.deduct_labor_ins).toBe(1053);
+    // 雇主就保 0、勞保普通 45800×0.0805=3686.9→3687
+    expect(r.employer_cost_labor).toBe(3687);
+    expect(r.employer_cost_employment).toBe(0);
+  });
+
+  it('健保眷屬數 2 → 整月扣 (insured×rate round 後) × 3', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 36300, health_ins_bracket: 36300,
+        health_ins_dependents: 2, pension_wage: 36300,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // perPerson = round(36300×0.01551)=563;× (2+1)=1689
+    expect(r.deduct_health_ins).toBe(1689);
+  });
+
+  it('健保眷屬數 5(超 cap)→ 自動 clamp 為 3、扣 perPerson × 4', async () => {
+    const repo = makeFullRepo({
+      findEmployeeInsuranceSettings: vi.fn(async () => ({
+        has_insurance: true,
+        labor_ins_bracket: 36300, health_ins_bracket: 36300,
+        health_ins_dependents: 5, pension_wage: 36300,
+      })),
+    });
+    await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    const r = repo.upsertSalaryRecord.mock.calls.at(-1)[0];
+    // perPerson 563 × (3+1) = 2252
+    expect(r.deduct_health_ins).toBe(2252);
   });
 });
 
