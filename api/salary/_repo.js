@@ -451,6 +451,34 @@ export function makeSalaryRepo() {
       return data;
     },
 
+    // Phase 3B:撈某員工某月「approved/archived 且日期重疊」的請假,join leave_types.pay_rate
+    // 給 calculator Step 3.5 算無薪/半薪扣薪用。對齊 api/leave-overview/_repo.js:listForMonth 慣例。
+    async findApprovedLeavesForDeduction(employee_id, year, month) {
+      if (!employee_id || !Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+        return [];
+      }
+      const start = `${year}-${String(month).padStart(2,'0')}-01`;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const end   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+      const { data, error } = await supabaseAdmin
+        .from('leave_requests')
+        .select('id, leave_type, start_date, end_date, days, status, leave_types(pay_rate)')
+        .eq('employee_id', employee_id)
+        .in('status', ['approved', 'archived'])   // post-approval 終態(prod 實際出現的)
+        .is('deleted_at', null)
+        .lte('start_date', end)
+        .gte('end_date',   start);
+      if (error) throw error;
+      return (data || []).map(r => ({
+        id:         r.id,
+        leave_type: r.leave_type,
+        start_date: r.start_date,
+        end_date:   r.end_date,
+        days:       Number(r.days) || 0,
+        pay_rate:   r.leave_types?.pay_rate ?? null,
+      }));
+    },
+
     // Phase 3A:撈在 asOfDate 生效中的費率參數,回 Map<"category:parameter_name", Number>。
     // 選版邏輯:
     //   - WHERE effective_from <= asOfDate AND (effective_to IS NULL OR effective_to >= asOfDate)

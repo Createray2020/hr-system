@@ -261,6 +261,9 @@ function makeFullRepo(over = {}) {
     // ─── Phase 3A:費率中央表(預設空 Map、各 step 走 hardcoded fallback)─
     getEffectiveParameters:         vi.fn(async () => new Map()),
 
+    // ─── Phase 3B:無薪/半薪請假扣薪(預設空陣列、deduct_unpaid_leave=0)─
+    findApprovedLeavesForDeduction: vi.fn(async () => []),
+
     ...over,
   };
 }
@@ -1660,6 +1663,127 @@ describe('Phase 3A — 費率中央表接線(中性 + override)', () => {
     const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
     // 跑完沒 throw + 有 supplementary_health 計算
     expect(r.record.deduct_supplementary_health).toBeGreaterThan(0);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════
+// Phase 3B:leave pay_rate 扣薪(deduct_unpaid_leave)
+// ═════════════════════════════════════════════════════════════
+describe('Phase 3B — 無薪/半薪請假扣薪 deduct_unpaid_leave', () => {
+  // 正職員工 base_salary=30000 → daily_wage = 1000
+  function repoForLeave(leaves, overrides = {}) {
+    return makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 30000, attendance_bonus: 0, employment_type: 'full_time',
+      })),
+      findApprovedLeavesForDeduction: vi.fn(async () => leaves),
+      ...overrides,
+    });
+  }
+
+  it('沒請假 → deduct_unpaid_leave=0、breakdown.unpaid_leave.total_amount=0(中性)', async () => {
+    const repo = repoForLeave([]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(0);
+    expect(r.breakdown.unpaid_leave.total_amount).toBe(0);
+    expect(r.breakdown.unpaid_leave.lines).toEqual([]);
+    expect(r.breakdown.unpaid_leave.needs_rate).toEqual([]);
+  });
+
+  it('事假 pay_rate=0、1 天 → 扣滿(1000 × 1 × 1.0 = 1000)', async () => {
+    const repo = repoForLeave([
+      { id:'L1', leave_type:'personal', start_date:'2026-06-10', end_date:'2026-06-10', days:1, pay_rate:0 },
+    ]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(1000);
+    expect(r.breakdown.unpaid_leave.lines).toHaveLength(1);
+    expect(r.breakdown.unpaid_leave.lines[0]).toMatchObject({
+      leave_type: 'personal', pay_rate: 0, total_days: 1, in_month_days: 1, daily_wage: 1000, amount: 1000,
+    });
+  });
+
+  it('病假 pay_rate=0.5、2 天 → 扣半(1000 × 2 × 0.5 = 1000)', async () => {
+    const repo = repoForLeave([
+      { id:'L1', leave_type:'sick', start_date:'2026-06-05', end_date:'2026-06-06', days:2, pay_rate:0.5 },
+    ]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(1000);
+  });
+
+  it('特休 pay_rate=1、3 天 → 扣 0(全薪)', async () => {
+    const repo = repoForLeave([
+      { id:'L1', leave_type:'annual', start_date:'2026-06-05', end_date:'2026-06-07', days:3, pay_rate:1 },
+    ]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(0);
+    expect(r.breakdown.unpaid_leave.lines[0].amount).toBe(0);
+  });
+
+  it('pay_rate=null(待設定)→ 不扣,breakdown.needs_rate 標記', async () => {
+    const repo = repoForLeave([
+      { id:'L1', leave_type:'menstrual', start_date:'2026-06-15', end_date:'2026-06-15', days:1, pay_rate:null },
+    ]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(0);
+    expect(r.breakdown.unpaid_leave.lines).toHaveLength(0);
+    expect(r.breakdown.unpaid_leave.needs_rate).toEqual([
+      { leave_request_id:'L1', leave_type:'menstrual', days:1 },
+    ]);
+  });
+
+  it('兼職 → deduct_unpaid_leave 強制 0(repo.findApprovedLeavesForDeduction 不會被呼叫)', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 30000, attendance_bonus: 0, employment_type: 'part_time',
+      })),
+      findEmployeeHourlyRate: vi.fn(async () => 200),
+      findTotalWorkHoursByEmployeeMonth: vi.fn(async () => 80),
+      findApprovedLeavesForDeduction: vi.fn(async () => [
+        { id:'L1', leave_type:'personal', start_date:'2026-06-10', end_date:'2026-06-10', days:1, pay_rate:0 },
+      ]),
+    });
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(0);
+    expect(repo.findApprovedLeavesForDeduction).not.toHaveBeenCalled();
+  });
+
+  it('多筆請假加總(事假 1 天 + 病假 2 天 + 特休 1 天 = 1000+1000+0 = 2000)', async () => {
+    const repo = repoForLeave([
+      { id:'L1', leave_type:'personal', start_date:'2026-06-05', end_date:'2026-06-05', days:1,   pay_rate:0   },
+      { id:'L2', leave_type:'sick',     start_date:'2026-06-10', end_date:'2026-06-11', days:2,   pay_rate:0.5 },
+      { id:'L3', leave_type:'annual',   start_date:'2026-06-15', end_date:'2026-06-15', days:1,   pay_rate:1   },
+    ]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(2000);
+    expect(r.breakdown.unpaid_leave.lines).toHaveLength(3);
+  });
+
+  it('跨月 clip 正確(5/30~6/2 共 4 天事假、6 月分攤 2 天 → 扣 1000 × 2 × 1.0 = 2000)', async () => {
+    const repo = repoForLeave([
+      { id:'L1', leave_type:'personal', start_date:'2026-05-30', end_date:'2026-06-02', days:4, pay_rate:0 },
+    ]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(2000);
+    expect(r.breakdown.unpaid_leave.lines[0].in_month_days).toBe(2);
+  });
+
+  it('半天事假(days=0.5)→ 扣 500(1000 × 0.5 × 1.0)', async () => {
+    const repo = repoForLeave([
+      { id:'L1', leave_type:'personal', start_date:'2026-06-15', end_date:'2026-06-15', days:0.5, pay_rate:0 },
+    ]);
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(500);
+  });
+
+  it('repo 沒實作 findApprovedLeavesForDeduction → 仍能跑、deduct_unpaid_leave=0', async () => {
+    const repo = makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', base_salary: 30000, attendance_bonus: 0, employment_type: 'full_time',
+      })),
+    });
+    delete repo.findApprovedLeavesForDeduction;
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(0);
   });
 });
 
