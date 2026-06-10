@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/js/salary-breakdown.js"></script>
+<script src="/js/labels.js"></script>
 <style>
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{padding:8px 10px;border-bottom:0.5px solid rgba(255,255,255,.06);text-align:right;vertical-align:middle}
@@ -260,7 +261,7 @@ function render(){
       <td class="num auto-cell">${fmt$(r.attendance_penalty_total)}</td>
       <td class="num gen-cell">${fmt$(r.gross_salary)}</td>
       <td class="num gen-cell">${fmt$(r.net_salary)}</td>
-      <td onclick="event.stopPropagation()"><span class="pill s-${escHtml(r.status)}">${escHtml(r.status)}</span></td>
+      <td onclick="event.stopPropagation()"><span class="pill s-${escHtml(r.status)}">${escHtml(HRLabels.salaryStatusText(r.status))}</span></td>
       <td style="white-space:nowrap" onclick="event.stopPropagation()">
         <button class="btn btn-ghost btn-sm" onclick="openEdit('${escHtml(r.id)}')">編輯</button>
         <a href="/payslip.html?employee_id=${encodeURIComponent(r.employee_id)}&year=${r.year}&month=${r.month}"
@@ -459,7 +460,7 @@ function openEdit(id){
       <div style="margin-top:6px;color:var(--text-dim);font-size:11px">💡 本月為預扣稅、年度結算可能差額需另行申報</div>
     </div>` : '';
   document.getElementById('modal-meta').innerHTML =
-    `${currentRow.year}/${String(currentRow.month).padStart(2,'0')} · 狀態 ${currentRow.status}${finalMonthBadge}${proRataInfo}`;
+    `${currentRow.year}/${String(currentRow.month).padStart(2,'0')} · 狀態 ${HRLabels.salaryStatusText(currentRow.status)}${finalMonthBadge}${proRataInfo}`;
 
   // Auto fields(唯讀)
   // 兼職時薪制:底薪行改顯「時薪 × 工時 = prorata_base」拆解、不顯示 base=0
