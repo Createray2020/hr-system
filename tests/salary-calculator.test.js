@@ -1815,6 +1815,110 @@ describe('Phase 3B — 無薪/半薪請假扣薪 deduct_unpaid_leave', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════
+// Phase 3B — 日薪基準改為「經常性月薪 / 30」(對齊《勞工請假規則 §4》)
+// 經常性月薪 = base_salary + attendance_bonus + grade_allowance + manager_allowance + extra_allowance
+// 對齊 lib/overtime/pay-calc.js getOvertimeHourlyBase 的經常性月薪概念(差 allowance,該欄為 salary_records _manual)
+// per-loop round2 累積行為不變;與整體一次 round 可能有 0.01~0.03 級數累積差
+// ═════════════════════════════════════════════════════════════
+describe('Phase 3B — 經常性月薪基準(monthlyRegularWage/30)', () => {
+  function repoForLeave(empProfile, leaves, overrides = {}) {
+    return makeFullRepo({
+      findEmployeeForSalary: vi.fn(async () => ({
+        id: 'E001', employment_type: 'full_time', ...empProfile,
+      })),
+      findApprovedLeavesForDeduction: vi.fn(async () => leaves),
+      ...overrides,
+    });
+  }
+
+  it('洪千雅型(base 30000 + att 2000 + grade 9000 = 41000)— 病假 4 + 生理假 1 + 特休 1', async () => {
+    // daily = round2(41000/30) = 1366.67
+    // 每筆半薪 amt = round2(1366.67 × 1 × 0.5) = 683.34
+    // 5 筆 × 683.34 = 3416.70(特休 pay_rate=1 不扣);per-loop round 累積、整體 spec 算 3416.67 差 0.03
+    const repo = repoForLeave(
+      { base_salary: 30000, attendance_bonus: 2000, grade_allowance: 9000 },
+      [
+        { id:'L1', leave_type:'sick',      start_date:'2026-05-11', end_date:'2026-05-11', days:1, pay_rate:0.5 },
+        { id:'L2', leave_type:'sick',      start_date:'2026-05-19', end_date:'2026-05-19', days:1, pay_rate:0.5 },
+        { id:'L3', leave_type:'sick',      start_date:'2026-05-22', end_date:'2026-05-22', days:1, pay_rate:0.5 },
+        { id:'L4', leave_type:'sick',      start_date:'2026-05-27', end_date:'2026-05-27', days:1, pay_rate:0.5 },
+        { id:'L5', leave_type:'menstrual', start_date:'2026-05-05', end_date:'2026-05-05', days:1, pay_rate:0.5 },
+        { id:'L6', leave_type:'annual',    start_date:'2026-05-15', end_date:'2026-05-15', days:1, pay_rate:1.0 },
+      ],
+    );
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    expect(r.record.deduct_unpaid_leave).toBe(3416.70);
+    expect(r.breakdown.unpaid_leave.daily_wage).toBe(1366.67);
+  });
+
+  it('柯郁含型(base 30000、無加給)— 生理假 1 + 事假 0.5', async () => {
+    // daily = 30000/30 = 1000
+    // 生理:round2(1000 × 1 × 0.5)=500;事假:round2(1000 × 0.5 × 1)=500;sum=1000
+    const repo = repoForLeave(
+      { base_salary: 30000 },
+      [
+        { id:'L1', leave_type:'menstrual', start_date:'2026-05-04', end_date:'2026-05-04', days:1,   pay_rate:0.5 },
+        { id:'L2', leave_type:'personal',  start_date:'2026-05-06', end_date:'2026-05-06', days:0.5, pay_rate:0   },
+      ],
+    );
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    expect(r.record.deduct_unpaid_leave).toBe(1000);
+    expect(r.breakdown.unpaid_leave.daily_wage).toBe(1000);
+  });
+
+  it('事假型(base 30000 + att 2000 = 32000)— 事假 2 天', async () => {
+    // daily = round2(32000/30) = 1066.67
+    // round2(1066.67 × 2 × 1) = 2133.34(整體 spec 算 2133.33 差 0.01)
+    const repo = repoForLeave(
+      { base_salary: 30000, attendance_bonus: 2000 },
+      [
+        { id:'L1', leave_type:'personal', start_date:'2026-05-17', end_date:'2026-05-18', days:2, pay_rate:0 },
+      ],
+    );
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    expect(r.record.deduct_unpaid_leave).toBe(2133.34);
+    expect(r.breakdown.unpaid_leave.daily_wage).toBe(1066.67);
+  });
+
+  it('只有 base(無 att / grade / manager / extra)→ 行為等同舊 base/30 回歸保護', async () => {
+    // daily = 30000/30 = 1000、病假 1 天 = 500
+    const repo = repoForLeave(
+      { base_salary: 30000 },
+      [
+        { id:'L1', leave_type:'sick', start_date:'2026-06-10', end_date:'2026-06-10', days:1, pay_rate:0.5 },
+      ],
+    );
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:6 });
+    expect(r.record.deduct_unpaid_leave).toBe(500);
+    expect(r.breakdown.unpaid_leave.daily_wage).toBe(1000);
+  });
+
+  it('有經常性加給但無請假 → deduct_unpaid_leave=0', async () => {
+    const repo = repoForLeave(
+      { base_salary: 30000, attendance_bonus: 2000, grade_allowance: 3000, manager_allowance: 4000, extra_allowance: 1000 },
+      [],
+    );
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    expect(r.record.deduct_unpaid_leave).toBe(0);
+    expect(r.breakdown.unpaid_leave.lines).toEqual([]);
+    expect(r.breakdown.unpaid_leave.daily_wage).toBe(1333.33);  // (30000+2000+3000+4000+1000)/30 = 40000/30
+  });
+
+  it('extra_allowance 也算經常性(Ray 高階經理人加給 case)', async () => {
+    // base 30000 + extra 60000 = 90000;daily=3000;事假 1 天 → 3000 全扣
+    const repo = repoForLeave(
+      { base_salary: 30000, extra_allowance: 60000 },
+      [
+        { id:'L1', leave_type:'personal', start_date:'2026-05-10', end_date:'2026-05-10', days:1, pay_rate:0 },
+      ],
+    );
+    const r = await calculateMonthlySalary(repo, { employee_id:'E001', year:2026, month:5 });
+    expect(r.record.deduct_unpaid_leave).toBe(3000);
+    expect(r.breakdown.unpaid_leave.daily_wage).toBe(3000);
+  });
+});
+
 describe('calculateMonthlySalary — 2026 法規勞健保整合(insurance-bracket.js)', () => {
   // 對應 prod bug: bracket 表存的是 9% 勞保 / 5% 健保時代金額、insurance_settings.{labor,health}_ins_employee
   // 跟著舊版、calculator 直接吃 direct premium → 全公司每人每月少扣勞保 ~230、健保 ~24。
