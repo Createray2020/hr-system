@@ -994,6 +994,9 @@ async function submitRequest() {
   fields.forEach(f => { const el = document.getElementById('ff-'+f.id); if (el) form_data[f.id] = el.value; });
 
   const note = document.getElementById('ff-note')?.value || '';
+  // 防連點:送出期間 disable 按鈕(對齊 onAttachmentPick 寫法);finally 解開
+  const btn = document.querySelector('button[onclick="submitRequest()"]');
+  if (btn) btn.disabled = true;
   try {
     await api('/api/approvals', { method:'POST', body: JSON.stringify({
       action: 'create', request_type: currentConfig.request_type,
@@ -1006,6 +1009,7 @@ async function submitRequest() {
     await loadMyRequests();
     toast('✅ 申請已送出，等待審批', 'success');
   } catch(e) { toast('送出失敗：'+e.message, 'error'); }
+  finally { if (btn) btn.disabled = false; }
 }
 
 /* ── Detail modal ────────────────────────────────────────────────────────── */

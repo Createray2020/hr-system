@@ -458,6 +458,95 @@ describe('/api/approvals create — applicant_id 強制 caller.id', () => {
 });
 
 // ════════════════════════════════════════════════════════════
+// create action — 防重複送出(3 秒去重)
+// 對應 fix(approvals): 防止重複送出審批申請
+// ════════════════════════════════════════════════════════════
+describe('/api/approvals create — 3 秒去重', () => {
+  function setupCreateFlow() {
+    dataByQuery['approval_flow_configs:single'] = {
+      request_type: 'punch_correction',
+      type_name: '補打卡',
+      steps: [
+        { step: 1, name: '主管審核', role: 'manager' },
+        { step: 2, name: 'HR 確認',  role: 'hr' },
+      ],
+    };
+    dataByQuery['employees:maybeSingle'] = { id: 'E1', dept_id: 'D1', is_manager: false };
+    dataByQuery['employees:then'] = [];
+  }
+
+  it('3 秒內同申請人+同類型+同 form_data → 回既有 id、不產生第二筆 INSERT', async () => {
+    overrides.caller = E1;
+    setupCreateFlow();
+    // 模擬 DB 已有 3 秒內同 (applicant, type, form_data) 的 row
+    dataByQuery['approval_requests:then'] = [
+      { id: 'APR_PREV_1', form_data: { date: '2026-06-10', reason: 'A' },
+        created_at: new Date().toISOString() },
+    ];
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction',
+              form_data: { date: '2026-06-10', reason: 'A' } },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.id).toBe('APR_PREV_1');
+    expect(res.body.message).toBe('申請已送出');
+    expect(res.body.deduplicated).toBe(true);
+    // 重點:沒有新 INSERT(無 approval_requests / approval_steps 寫入)
+    expect(calls.inserts.find(i => i.table === 'approval_requests')).toBeUndefined();
+    expect(calls.inserts.find(i => i.table === 'approval_steps')).toBeUndefined();
+  });
+
+  it('form_data key 順序不同但內容相同 → 視為重複(stable stringify)', async () => {
+    overrides.caller = E1;
+    setupCreateFlow();
+    dataByQuery['approval_requests:then'] = [
+      { id: 'APR_PREV_2', form_data: { reason: 'A', date: '2026-06-10' } },
+    ];
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction',
+              form_data: { date: '2026-06-10', reason: 'A' } },  // key 順序反過來
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.id).toBe('APR_PREV_2');
+    expect(calls.inserts.find(i => i.table === 'approval_requests')).toBeUndefined();
+  });
+
+  it('不同 form_data → 不去重、正常 INSERT 新 row', async () => {
+    overrides.caller = E1;
+    setupCreateFlow();
+    dataByQuery['approval_requests:then'] = [
+      { id: 'APR_PREV_3', form_data: { date: '2026-06-10', reason: 'A' } },
+    ];
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction',
+              form_data: { date: '2026-06-10', reason: 'B' } },  // reason 不同
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.id).not.toBe('APR_PREV_3');
+    expect(res.body.deduplicated).toBeUndefined();
+    expect(calls.inserts.find(i => i.table === 'approval_requests')).toBeDefined();
+  });
+
+  it('超過 3 秒(DB 端 gte 已過濾)→ 不去重、正常 INSERT', async () => {
+    overrides.caller = E1;
+    setupCreateFlow();
+    // 模擬 DB .gte('created_at', since) 已將 3 秒前的舊 row 過濾掉
+    dataByQuery['approval_requests:then'] = [];
+    const [req, res] = makeReqRes({
+      body: { action: 'create', request_type: 'punch_correction',
+              form_data: { date: '2026-06-10', reason: 'A' } },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.deduplicated).toBeUndefined();
+    expect(calls.inserts.find(i => i.table === 'approval_requests')).toBeDefined();
+  });
+});
+
+// ════════════════════════════════════════════════════════════
 // update_config — hr/admin only
 // ════════════════════════════════════════════════════════════
 describe('/api/approvals update_config — hr/admin only', () => {

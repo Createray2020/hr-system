@@ -30,6 +30,19 @@ import { applyExpenseReimbursement } from '../lib/salary/expense-cascade.js';
 // migration:migrations/20260609_disable_overtime_approval_configs.sql
 const OVERTIME_TYPES_BLOCKED = ['overtime', 'overtime_pay'];
 
+// 防重複送出守門:create 路徑 INSERT 前查 3 秒內同(applicant, type, form_data)、命中回既有 id
+// 對齊規格:不 INSERT、不建 approval_steps、response shape 同正常 create(idempotent、雙擊無感)。
+const DEDUP_WINDOW_MS = 3000;
+
+// 遞迴對物件 key 排序後 JSON.stringify;同內容 key 順序不同也會視為相等
+function stableStringify(value) {
+  if (value === null || value === undefined) return JSON.stringify(value ?? null);
+  if (typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+  const keys = Object.keys(value).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
+}
+
 // ─────────────────────────────────────────────────────────────────
 // 離職檢核表 MVP 預設 46 項(對應 migrations/2026_05_26_resignation_checklist.sql)
 // 由 applyResignation cascade 在離職核准完成後 bulk insert。
@@ -287,6 +300,30 @@ export default async function handler(req, res) {
       // Batch 7 收尾:加班類禁入 approval_requests(走 /overtime.html → overtime_requests)
       if (OVERTIME_TYPES_BLOCKED.includes(request_type)) {
         return res.status(400).json({ error: '加班申請請改走 /overtime.html' });
+      }
+
+      // 防重複送出:3 秒內同申請人+同類型+同 form_data 已建立過 → 直接回既有 id
+      // (雙擊「送出申請」按鈕的常見情境;前端 disable-on-submit 為第一道、本守門為第二道)
+      const since = new Date(Date.now() - DEDUP_WINDOW_MS).toISOString();
+      const { data: recentSimilar } = await supabaseAdmin
+        .from('approval_requests')
+        .select('id, form_data, created_at')
+        .eq('applicant_id', realApplicantId)
+        .eq('request_type', request_type)
+        .gte('created_at', since)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      const incomingSig = stableStringify(form_data || {});
+      const dup = (recentSimilar || []).find(r => stableStringify(r.form_data || {}) === incomingSig);
+      if (dup) {
+        // shape 對齊正常 create:{ id, message, skipped_manager_step }
+        return res.status(201).json({
+          id: dup.id,
+          message: '申請已送出',
+          skipped_manager_step: false,
+          deduplicated: true,
+        });
       }
 
       const { data: config, error: cfgErr } = await supabaseAdmin

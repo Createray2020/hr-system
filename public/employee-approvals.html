@@ -941,6 +941,9 @@ async function submitRequest() {
   });
   const note = document.getElementById('ff-note')?.value || '';
 
+  // 防連點:送出期間 disable 按鈕(對齊 onAttachmentPick 寫法);finally 解開
+  const btn = document.querySelector('button[onclick="submitRequest()"]');
+  if (btn) btn.disabled = true;
   try {
     await apiFetch('/api/approvals', { method:'POST', body: JSON.stringify({
       action:'create', request_type: currentConfig.request_type,
@@ -952,6 +955,7 @@ async function submitRequest() {
     toast('✅ 申請已送出', 'success');
     await loadMine();
   } catch(e) { toast('送出失敗:' + e.message, 'error'); }
+  finally { if (btn) btn.disabled = false; }
 }
 
 // ─────────────────────────────────────────
