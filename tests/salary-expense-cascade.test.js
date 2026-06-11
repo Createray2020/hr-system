@@ -238,6 +238,7 @@ const {
   isSettledStatus,
   isUnsettledStatus,
   reflectExpenseEntriesToSalary,
+  parseTargetPeriod,
 } = await import('../lib/salary/expense-cascade.js');
 
 // ─── 共用 fixture helpers ─────────────────────────────────────
@@ -875,6 +876,176 @@ describe('reflectExpenseEntriesToSalary 純單元', () => {
     });
 
     expect(res).toEqual({ ok: true, action: 'recomputed' });
+    expect(mockCalc).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ════════════════════════════════════════════════════════════
+// 階段 C:form_data.target_period 路由
+// 員工在請款表單選的「歸屬薪資月份」直接做 target,取代「核准完成日→隔月」
+// approved 預設行為從「往後滾」改成「留在該月、待 HR 併入」
+// ════════════════════════════════════════════════════════════
+describe('parseTargetPeriod(階段 C)', () => {
+  it('合法 YYYY-MM → 解析', () => {
+    expect(parseTargetPeriod('2026-05')).toEqual({ year: 2026, month: 5 });
+    expect(parseTargetPeriod('2026-12')).toEqual({ year: 2026, month: 12 });
+    expect(parseTargetPeriod('2027-01')).toEqual({ year: 2027, month: 1 });
+  });
+  it('格式錯 / 空 / null / undefined → null(回歸 inferNext)', () => {
+    expect(parseTargetPeriod('')).toBeNull();
+    expect(parseTargetPeriod(null)).toBeNull();
+    expect(parseTargetPeriod(undefined)).toBeNull();
+    expect(parseTargetPeriod('abc')).toBeNull();
+    expect(parseTargetPeriod('2026/05')).toBeNull();
+    expect(parseTargetPeriod('2026-5')).toBeNull();       // 月份不補 0 不收
+    expect(parseTargetPeriod('2026-13')).toBeNull();      // 月份越界
+    expect(parseTargetPeriod('2026-00')).toBeNull();      // 月份 0 不合法
+    expect(parseTargetPeriod('1899-12')).toBeNull();      // 年份越界(下界)
+    expect(parseTargetPeriod('3000-01')).toBeNull();      // 年份越界(上界)
+  });
+});
+
+describe('applyExpenseReimbursement — form_data.target_period 路由(階段 C)', () => {
+  it('target_period=2026-05 + 該月 pending_review → entry 落 5月、recompute 被觸發', async () => {
+    setPeriod(2026, 5, 'pending_review');
+    setSalaryRecord('EMP_X', 2026, 5, { status: 'draft' });
+    state.categoriesByName['交通'] = { id: 'EC1', name: '交通', is_wage: false, is_taxable: true };
+
+    const req = makeRequest({
+      form_data: {
+        expense_date: '2026-05-20', expense_category: '交通',
+        amount: '1000', description: 'test', target_period: '2026-05',
+      },
+    });
+    await applyExpenseReimbursement(req, { id: 'HR1', role: 'hr' });
+
+    expect(state.insertedEntries).toHaveLength(1);
+    const e = state.insertedEntries[0];
+    expect(e.target_year).toBe(2026);
+    expect(e.target_month).toBe(5);
+    expect(e.settlement_mode).toBe('defer');
+    expect(e.deferred_from).toBeNull();
+    expect(e.salary_record_id).toBe('S_EMP_X_2026_05');
+    expect(mockCalc).toHaveBeenCalledTimes(1);
+    expect(state.calcCalls[0]).toMatchObject({ employee_id: 'EMP_X', year: 2026, month: 5 });
+  });
+
+  it('target_period=2026-05 + 該月 approved + 非 force → entry 落 5月 active、不動 salary_record、audit PENDING_HR_MERGE、無 deferred_from', async () => {
+    setPeriod(2026, 5, 'approved');
+    setSalaryRecord('EMP_X', 2026, 5, {
+      status: 'approved',
+      expense_reimbursement_total: 0,
+      expense_reimbursement_taxable: 0,
+    });
+    state.categoriesByName['交通'] = { id: 'EC1', name: '交通', is_wage: false, is_taxable: true };
+
+    const req = makeRequest({
+      form_data: {
+        expense_date: '2026-05-20', expense_category: '交通',
+        amount: '1000', description: 'test', target_period: '2026-05',
+      },
+    });
+    await applyExpenseReimbursement(req, { id: 'HR1', role: 'hr' });
+
+    expect(state.insertedEntries).toHaveLength(1);
+    const e = state.insertedEntries[0];
+    expect(e.target_year).toBe(2026);
+    expect(e.target_month).toBe(5);
+    expect(e.settlement_mode).toBe('defer');
+    expect(e.deferred_from).toBeNull();
+    // 不動 salary_record、不呼叫 calculator
+    expect(state.updatedSalaryRecords).toHaveLength(0);
+    expect(mockCalc).not.toHaveBeenCalled();
+    // audit:PENDING_HR_MERGE 訊息
+    expect(state.approvalAuditPrepended.some(s => /待 HR 併入|PENDING_HR_MERGE/.test(s))).toBe(true);
+  });
+
+  it('target_period=2026-05 + 該月 approved + caller=ceo + force → 沿用 surgical(主管強制路徑)', async () => {
+    setPeriod(2026, 5, 'approved');
+    setSalaryRecord('EMP_X', 2026, 5, {
+      status: 'approved',
+      taxable_income_snapshot: 50000,
+      deduct_tax: 3000,
+      deduct_tax_manual_override: false,
+      expense_reimbursement_total: 0,
+      expense_reimbursement_taxable: 0,
+      admin_audit_note: null,
+    });
+    state.categoriesByName['交通'] = { id: 'EC1', name: '交通', is_wage: false, is_taxable: true };
+    state.insuranceByEmp['EMP_X'] = { health_ins_dependents: 0, has_insurance: true };
+
+    const req = makeRequest({
+      form_data: {
+        expense_date: '2026-05-20', expense_category: '交通',
+        amount: '1000', description: 'test', target_period: '2026-05',
+      },
+    });
+    await applyExpenseReimbursement(req, { id: 'CEO1', role: 'ceo' }, 'force');
+
+    const e = state.insertedEntries[0];
+    expect(e.target_year).toBe(2026);
+    expect(e.target_month).toBe(5);
+    expect(e.settlement_mode).toBe('force');
+    expect(e.deferred_from).toBeNull();
+    expect(state.updatedSalaryRecords).toHaveLength(1);
+    expect(state.updatedSalaryRecords[0].id).toBe('S_EMP_X_2026_05');
+    expect(state.updatedSalaryRecords[0].patch.expense_reimbursement_total).toBe(1000);
+    expect(state.updatedSalaryRecords[0].patch.admin_audit_note).toMatch(/^\[FORCE 併薪 /);
+  });
+
+  it('無 target_period(舊單回歸)→ 走 inferNext、行為與既有 defer 流程一致', async () => {
+    // completed_at='2026-06-08' → 隔月 2026-07
+    setPeriod(2026, 7, 'draft');
+    setSalaryRecord('EMP_X', 2026, 7, { status: 'draft' });
+    state.categoriesByName['交通'] = { id: 'EC1', name: '交通', is_wage: false, is_taxable: true };
+
+    // 不放 target_period
+    await applyExpenseReimbursement(makeRequest(), { id: 'HR1', role: 'hr' });
+
+    const e = state.insertedEntries[0];
+    expect(e.target_year).toBe(2026);
+    expect(e.target_month).toBe(7);
+    expect(e.settlement_mode).toBe('defer');
+    expect(mockCalc).toHaveBeenCalledTimes(1);
+    expect(state.calcCalls[0]).toMatchObject({ employee_id: 'EMP_X', year: 2026, month: 7 });
+  });
+
+  it('target_period 指向 paid 月 → entry 仍落該月、audit PERIOD_LOCKED(前端應已排除、防呆)', async () => {
+    setPeriod(2026, 5, 'paid');
+    setSalaryRecord('EMP_X', 2026, 5, { status: 'paid' });
+    state.categoriesByName['交通'] = { id: 'EC1', name: '交通', is_wage: false, is_taxable: true };
+
+    const req = makeRequest({
+      form_data: {
+        expense_date: '2026-05-20', expense_category: '交通',
+        amount: '1000', description: 'test', target_period: '2026-05',
+      },
+    });
+    await applyExpenseReimbursement(req, { id: 'HR1', role: 'hr' });
+
+    // entry 仍寫入(避免遺失;HR 可後續 void)
+    expect(state.insertedEntries[0].target_month).toBe(5);
+    // 不動 salary_record
+    expect(state.updatedSalaryRecords).toHaveLength(0);
+    expect(mockCalc).not.toHaveBeenCalled();
+    expect(state.approvalAuditPrepended.some(s => /PERIOD_LOCKED/.test(s))).toBe(true);
+  });
+
+  it('target_period 格式錯("abc")→ 走 inferNext 回歸路徑', async () => {
+    setPeriod(2026, 7, 'draft');
+    setSalaryRecord('EMP_X', 2026, 7, { status: 'draft' });
+    state.categoriesByName['交通'] = { id: 'EC1', name: '交通', is_wage: false, is_taxable: true };
+
+    const req = makeRequest({
+      form_data: {
+        expense_date: '2026-06-08', expense_category: '交通',
+        amount: '1000', description: 'test', target_period: 'abc',
+      },
+    });
+    await applyExpenseReimbursement(req, { id: 'HR1', role: 'hr' });
+
+    const e = state.insertedEntries[0];
+    expect(e.target_month).toBe(7);  // 走 inferNext、不是 'abc'
     expect(mockCalc).toHaveBeenCalledTimes(1);
   });
 });
