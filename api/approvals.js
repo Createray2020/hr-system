@@ -902,15 +902,15 @@ export default async function handler(req, res) {
     }
 
     // ── 軟刪除既有申請 ──────────────────────────────────────────────────────
-    // 限 admin / chairman、必填 reason。寫入 deleted_at/deleted_by/delete_reason
-    // 三欄位 + append 一行 admin_audit_note。後續 SELECT 全部已加 .is('deleted_at',null)
-    // filter,刪除後該 row 不再出現在任何列表 / 詳情 / 待審。
+    // 權限放寬(2026-06-12):
+    //   - admin / chairman → 可刪任何狀態(原有行為、含 completed,清測試紀錄)
+    //   - 其他後台角色(hr/ceo)→ 可刪 pending / in_progress(未觸發 cascade、安全)
+    //   - 一般員工 → 403
+    // 必填 reason。寫入 deleted_at/deleted_by/delete_reason 三欄 + append admin_audit_note。
+    // 後續 SELECT 全部已加 .is('deleted_at',null) filter,刪除後不再出現在任何列表 / 詳情 / 待審。
     // 還原:DB 直接 UPDATE SET deleted_at=NULL(無 UI 入口)。
     if (body.action === 'delete') {
       const { id, reason } = body;
-      if (!canDeleteRecord(caller)) {
-        return res.status(403).json({ error: '無刪除權限(限 admin / chairman)' });
-      }
       if (!id) return res.status(400).json({ error: 'id required' });
       if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
         return res.status(400).json({ error: '刪除理由必填' });
@@ -923,11 +923,19 @@ export default async function handler(req, res) {
       // 撈 existing(.is('deleted_at',null) 防重複刪除已刪除的)
       const { data: existing } = await supabaseAdmin
         .from('approval_requests')
-        .select('id, admin_audit_note, deleted_at')
+        .select('id, status, admin_audit_note, deleted_at')
         .is('deleted_at', null)
         .eq('id', id)
         .maybeSingle();
       if (!existing) return res.status(404).json({ error: '找不到申請' });
+
+      // 權限判定:admin/chairman 任何狀態 OR 後台角色 + pending/in_progress
+      const isFullDelete = canDeleteRecord(caller);
+      const isBackoffice = isBackofficeRole(caller);
+      const isEarlyStatus = ['pending', 'in_progress'].includes(existing.status);
+      if (!isFullDelete && !(isBackoffice && isEarlyStatus)) {
+        return res.status(403).json({ error: '無權限刪除此申請' });
+      }
 
       const now = new Date();
       const noteLine = `[${now.toISOString().slice(0, 10)}] deleted by ${caller.id}: ${trimmedReason}`;

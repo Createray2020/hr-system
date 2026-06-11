@@ -788,6 +788,14 @@ function renderMine() {
 }
 
 /* ── Pending approvals ───────────────────────────────────────────────────── */
+// 列表行刪除鈕顯示條件:後台角色 + pending / in_progress(用於 renderPending + renderAll)
+function canDeleteRow(r) {
+  if (!r) return false;
+  const u = window.currentUser;
+  if (!u || !window.Roles?.isBackofficeRole?.(u)) return false;
+  return ['pending', 'in_progress'].includes(r.status);
+}
+
 function renderPending() {
   const list  = document.getElementById('pending-list');
   const empty = document.getElementById('pending-empty');
@@ -797,6 +805,9 @@ function renderPending() {
     const r   = step.approval_requests;
     const emp = r?.employees;
     const c   = allConfigs.find(x => x.request_type === r?.request_type);
+    const delBtn = canDeleteRow(r)
+      ? `<button class="btn btn-ghost btn-sm" style="color:#F87171;border:1px solid rgba(248,113,113,.3)" onclick="event.stopPropagation();openDeleteApproval('${r?.id||''}')">🗑 刪除</button>`
+      : '';
     return `<div class="pending-card" onclick="openDetail('${r?.id||''}')">
       <div style="font-size:30px;line-height:1;flex-shrink:0">${c?.icon||'📋'}</div>
       <div class="pc-body">
@@ -810,6 +821,7 @@ function renderPending() {
       <div class="pc-actions">
         <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();quickApprove('${r?.id}','${step.step_number}')">✓ 通過</button>
         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDetail('${r?.id||''}')">查看</button>
+        ${delBtn}
       </div>
     </div>`;
   }).join('');
@@ -839,6 +851,9 @@ function renderAll() {
   tbody.innerHTML = rows.map(r => {
     const c   = allConfigs.find(x => x.request_type === r.request_type);
     const emp = r.employees;
+    const delBtn = canDeleteRow(r)
+      ? `<button class="btn btn-ghost btn-sm" style="color:#F87171;border:1px solid rgba(248,113,113,.3);margin-left:4px" onclick="event.stopPropagation();openDeleteApproval('${r.id}')">🗑</button>`
+      : '';
     return `<tr style="cursor:pointer" onclick="openDetail('${r.id}')">
       <td><span style="font-size:15px">${c?.icon||'📋'}</span> <span style="font-size:12px">${c?.type_name||r.request_type}</span></td>
       <td style="font-weight:500">${r.title}</td>
@@ -847,7 +862,7 @@ function renderAll() {
       <td style="font-size:12px;color:var(--text-dim)">${fmtDate(r.created_at)}</td>
       <td>${stepDots(r.current_step, r.total_steps, r.status)}</td>
       <td>${statusBadge(r.status)}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDetail('${r.id}')">詳情</button></td>
+      <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openDetail('${r.id}')">詳情</button>${delBtn}</td>
     </tr>`;
   }).join('');
 }
@@ -1222,9 +1237,12 @@ function renderDetail(data) {
   if (canAdminEdit) {
     actions += `<button class="btn btn-ghost" style="border:1px solid rgba(251,146,60,.4);color:#FB923C" onclick="openAdminEditApproval('${data.id}')">⚙ 進階編輯</button>`;
   }
-  // 軟刪除按鈕(限 admin/chairman、不看 status,即使 cancelled/completed 也可刪測試紀錄)
-  const canDelete = window.Roles?.canDeleteRecord?.(window.currentUser);
-  if (canDelete) {
+  // 軟刪除按鈕:
+  //   - admin/chairman 任何狀態(沿用、含 completed,清測試紀錄)
+  //   - 其他後台角色(hr/ceo)只 pending/in_progress(對齊列表行刪除鈕的範圍)
+  const canFullDelete = window.Roles?.canDeleteRecord?.(window.currentUser);
+  const canBackofficeDelete = isBackoffice && ['pending','in_progress'].includes(data.status);
+  if (canFullDelete || canBackofficeDelete) {
     actions += `<button class="btn btn-danger" onclick="openDeleteApproval('${data.id}')">🗑 刪除紀錄</button>`;
   }
   // Feature B:核准完成後可匯出交辦單(列印 → PDF / 紙本傳遞)
@@ -1690,7 +1708,10 @@ async function saveAdminEditApprovalWithRow(requestId, existing) {
 // prompt + confirm 兩階段、UX 簡單版;後端 /api/approvals action=delete 寫 deleted_at/by/reason
 // + admin_audit_note。刪除後該 row 不再出現於 list / detail / pending(SELECT 全加 .is(deleted_at,null))
 async function openDeleteApproval(id) {
-  const reason = prompt('請輸入刪除理由(必填):\n常見:測試資料 / 重複申請 / 申請錯誤');
+  const reason = prompt(
+    '請輸入刪除理由(必填):\n常見:測試資料 / 重複申請 / 申請錯誤',
+    '重複申請,刪除重複筆',
+  );
   if (!reason || !reason.trim()) return;
   const trimmed = reason.trim();
   if (!confirm(`確定刪除此申請?\n理由:${trimmed}\n\n⚠ 軟刪除後將從所有列表隱藏、包括統計、待審、稽核。需 DB 手動還原。`)) return;

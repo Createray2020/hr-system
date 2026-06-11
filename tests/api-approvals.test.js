@@ -830,3 +830,108 @@ describe('/api/approvals create — B12 sole-manager dept self-approval skip', (
     expect(getReqInsert().current_step).toBe(1);
   });
 });
+
+// ════════════════════════════════════════════════════════════
+// delete action — 權限放寬:後台角色可刪 pending/in_progress
+// 對應 feat(approvals): 審批管理列表新增刪除動作(後台角色清重複)
+// ════════════════════════════════════════════════════════════
+describe('/api/approvals delete — 後台角色放寬刪 pending/in_progress', () => {
+  function setupDeleteTarget(over = {}) {
+    dataByQuery['approval_requests:maybeSingle'] = {
+      id: 'APR_DEL_1', status: 'pending',
+      admin_audit_note: null, deleted_at: null,
+      ...over,
+    };
+  }
+
+  it('HR 刪 pending 申請 → 200,寫入 deleted_at/deleted_by/delete_reason', async () => {
+    overrides.caller = HR;
+    setupDeleteTarget({ status: 'pending' });
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'APR_DEL_1', reason: '重複申請,刪除重複筆' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const upd = calls.updates.find(u => u.table === 'approval_requests');
+    expect(upd).toBeDefined();
+    expect(upd.patch.deleted_at).toBeTruthy();
+    expect(upd.patch.deleted_by).toBe('HR1');
+    expect(upd.patch.delete_reason).toBe('重複申請,刪除重複筆');
+    expect(upd.patch.admin_audit_note).toMatch(/deleted by HR1: 重複申請/);
+  });
+
+  it('HR 刪 in_progress 申請 → 200(對齊規格的早期狀態)', async () => {
+    overrides.caller = HR;
+    setupDeleteTarget({ status: 'in_progress' });
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'APR_DEL_1', reason: '錯誤申請' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(calls.updates.find(u => u.table === 'approval_requests')).toBeDefined();
+  });
+
+  it('HR 刪 completed 申請 → 403(後台角色只可刪 pending/in_progress)', async () => {
+    overrides.caller = HR;
+    setupDeleteTarget({ status: 'completed' });
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'APR_DEL_1', reason: '測試刪除' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toMatch(/無權限/);
+    expect(calls.updates.find(u => u.table === 'approval_requests')).toBeUndefined();
+  });
+
+  it('CEO 刪 pending 申請 → 200(同 HR、後台角色)', async () => {
+    overrides.caller = CEO;
+    setupDeleteTarget({ status: 'pending' });
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'APR_DEL_1', reason: '重複' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('admin 刪 completed 申請 → 200(既有行為不變、清測試紀錄)', async () => {
+    overrides.caller = ADM;
+    setupDeleteTarget({ status: 'completed' });
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'APR_DEL_1', reason: '測試資料' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(calls.updates.find(u => u.table === 'approval_requests')).toBeDefined();
+  });
+
+  it('chairman 刪 rejected 申請 → 200(既有行為不變)', async () => {
+    overrides.caller = CHR;
+    setupDeleteTarget({ status: 'rejected' });
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'APR_DEL_1', reason: '清整' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('一般員工嘗試刪 pending → 403', async () => {
+    overrides.caller = E1;
+    setupDeleteTarget({ status: 'pending' });
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'APR_DEL_1', reason: 'X' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('row 不存在 → 404', async () => {
+    overrides.caller = HR;
+    // 不 setup → null
+    const [req, res] = makeReqRes({
+      body: { action: 'delete', id: 'NOT_EXIST', reason: 'X' },
+    });
+    await handler(req, res);
+    expect(res.statusCode).toBe(404);
+  });
+});
