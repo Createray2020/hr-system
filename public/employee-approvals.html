@@ -241,6 +241,7 @@ let currentUser = null;
 let API = '';
 let allConfigs = [];     // 全部申請類型(含 icon, type_name, category)
 let allExpenseCategories = [];  // Phase 5b:expense_reimbursement 下拉 active 類別 cache
+let allUnpaidPeriods = [];      // 階段 B:expense_reimbursement target_period 下拉(當月+前3月、扣 paid/locked)
 let myRequests = [];     // 我的申請列表
 let pendingItems = [];   // 待我審批列表
 let currentConfig = null; // 開填寫表單時鎖定的 config
@@ -334,6 +335,76 @@ function switchTab(t) {
 }
 
 // ─────────────────────────────────────────
+// 階段 B:expense_reimbursement target_period 下拉資料來源
+// 候選 = 當月 + 前 3 月(共 4 個 YYYY-MM、跨年自動處理、新到舊)
+// 撈 payroll_periods 該幾年的清單,過濾 status IN ('paid','locked')
+// 「尚未建立 period」的月份視為可選(status=null)
+// ─────────────────────────────────────────
+function buildCandidateMonths_(today) {
+  const t = today || new Date();
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const d = new Date(t.getFullYear(), t.getMonth() - i, 1);
+    out.push({
+      year: d.getFullYear(),
+      month: d.getMonth() + 1,
+      ym: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+    });
+  }
+  return out;
+}
+async function fetchPeriodsForCandidates_(candidates) {
+  const years = [...new Set(candidates.map(c => c.year))];
+  const statusByYM = {};
+  for (const y of years) {
+    try {
+      const rows = await apiFetch(`/api/salary?_resource=periods&year=${y}`);
+      for (const r of (rows || [])) {
+        const ym = `${r.year}-${String(r.month).padStart(2, '0')}`;
+        statusByYM[ym] = r.status;
+      }
+    } catch (e) { /* 該年無 period / API 失敗 → 該月份視為未建立、可選 */ }
+  }
+  return statusByYM;
+}
+function buildUnpaidPeriods_(candidates, statusByYM) {
+  const FROZEN = new Set(['paid', 'locked']);
+  return candidates
+    .map(c => ({
+      value: c.ym, year: c.year, month: c.month,
+      status: statusByYM[c.ym] || null,
+      label: `${c.year}年${c.month}月（${c.ym}）`,
+    }))
+    .filter(p => !FROZEN.has(p.status));
+}
+async function loadUnpaidPeriods_() {
+  const candidates = buildCandidateMonths_();
+  const statusByYM = await fetchPeriodsForCandidates_(candidates);
+  return buildUnpaidPeriods_(candidates, statusByYM);
+}
+
+// expense_reimbursement 表單:當填/改費用日期 → 自動帶歸屬薪資月份
+function wireTargetPeriodAutoFill_() {
+  const dateEl   = document.getElementById('ff-expense_date');
+  const periodEl = document.getElementById('ff-target_period');
+  if (!dateEl || !periodEl) return;
+  const apply = () => {
+    const periods = allUnpaidPeriods || [];
+    if (!periods.length) return;
+    const v = dateEl.value;
+    let target = null;
+    if (v && v.length >= 7) {
+      const ym = v.slice(0, 7);
+      target = periods.find(p => p.value === ym) || null;
+    }
+    if (!target) target = periods[0];  // 最近的未發放月(已新到舊排序)
+    if (target) periodEl.value = target.value;
+  };
+  dateEl.addEventListener('change', apply);
+  apply();  // 初次也跑(若 expense_date 為空,預設選最近未發放月)
+}
+
+// ─────────────────────────────────────────
 // 載入資料
 // ─────────────────────────────────────────
 async function loadAll() {
@@ -346,6 +417,9 @@ async function loadAll() {
       apiFetch('/api/expense-categories').catch(() => null),
     ]);
     allExpenseCategories = expenseCatsRes?.categories || [];
+    // 階段 B:預載未發放月份清單(供 expense_reimbursement target_period 下拉)
+    try { allUnpaidPeriods = await loadUnpaidPeriods_(); }
+    catch(e) { allUnpaidPeriods = []; }
     await Promise.all([loadMine(), loadPending()]);
     if (isManagerOrBackoffice(currentUser)) {
       document.getElementById('tab-pending-btn').style.display = '';
@@ -652,6 +726,9 @@ function pickType(rt) {
 const FORM_SCHEMA = {
   expense_reimbursement:[
     {id:'expense_date',label:'費用日期',type:'date',required:true},
+    // 階段 B:歸屬薪資月份(value=YYYY-MM、value→label 由 allUnpaidPeriods 提供)
+    //   後端 cascade 此階段尚不讀 form_data.target_period(仍走 inferNext);只負責 UI 與帶值
+    {id:'target_period',label:'歸屬薪資月份',type:'select',options_source:'unpaid_periods',required:true},
     // 2026-06:options_source 動態從 /api/expense-categories 抓 active 類別、空 fallback 硬編
     {id:'expense_category',label:'費用類別',type:'select',options_source:'expense_categories',required:true},
     {id:'amount',label:'金額(NT$)',type:'number',required:true},
@@ -762,16 +839,24 @@ function openForm() {
         <textarea class="m-textarea" id="${id}" placeholder="${f.placeholder||''}"></textarea></div>`;
     } else if (f.type === 'select') {
       // Phase 5b:options_source='expense_categories' → 動態吃 cache;空 → fallback 硬編
-      let optionVals;
-      if (f.options_source === 'expense_categories') {
-        const names = (allExpenseCategories || []).map(c => c.name);
-        optionVals = names.length ? names : ['交通','餐費','材料','住宿','其他'];
+      // 階段 B:options_source='unpaid_periods' → value/label 來自 allUnpaidPeriods
+      let optsHtml;
+      if (f.options_source === 'unpaid_periods') {
+        optsHtml = (allUnpaidPeriods || [])
+          .map(p => `<option value="${p.value}">${p.label}</option>`)
+          .join('');
       } else {
-        optionVals = f.options || [];
+        let optionVals;
+        if (f.options_source === 'expense_categories') {
+          const names = (allExpenseCategories || []).map(c => c.name);
+          optionVals = names.length ? names : ['交通','餐費','材料','住宿','其他'];
+        } else {
+          optionVals = f.options || [];
+        }
+        optsHtml = optionVals.map(o => `<option value="${o}">${o}</option>`).join('');
       }
-      const opts = optionVals.map(o => `<option value="${o}">${o}</option>`).join('');
       html += `<div class="m-form-row"><label class="m-label">${f.label}</label>
-        <select class="m-select" id="${id}"><option value="">請選擇…</option>${opts}</select></div>`;
+        <select class="m-select" id="${id}"><option value="">請選擇…</option>${optsHtml}</select></div>`;
     } else {
       html += `<div class="m-form-row"><label class="m-label">${f.label}</label>
         <input type="${f.type}" class="m-input" id="${id}" placeholder="${f.placeholder||''}"></div>`;
@@ -790,6 +875,11 @@ function openForm() {
 
   document.getElementById('form-body').innerHTML = html;
   document.getElementById('form-modal').classList.add('open');
+
+  // 階段 B:expense_reimbursement → 依費用日自動帶歸屬薪資月份
+  if (currentConfig.request_type === 'expense_reimbursement') {
+    wireTargetPeriodAutoFill_();
+  }
 }
 
 // Feature A:選檔 → 逐檔上傳 → 顯示已選清單;上傳期間 disable 送出鈕
